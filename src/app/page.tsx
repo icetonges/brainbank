@@ -1,0 +1,88 @@
+import Link from "next/link";
+import { db, isDatabaseConfigured } from "@/lib/db";
+import { notes } from "@/lib/db/schema";
+import { desc } from "drizzle-orm";
+
+export const dynamic = "force-dynamic";
+
+async function loadNotes() {
+  if (!isDatabaseConfigured) return { notes: [], error: "not-configured" as const };
+  try {
+    const rows = await db.select().from(notes).orderBy(desc(notes.updatedAt)).limit(50);
+    return { notes: rows, error: null };
+  } catch {
+    return { notes: [], error: "connection-failed" as const };
+  }
+}
+
+export default async function Home() {
+  const { notes: rows, error } = await loadNotes();
+
+  return (
+    <div className="flex flex-1 flex-col gap-8">
+      <section>
+        <h1 className="text-3xl font-semibold tracking-tight text-fg">
+          Your knowledge, connected.
+        </h1>
+        <p className="mt-2 max-w-2xl text-fg-secondary">
+          Capture text, links, videos and documents. Each entry becomes a page
+          structured as <span className="text-fg">what</span>,{" "}
+          <span className="text-fg">how</span>, and{" "}
+          <span className="text-fg">why</span> — connected to everything else
+          you know.
+        </p>
+      </section>
+
+      {error === "not-configured" && (
+        <div className="rounded-lg border border-border bg-bg-elevated p-5 text-fg-secondary">
+          <p className="font-medium text-fg">Database not connected yet.</p>
+          <p className="mt-1 text-sm">
+            Set <code className="text-accent">DATABASE_URL</code> in{" "}
+            <code className="text-accent">.env.local</code> to a Neon Postgres
+            connection string, then run the migrations. See{" "}
+            <code className="text-accent">SETUP.md</code>.
+          </p>
+        </div>
+      )}
+
+      {error === "connection-failed" && (
+        <div className="rounded-lg border border-danger/40 bg-bg-elevated p-5 text-fg-secondary">
+          <p className="font-medium text-fg">Couldn&apos;t reach the database.</p>
+          <p className="mt-1 text-sm">
+            Double-check <code className="text-accent">DATABASE_URL</code> and
+            that migrations have been run.
+          </p>
+        </div>
+      )}
+
+      {!error && rows.length === 0 && (
+        <div className="rounded-lg border border-border bg-bg-elevated p-5 text-fg-secondary">
+          No notes yet.{" "}
+          <Link href="/new" className="text-accent hover:underline">
+            Create your first one
+          </Link>
+          .
+        </div>
+      )}
+
+      {rows.length > 0 && (
+        <ul className="flex flex-col divide-y divide-border rounded-lg border border-border bg-bg-elevated">
+          {rows.map((note) => (
+            <li key={note.id} className="p-5">
+              <Link
+                href={`/notes/${note.slug}`}
+                className="text-lg font-medium text-fg hover:text-accent transition-colors"
+              >
+                {note.title}
+              </Link>
+              <div className="mt-1 text-sm text-fg-secondary">
+                {note.status} · {note.sourceType} ·{" "}
+                {new Date(note.updatedAt).toLocaleDateString()}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
