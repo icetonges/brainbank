@@ -26,4 +26,9 @@ deployed on Vercel.
 
 ```
 npm install
-cp .env.example .env.local   # fill in DATABASE_URL, NEXTAUTH_SECRET
+cp .env.example .env.local   # fill in DATABASE_URL, NEXTAUTH_SECRET, OWNER_*
+npm run db:migrate
+npm run dev
+```
+
+Full instructions: [`SETUP.md`](./SETUP.md).
