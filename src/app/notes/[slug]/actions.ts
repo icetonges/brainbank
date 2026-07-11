@@ -11,6 +11,7 @@ import { translateNote, summarizeNote, suggestTags } from "@/lib/ai/tasks";
 import { dispatchIngestionJob } from "@/lib/background-jobs";
 import type { ModelId } from "@/lib/ai/models";
 import { linkWikilinksFromText } from "@/lib/notes/link-wikilinks";
+import { linkRelatedByTags } from "@/lib/notes/link-related";
 
 async function requireOwner() {
   const session = await auth();
@@ -129,6 +130,8 @@ export async function suggestTagsAction(
       await db.insert(noteTags).values({ noteId, tagId: tag.id });
     }
   }
+
+  await linkRelatedByTags(noteId);
 
   revalidatePath(`/notes/${slug}`);
 }

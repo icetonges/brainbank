@@ -30,59 +30,103 @@ export default async function NotePage({
 }) {
   const { slug } = await params;
   const { lang } = await searchParams;
-
-  const note = await db.query.notes.findFirst({ where: eq(notes.slug, slug) });
-  if (!note) notFound();
+  const language: "en" | "zh" = lang === "zh" ? "zh" : "en";
+  const otherLanguage: "en" | "zh" = language === "en" ? "zh" : "en";
 
   const session = await auth();
+
+  // Wrapped like the homepage/search pages: a transient DB hiccup (Neon
+  // cold start, connection reset, etc.) should degrade to a visible retry
+  // message, not an uncaught exception that takes down the whole page (see
+  // src/app/error.tsx for the last-resort net if something still slips
+  // through — but that shouldn't be the normal path for a query failure).
+  let note: typeof notes.$inferSelect | undefined;
+  let content: typeof noteContent.$inferSelect | undefined;
+  let noteTagRows: { name: string }[] = [];
+  let titleToSlug = new Map<string, string>();
+  let mediaRows: {
+    id: number;
+    kind: (typeof mediaTable.$inferSelect)["kind"];
+    url: string;
+    mimeType: string | null;
+    sizeBytes: number | null;
+  }[] = [];
+  let latestJob: typeof ingestionJobs.$inferSelect | undefined;
+  let loadError = false;
+
+  try {
+    note = await db.query.notes.findFirst({ where: eq(notes.slug, slug) });
+  } catch (err) {
+    console.error(`Failed to load note "${slug}":`, err);
+    loadError = true;
+  }
+
+  if (!loadError && !note) notFound();
+
+  if (loadError) {
+    return (
+      <div className="rounded-lg border border-danger/40 bg-bg-elevated p-5 text-fg-secondary">
+        <p className="font-medium text-fg">Couldn&apos;t load this note.</p>
+        <p className="mt-1 text-sm">The database didn&apos;t respond — reload to try again.</p>
+      </div>
+    );
+  }
 
   // Public-read/private-edit model: anonymous visitors only ever see
   // published notes. The owner (signed in) can see everything, including
   // drafts still being ingested and notes marked private.
-  if (note.status !== "published" && !session) notFound();
+  if (note!.status !== "published" && !session) notFound();
 
-  const language: "en" | "zh" = lang === "zh" ? "zh" : "en";
-  const otherLanguage: "en" | "zh" = language === "en" ? "zh" : "en";
+  try {
+    content = await db.query.noteContent.findFirst({
+      where: and(eq(noteContent.noteId, note!.id), eq(noteContent.language, language)),
+    });
 
-  const content = await db.query.noteContent.findFirst({
-    where: and(eq(noteContent.noteId, note.id), eq(noteContent.language, language)),
-  });
+    noteTagRows = await db
+      .select({ name: tagsTable.name })
+      .from(noteTags)
+      .innerJoin(tagsTable, eq(noteTags.tagId, tagsTable.id))
+      .where(eq(noteTags.noteId, note!.id));
 
-  const noteTagRows = await db
-    .select({ name: tagsTable.name })
-    .from(noteTags)
-    .innerJoin(tagsTable, eq(noteTags.tagId, tagsTable.id))
-    .where(eq(noteTags.noteId, note.id));
+    // For resolving [[Wikilinks]] in the body text to real /notes/<slug> links.
+    const allNotes = await db.select({ title: notes.title, slug: notes.slug }).from(notes);
+    titleToSlug = new Map(allNotes.map((n) => [n.title.toLowerCase(), n.slug]));
 
-  // For resolving [[Wikilinks]] in the body text to real /notes/<slug> links.
-  const allNotes = await db.select({ title: notes.title, slug: notes.slug }).from(notes);
-  const titleToSlug = new Map(allNotes.map((n) => [n.title.toLowerCase(), n.slug]));
+    mediaRows = await db
+      .select({
+        id: mediaTable.id,
+        kind: mediaTable.kind,
+        url: mediaTable.url,
+        mimeType: mediaTable.mimeType,
+        sizeBytes: mediaTable.sizeBytes,
+      })
+      .from(mediaTable)
+      .where(eq(mediaTable.noteId, note!.id));
 
-  const mediaRows = await db
-    .select({
-      id: mediaTable.id,
-      kind: mediaTable.kind,
-      url: mediaTable.url,
-      mimeType: mediaTable.mimeType,
-      sizeBytes: mediaTable.sizeBytes,
-    })
-    .from(mediaTable)
-    .where(eq(mediaTable.noteId, note.id));
+    latestJob = await db.query.ingestionJobs.findFirst({
+      where: eq(ingestionJobs.noteId, note!.id),
+      orderBy: desc(ingestionJobs.createdAt),
+    });
+  } catch (err) {
+    console.error(`Failed to load content for note "${slug}" (lang=${language}):`, err);
+    return (
+      <div className="rounded-lg border border-danger/40 bg-bg-elevated p-5 text-fg-secondary">
+        <p className="font-medium text-fg">Couldn&apos;t load this note&apos;s content.</p>
+        <p className="mt-1 text-sm">The database didn&apos;t respond — reload to try again.</p>
+      </div>
+    );
+  }
 
-  const latestJob = await db.query.ingestionJobs.findFirst({
-    where: eq(ingestionJobs.noteId, note.id),
-    orderBy: desc(ingestionJobs.createdAt),
-  });
-
-  const translateAction = translateNoteAction.bind(null, note.id, slug, otherLanguage, undefined);
-  const summarizeAction = summarizeNoteAction.bind(null, note.id, slug, language, undefined);
-  const tagAction = suggestTagsAction.bind(null, note.id, slug, language, undefined);
+  const n = note!;
+  const translateAction = translateNoteAction.bind(null, n.id, slug, otherLanguage, undefined);
+  const summarizeAction = summarizeNoteAction.bind(null, n.id, slug, language, undefined);
+  const tagAction = suggestTagsAction.bind(null, n.id, slug, language, undefined);
 
   return (
     <article className="flex flex-col gap-8">
       <header className="flex flex-col gap-3">
         <div className="flex items-start justify-between gap-4">
-          <h1 className="text-3xl font-semibold text-fg">{note.title}</h1>
+          <h1 className="text-3xl font-semibold text-fg">{n.title}</h1>
           <div className="flex shrink-0 gap-1 rounded-md border border-border p-1 text-sm">
             <Link
               href={`/notes/${slug}?lang=en`}
@@ -99,8 +143,8 @@ export default async function NotePage({
           </div>
         </div>
         <p className="text-sm text-fg-secondary">
-          {note.status} · {note.sourceType} ·{" "}
-          {new Date(note.createdAt).toLocaleDateString()}
+          {n.status} · {n.sourceType} ·{" "}
+          {new Date(n.createdAt).toLocaleDateString()}
         </p>
         {noteTagRows.length > 0 && (
           <div className="flex flex-wrap gap-2">
@@ -118,7 +162,7 @@ export default async function NotePage({
 
       {latestJob && (latestJob.status === "queued" || latestJob.status === "running" || latestJob.status === "failed") && (
         <IngestStatusBanner
-          noteId={note.id}
+          noteId={n.id}
           slug={slug}
           initialStatus={latestJob.status}
           initialStage={latestJob.stage}
@@ -155,8 +199,8 @@ export default async function NotePage({
           </Link>
 
           <div className="ml-auto flex items-center gap-2">
-            <StatusControl noteId={note.id} slug={slug} current={note.status} />
-            <DeleteNoteButton noteId={note.id} title={note.title} />
+            <StatusControl noteId={n.id} slug={slug} current={n.status} />
+            <DeleteNoteButton noteId={n.id} title={n.title} />
           </div>
         </div>
       )}
@@ -185,7 +229,7 @@ export default async function NotePage({
 
       {session && (
         <div className="rounded-lg border border-dashed border-border p-4">
-          <UploadWidget noteId={note.id} slug={slug} />
+          <UploadWidget noteId={n.id} slug={slug} />
         </div>
       )}
     </article>

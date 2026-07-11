@@ -4,6 +4,7 @@ import type { NoteStatus } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { slugify } from "@/lib/slug";
 import { linkWikilinksFromText } from "@/lib/notes/link-wikilinks";
+import { linkRelatedByTags } from "@/lib/notes/link-related";
 import { parseFrontmatter } from "./frontmatter";
 import { splitSections } from "./sections";
 import { draftNoteFromSource } from "@/lib/ai/tasks";
@@ -138,6 +139,7 @@ export async function upsertNoteFromVaultFile(file: VaultFile, rawContent: strin
   }
 
   await linkWikilinksFromText(noteId, what, how, why, other);
+  await linkRelatedByTags(noteId);
 }
 
 // --- sync run tracking (one row per vault-wide sync pass) ---

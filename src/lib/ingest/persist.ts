@@ -3,6 +3,7 @@ import { notes, noteContent, tags, noteTags, ingestionJobs, media } from "@/lib/
 import { eq, and } from "drizzle-orm";
 import { slugify } from "@/lib/slug";
 import { linkWikilinksFromText } from "@/lib/notes/link-wikilinks";
+import { linkRelatedByTags } from "@/lib/notes/link-related";
 import type { DraftedNote } from "@/lib/ai/tasks";
 
 export async function markJobRunning(noteId: number, stage: string) {
@@ -101,6 +102,7 @@ export async function saveDraftedNote(noteId: number, draft: DraftedNote, imageU
   }
 
   await linkWikilinksFromText(noteId, draft.what, draft.how, draft.why, draft.other);
+  await linkRelatedByTags(noteId);
 
   if (imageUrl) {
     const existingImage = await db.query.media.findFirst({
