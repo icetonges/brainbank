@@ -41,14 +41,23 @@
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
-body {
-  background: var(--color-bg);
-  color: var(--color-fg);
-  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
-  -webkit-font-smoothing: antialiased;
-}
+@layer base {
+  body {
+    background: var(--color-bg);
+    color: var(--color-fg);
+    font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
 
-/* High-contrast, eye-friendly defaults: no low-contrast gray body text. */
-a {
-  color: var(--color-accent);
+  /* Default link color for prose/body links (e.g. wikilinks in note
+     content). Deliberately inside @layer base — Tailwind's utility layer
+     comes after base in the cascade, so any component's own text-* utility
+     class (text-fg, text-accent-fg, text-fg-secondary, ...) correctly wins
+     over this default instead of this unlayered rule silently beating
+     every utility class on every <a>/<Link>, which is what caused the
+     "+ New knowledge" button text to be invisible (gold-on-gold: this rule
+     was overriding its intended text-accent-fg). */
+  a {
+    color: var(--color-accent);
+  }
 }
