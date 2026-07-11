@@ -1,6 +1,7 @@
 import { parseHTML } from "linkedom";
 import { Readability } from "@mozilla/readability";
 import type { ExtractedSource } from "./types";
+import { assertSafePublicUrl } from "@/lib/intake";
 
 const MAX_CHARS = 20000;
 
@@ -18,6 +19,7 @@ const MAX_CHARS = 20000;
  * serverless/bundler compatibility case and is a standard drop-in for
  * Readability-based scraping. */
 export async function extractFromUrl(url: string): Promise<ExtractedSource> {
+  assertSafePublicUrl(url);
   const res = await fetch(url, {
     headers: {
       "User-Agent":

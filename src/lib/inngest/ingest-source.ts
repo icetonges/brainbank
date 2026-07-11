@@ -16,6 +16,7 @@ export interface IngestEventData {
   sourceUrl?: string;
   mediaUrl?: string;
   filename?: string;
+  rawText?: string;
 }
 
 // The full pipeline from PLAN.md §5: fetch/parse the source (plain code,
@@ -30,13 +31,13 @@ export const ingestSource = inngest.createFunction(
     triggers: [{ event: "note/ingest.requested" }],
   },
   async ({ event, step }) => {
-    const { noteId, sourceType, sourceUrl, mediaUrl, filename } = event.data as IngestEventData;
+    const { noteId, sourceType, sourceUrl, mediaUrl, filename, rawText } = event.data as IngestEventData;
 
     try {
       await step.run("mark-running", () => markJobRunning(noteId, "extracting"));
 
       const extracted = await step.run("extract", () =>
-        extractSource({ sourceType, sourceUrl, mediaUrl, filename }),
+        extractSource({ sourceType, sourceUrl, mediaUrl, filename, rawText }),
       );
 
       await step.run("mark-drafting", () => markJobStage(noteId, "drafting"));
@@ -51,7 +52,7 @@ export const ingestSource = inngest.createFunction(
 
       await step.run("mark-saving", () => markJobStage(noteId, "saving"));
 
-      const slug = await step.run("save", () => saveDraftedNote(noteId, draft));
+      const slug = await step.run("save", () => saveDraftedNote(noteId, draft, extracted.imageUrl));
 
       await step.run("mark-succeeded", () => markJobSucceeded(noteId));
 

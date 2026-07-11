@@ -18,10 +18,8 @@ function sourceTypeForFile(file: File): SourceType | null {
     return "docx";
   }
   if (
-    file.type === "application/vnd.ms-excel" ||
     file.type === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
     file.type === "text/csv" ||
-    name.endsWith(".xls") ||
     name.endsWith(".xlsx") ||
     name.endsWith(".csv")
   ) {
@@ -80,7 +78,7 @@ export function IngestUploadWidget() {
         <input
           ref={inputRef}
           type="file"
-          accept=".pdf,.doc,.docx,.xls,.xlsx,.csv"
+          accept=".pdf,.doc,.docx,.xlsx,.csv"
           className="hidden"
           disabled={stage !== null}
           onChange={(e) => {

@@ -1,5 +1,5 @@
 import { createNote } from "./actions";
-import { startUrlIngestion } from "./ingest-actions";
+import { startTextIngestion, startUrlIngestion } from "./ingest-actions";
 import { AiAssistPanel } from "@/components/ai-assist-panel";
 import { IngestUploadWidget } from "@/components/ingest-upload-widget";
 
@@ -33,6 +33,22 @@ export default function NewNotePage() {
             className="rounded-md bg-accent px-4 py-2 text-sm font-semibold text-accent-fg hover:opacity-90 transition-opacity"
           >
             Fetch &amp; build
+          </button>
+        </form>
+        <form action={startTextIngestion} className="flex flex-col gap-2">
+          <textarea
+            name="text"
+            required
+            minLength={20}
+            rows={5}
+            placeholder="Paste an article, transcript, learning note, or Chinese text…"
+            className="rounded-md border border-border bg-bg px-3 py-2 text-sm text-fg outline-none focus:border-accent"
+          />
+          <button
+            type="submit"
+            className="self-start rounded-md border border-accent px-4 py-2 text-sm font-semibold text-accent hover:bg-accent hover:text-accent-fg"
+          >
+            Build page from text
           </button>
         </form>
         <IngestUploadWidget />

@@ -8,6 +8,7 @@ import { slugify } from "@/lib/slug";
 import { inngest } from "@/lib/inngest/client";
 import { redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
+import { assertSafePublicUrl } from "@/lib/intake";
 
 async function requireOwner() {
   const session = await auth();
@@ -59,12 +60,7 @@ export async function startUrlIngestion(formData: FormData) {
   const url = String(formData.get("url") ?? "").trim();
   if (!url) throw new Error("URL is required");
 
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    throw new Error("That doesn't look like a valid URL");
-  }
+  const parsed = assertSafePublicUrl(url);
 
   const sourceType: SourceType = isYoutubeUrl(url) ? "youtube" : "url";
   const { noteId, slug } = await createPendingNote(parsed.hostname, sourceType, url);
@@ -74,6 +70,22 @@ export async function startUrlIngestion(formData: FormData) {
     data: { noteId, sourceType, sourceUrl: url },
   });
 
+  redirect(`/notes/${slug}`);
+}
+
+/** Turns pasted text into the same structured, tagged page as a URL or document. */
+export async function startTextIngestion(formData: FormData) {
+  await requireOwner();
+  const text = String(formData.get("text") ?? "").trim();
+  if (text.length < 20) throw new Error("Paste at least 20 characters");
+  if (text.length > 100_000) throw new Error("Pasted text is limited to 100,000 characters");
+
+  const firstLine = text.split(/\r?\n/).find(Boolean)?.slice(0, 80) || "Text capture";
+  const { noteId, slug } = await createPendingNote(firstLine, "manual");
+  await inngest.send({
+    name: "note/ingest.requested",
+    data: { noteId, sourceType: "manual", rawText: text },
+  });
   redirect(`/notes/${slug}`);
 }
 

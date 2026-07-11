@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { notes, noteContent, tags, noteTags, ingestionJobs } from "@/lib/db/schema";
+import { notes, noteContent, tags, noteTags, ingestionJobs, media } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { slugify } from "@/lib/slug";
 import { linkWikilinksFromText } from "@/lib/notes/link-wikilinks";
@@ -48,7 +48,7 @@ async function uniqueSlug(baseSlug: string, excludeNoteId: number): Promise<stri
  * edges from [[wikilinks]] the draft happened to use. Returns the final
  * slug (it may differ from the placeholder one passed in at creation).
  */
-export async function saveDraftedNote(noteId: number, draft: DraftedNote): Promise<string> {
+export async function saveDraftedNote(noteId: number, draft: DraftedNote, imageUrl?: string): Promise<string> {
   const newSlug = await uniqueSlug(slugify(draft.title), noteId);
 
   await db
@@ -101,6 +101,20 @@ export async function saveDraftedNote(noteId: number, draft: DraftedNote): Promi
   }
 
   await linkWikilinksFromText(noteId, draft.what, draft.how, draft.why, draft.other);
+
+  if (imageUrl) {
+    const existingImage = await db.query.media.findFirst({
+      where: and(eq(media.noteId, noteId), eq(media.url, imageUrl)),
+    });
+    if (!existingImage) {
+      await db.insert(media).values({
+        noteId,
+        kind: "image",
+        provider: "cloudinary",
+        url: imageUrl,
+      });
+    }
+  }
 
   return newSlug;
 }

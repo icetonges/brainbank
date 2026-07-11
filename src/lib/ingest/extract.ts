@@ -11,6 +11,7 @@ export interface ExtractInput {
   sourceUrl?: string | null;
   mediaUrl?: string | null;
   filename?: string | null;
+  rawText?: string | null;
 }
 
 /** Single dispatch point: given a source type and where to find it, return
@@ -19,6 +20,9 @@ export interface ExtractInput {
  * per PLAN.md §13. */
 export async function extractSource(input: ExtractInput): Promise<ExtractedSource> {
   switch (input.sourceType) {
+    case "manual":
+      if (!input.rawText?.trim()) throw new Error("Missing text for text ingestion");
+      return { title: "Text capture", text: input.rawText.trim().slice(0, 100_000) };
     case "url":
       if (!input.sourceUrl) throw new Error("Missing sourceUrl for url ingestion");
       return extractFromUrl(input.sourceUrl);

@@ -2,6 +2,10 @@ import { auth } from "@/auth";
 import { createR2UploadTarget } from "@/lib/storage/r2";
 import { signCloudinaryUpload } from "@/lib/storage/cloudinary";
 import { providerForMimeType } from "@/lib/storage/media-kind";
+import { validateUploadMetadata } from "@/lib/intake";
+import { db } from "@/lib/db";
+import { notes } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
 
 export const runtime = "nodejs";
 
@@ -9,6 +13,7 @@ interface SignRequestBody {
   noteId: number;
   filename: string;
   mimeType: string;
+  sizeBytes: number;
 }
 
 function sanitizeFilename(name: string): string {
@@ -21,10 +26,16 @@ export async function POST(req: Request) {
     return new Response("Unauthorized", { status: 401 });
   }
 
-  const body: SignRequestBody = await req.json();
-  if (!body.noteId || !body.filename || !body.mimeType) {
-    return new Response("noteId, filename, and mimeType are required", { status: 400 });
+  let body: SignRequestBody;
+  try {
+    body = await req.json();
+    validateUploadMetadata(body);
+  } catch (error) {
+    return new Response(error instanceof Error ? error.message : "Invalid upload", { status: 400 });
   }
+
+  const note = await db.query.notes.findFirst({ where: eq(notes.id, body.noteId) });
+  if (!note) return new Response("Note not found", { status: 404 });
 
   const provider = providerForMimeType(body.mimeType);
 

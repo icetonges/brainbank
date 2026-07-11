@@ -49,6 +49,7 @@ export async function signAndUploadFile(
       noteId,
       filename: file.name,
       mimeType: file.type || "application/octet-stream",
+      sizeBytes: file.size,
     }),
   });
   if (!signRes.ok) throw new Error(await signRes.text());
