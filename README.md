@@ -21,4 +21,16 @@ GitHub repo, code-first with an AI drafting fallback for freeform notes).
 
 Next.js (App Router) · Neon Postgres + Drizzle ORM · NextAuth (single owner
 account) · Tailwind CSS v4 · Vercel AI SDK (Google / Groq / Anthropic) ·
-Cloudflare R2 
+Cloudflare R2 + Cloudinary (storage) · Inngest (background jobs) ·
+deployed on Vercel.
+
+## Quick start
+
+```
+npm install
+cp .env.example .env.local   # fill in DATABASE_URL, NEXTAUTH_SECRET, OWNER_*
+npm run db:migrate
+npm run dev
+```
+
+Full instructions: [`SETUP.md`](./SETUP.md).

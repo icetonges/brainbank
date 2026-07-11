@@ -116,4 +116,45 @@ alongside) using the web app's own editor (PLAN.md §8).
    automate the push, or just `git add`/`commit`/`push` by hand.
 2. Create a GitHub personal access token with read-only access to that
    repo's contents (a fine-grained PAT scoped to just that repo is enough:
-   https://github.com/settings/tokens?type=beta) → `GITHUB_TOKEN
+   https://github.com/settings/tokens?type=beta) → `GITHUB_TOKEN`
+3. Set `GITHUB_OBSIDIAN_REPO` to `"owner/repo"`. `GITHUB_OBSIDIAN_BRANCH`
+   (default `main`) and `GITHUB_OBSIDIAN_PATH` (default `notes`) only need
+   changing if your setup differs from the defaults.
+4. Also needs an AI key (step 3b) and the Inngest dev server (step 3d)
+   running — freeform notes (without What/How/Why/Other headers) go
+   through the same AI drafting step as any other source.
+5. Sign in, go to `/obsidian`, click **Sync now**. Notes already using the
+   app's `## What` / `## How` / `## Why` / `## Other` headers are saved
+   as-is, no AI call; anything else gets auto-drafted into that template.
+   Frontmatter (`title`, `tags: [a, b]`, `status`, `language`) is read if
+   present.
+
+Re-syncing only processes files whose git blob sha changed since the last
+run, so it's cheap to run repeatedly. It's one-way — editing a note in the
+web app does not write back to the vault, and there's no deletion
+handling yet (removing a file from the vault doesn't remove or unpublish
+the corresponding note).
+
+## 4. Run it
+
+```
+npm run dev
+```
+
+Visit http://localhost:3000. Without `DATABASE_URL` set, the homepage still
+renders with a "database not connected yet" notice instead of crashing.
+
+## 5. Deploy (Vercel)
+
+1. `vercel link` (or import the GitHub repo in the Vercel dashboard)
+2. Add every variable from `.env.example` to the Vercel project's
+   Environment Variables
+3. Push to `main` — Vercel deploys automatically
+
+## Not wired up yet
+
+- Images/video don't go through auto-ingestion yet — the intake form only
+  handles PDF/docx/xlsx/URLs/YouTube; attach images/video to an existing
+  note via the upload widget on the note page instead
+- Obsidian sync is one-way (vault → site) with no deletion handling — see
+  step 3e
