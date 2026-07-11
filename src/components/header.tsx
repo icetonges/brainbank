@@ -8,12 +8,31 @@ export async function Header() {
 
   return (
     <header className="border-b border-border bg-bg-elevated">
-      <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
-        <Link href="/" className="text-lg font-semibold tracking-tight text-fg">
+      <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-6 py-4">
+        <Link href="/" className="shrink-0 text-lg font-semibold tracking-tight text-fg">
           brain<span className="text-accent">bank</span>
         </Link>
 
+        <form
+          action="/search"
+          method="get"
+          className="hidden flex-1 max-w-xs sm:block"
+        >
+          <input
+            type="text"
+            name="q"
+            placeholder="Search…"
+            className="w-full rounded-md border border-border bg-bg px-3 py-1.5 text-sm text-fg outline-none focus:border-accent"
+          />
+        </form>
+
         <nav className="flex items-center gap-3">
+          <Link
+            href="/search"
+            className="rounded-md px-3 py-1.5 text-sm font-medium text-fg-secondary hover:text-accent transition-colors sm:hidden"
+          >
+            Search
+          </Link>
           <Link
             href="/graph"
             className="rounded-md px-3 py-1.5 text-sm font-medium text-fg-secondary hover:text-accent transition-colors"
