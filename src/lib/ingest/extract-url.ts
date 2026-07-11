@@ -1,4 +1,4 @@
-import { JSDOM } from "jsdom";
+import { parseHTML } from "linkedom";
 import { Readability } from "@mozilla/readability";
 import type { ExtractedSource } from "./types";
 
@@ -7,7 +7,16 @@ const MAX_CHARS = 20000;
 /** Fetches a page and pulls the readable article out of it (title, body
  * text, hero image) — the same kind of extraction Reader Mode / Pocket do.
  * Code-first per PLAN.md §13: no LLM involved in getting the raw text out
- * of the page, only in what happens to that text afterward. */
+ * of the page, only in what happens to that text afterward.
+ *
+ * Uses linkedom rather than jsdom: jsdom's transitive dependency chain
+ * (html-encoding-sniffer -> @exodus/bytes, an ESM-only package) fails to
+ * load under Vercel's Turbopack server bundle with ERR_REQUIRE_ESM, which
+ * crashed this entire route (and every other ingestion source, since they
+ * share one bundled module graph) on cold start in production. linkedom is
+ * a much lighter DOM implementation built for exactly this
+ * serverless/bundler compatibility case and is a standard drop-in for
+ * Readability-based scraping. */
 export async function extractFromUrl(url: string): Promise<ExtractedSource> {
   const res = await fetch(url, {
     headers: {
@@ -20,12 +29,21 @@ export async function extractFromUrl(url: string): Promise<ExtractedSource> {
   }
   const html = await res.text();
 
-  const dom = new JSDOM(html, { url });
-  const doc = dom.window.document;
+  const { document: doc } = parseHTML(html);
+  try {
+    // Best-effort: lets Readability resolve any relative URLs it encounters
+    // against the real page URL. Not load-bearing for the text we actually
+    // use downstream, so swallow any failure rather than let it break
+    // extraction.
+    doc.location = url;
+  } catch {
+    // ignore
+  }
+
   const ogImage =
     doc.querySelector('meta[property="og:image"]')?.getAttribute("content") ?? undefined;
 
-  const reader = new Readability(doc);
+  const reader = new Readability(doc as unknown as Document);
   const article = reader.parse();
 
   if (!article?.textContent?.trim()) {
