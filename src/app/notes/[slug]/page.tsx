@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
 import { notes, noteContent, noteTags, tags as tagsTable, media as mediaTable, ingestionJobs } from "@/lib/db/schema";
+import type { NoteStatus } from "@/lib/db/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
@@ -8,13 +9,17 @@ import { renderWithWikilinks } from "@/lib/notes/render-wikilinks";
 import { UploadWidget } from "@/components/upload-widget";
 import { MediaGallery } from "@/components/media-gallery";
 import { IngestStatusBanner } from "@/components/ingest-status-banner";
+import { DeleteNoteButton } from "@/components/delete-note-button";
 import {
   translateNoteAction,
   summarizeNoteAction,
   suggestTagsAction,
+  updateNoteStatusAction,
 } from "./actions";
 
 export const dynamic = "force-dynamic";
+
+const STATUS_OPTIONS: NoteStatus[] = ["draft", "published", "private"];
 
 export default async function NotePage({
   params,
@@ -30,6 +35,12 @@ export default async function NotePage({
   if (!note) notFound();
 
   const session = await auth();
+
+  // Public-read/private-edit model: anonymous visitors only ever see
+  // published notes. The owner (signed in) can see everything, including
+  // drafts still being ingested and notes marked private.
+  if (note.status !== "published" && !session) notFound();
+
   const language: "en" | "zh" = lang === "zh" ? "zh" : "en";
   const otherLanguage: "en" | "zh" = language === "en" ? "zh" : "en";
 
@@ -116,7 +127,7 @@ export default async function NotePage({
       )}
 
       {session && (
-        <div className="flex flex-wrap gap-2 border-y border-border py-3">
+        <div className="flex flex-wrap items-center gap-2 border-y border-border py-3">
           <form action={translateAction}>
             <ActionButton>
               {content
@@ -131,11 +142,22 @@ export default async function NotePage({
             <ActionButton disabled={!content}>Suggest tags</ActionButton>
           </form>
           <Link
+            href={`/notes/${slug}/edit?lang=${language}`}
+            className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-fg hover:border-accent hover:text-accent transition-colors"
+          >
+            Edit
+          </Link>
+          <Link
             href="/graph"
             className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-fg-secondary hover:border-accent hover:text-accent transition-colors"
           >
             View in graph
           </Link>
+
+          <div className="ml-auto flex items-center gap-2">
+            <StatusControl noteId={note.id} slug={slug} current={note.status} />
+            <DeleteNoteButton noteId={note.id} title={note.title} />
+          </div>
         </div>
       )}
 
@@ -167,6 +189,41 @@ export default async function NotePage({
         </div>
       )}
     </article>
+  );
+}
+
+function StatusControl({
+  noteId,
+  slug,
+  current,
+}: {
+  noteId: number;
+  slug: string;
+  current: NoteStatus;
+}) {
+  return (
+    <div className="flex items-center gap-1 rounded-md border border-border p-1 text-xs">
+      {STATUS_OPTIONS.map((status) => {
+        const action = updateNoteStatusAction.bind(null, noteId, slug, status);
+        const active = status === current;
+        return (
+          <form action={action} key={status}>
+            <button
+              type="submit"
+              disabled={active}
+              title={`Mark as ${status}`}
+              className={`rounded px-2 py-1 font-medium capitalize transition-colors ${
+                active
+                  ? "bg-accent text-accent-fg"
+                  : "text-fg-secondary hover:text-accent"
+              }`}
+            >
+              {status}
+            </button>
+          </form>
+        );
+      })}
+    </div>
   );
 }
 

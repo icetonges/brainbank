@@ -3,12 +3,14 @@
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import { notes, noteContent, tags, noteTags, media, ingestionJobs } from "@/lib/db/schema";
-import type { MediaKind, MediaProvider } from "@/lib/db/schema";
+import type { MediaKind, MediaProvider, NoteStatus } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { translateNote, summarizeNote, suggestTags } from "@/lib/ai/tasks";
 import { inngest } from "@/lib/inngest/client";
 import type { ModelId } from "@/lib/ai/models";
+import { linkWikilinksFromText } from "@/lib/notes/link-wikilinks";
 
 async function requireOwner() {
   const session = await auth();
@@ -193,4 +195,84 @@ export async function retryIngestionAction(noteId: number, slug: string) {
   });
 
   revalidatePath(`/notes/${slug}`);
+}
+
+/** Edits a note's title and its current-language what/how/why/other fields.
+ * The slug is intentionally left unchanged so existing links (including
+ * [[wikilinks]] from other notes) keep working even after a rename;
+ * re-scans the edited text for new [[wikilinks]] afterward. */
+export async function updateNoteAction(
+  noteId: number,
+  slug: string,
+  language: "en" | "zh",
+  formData: FormData,
+) {
+  await requireOwner();
+
+  const title = String(formData.get("title") ?? "").trim();
+  const what = String(formData.get("what") ?? "").trim();
+  const how = String(formData.get("how") ?? "").trim();
+  const why = String(formData.get("why") ?? "").trim();
+  const other = String(formData.get("other") ?? "").trim();
+
+  if (!title) throw new Error("Title is required");
+
+  await db
+    .update(notes)
+    .set({ title, updatedAt: new Date() })
+    .where(eq(notes.id, noteId));
+
+  const existing = await loadNoteWithContent(noteId, language);
+  if (existing) {
+    await db
+      .update(noteContent)
+      .set({ what, how, why, other })
+      .where(eq(noteContent.id, existing.id));
+  } else {
+    await db.insert(noteContent).values({ noteId, language, what, how, why, other });
+  }
+
+  await linkWikilinksFromText(noteId, what, how, why, other);
+
+  revalidatePath(`/notes/${slug}`);
+  redirect(`/notes/${slug}?lang=${language}`);
+}
+
+const CYCLE_STATUS: Record<NoteStatus, NoteStatus> = {
+  draft: "published",
+  published: "private",
+  private: "draft",
+};
+
+/** Cycles a note's status draft -> published -> private -> draft, or sets
+ * an explicit target status if one is passed (used by the three buttons on
+ * the note page, which each pass their own target). */
+export async function updateNoteStatusAction(
+  noteId: number,
+  slug: string,
+  target?: NoteStatus,
+) {
+  await requireOwner();
+
+  const note = await db.query.notes.findFirst({ where: eq(notes.id, noteId) });
+  if (!note) throw new Error("Note not found");
+
+  const nextStatus = target ?? CYCLE_STATUS[note.status];
+
+  await db
+    .update(notes)
+    .set({ status: nextStatus, updatedAt: new Date() })
+    .where(eq(notes.id, noteId));
+
+  revalidatePath(`/notes/${slug}`);
+  revalidatePath("/");
+}
+
+export async function deleteNoteAction(noteId: number) {
+  await requireOwner();
+  // All related rows (note_content, note_tags, media, edges,
+  // ingestion_jobs) cascade-delete via FK constraints — see schema.ts.
+  await db.delete(notes).where(eq(notes.id, noteId));
+  revalidatePath("/");
+  redirect("/");
 }

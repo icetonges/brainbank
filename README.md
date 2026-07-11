@@ -8,10 +8,12 @@ becomes a connected page structured as **what → how → why**. See
 **Status:** Phases 1–6 — app scaffold, database schema, single-owner auth,
 the dark/light theme shell, a provider-agnostic AI chain (AI Assist,
 translate, summarize, tag suggestions), an interactive Obsidian-style
-[[wikilink]] graph, direct-to-R2/Cloudinary file uploads, and a background
+[[wikilink]] graph, direct-to-R2/Cloudinary file uploads, a background
 ingestion pipeline (paste a URL/YouTube link or upload a PDF/docx/xlsx and
-get a drafted what/how/why/other page back, via Inngest) are all in place.
-Obsidian sync and note editing/publish-state UI are next.
+get a drafted what/how/why/other page back, via Inngest), note editing,
+draft/published/private status control, note deletion, and public-read/
+private-edit visibility gating are all in place. Obsidian sync and search
+are next.
 
 ## Stack
 
@@ -24,9 +26,4 @@ deployed on Vercel.
 
 ```
 npm install
-cp .env.example .env.local   # fill in DATABASE_URL, NEXTAUTH_SECRET, OWNER_*
-npm run db:migrate
-npm run dev
-```
-
-Full instructions: [`SETUP.md`](./SETUP.md).
+cp .env.example .env.local   # fill in DATABASE_URL, NEXTAUTH_SECRET

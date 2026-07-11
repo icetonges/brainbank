@@ -1,14 +1,25 @@
 import Link from "next/link";
+import { auth } from "@/auth";
 import { db, isDatabaseConfigured } from "@/lib/db";
 import { notes } from "@/lib/db/schema";
-import { desc } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
 
-async function loadNotes() {
+async function loadNotes(isOwner: boolean) {
   if (!isDatabaseConfigured) return { notes: [], error: "not-configured" as const };
   try {
-    const rows = await db.select().from(notes).orderBy(desc(notes.updatedAt)).limit(50);
+    // Public-read/private-edit: anonymous visitors only ever see published
+    // notes; the signed-in owner sees everything, including drafts still
+    // being ingested and notes marked private.
+    const rows = isOwner
+      ? await db.select().from(notes).orderBy(desc(notes.updatedAt)).limit(50)
+      : await db
+          .select()
+          .from(notes)
+          .where(eq(notes.status, "published"))
+          .orderBy(desc(notes.updatedAt))
+          .limit(50);
     return { notes: rows, error: null };
   } catch {
     return { notes: [], error: "connection-failed" as const };
@@ -16,7 +27,8 @@ async function loadNotes() {
 }
 
 export default async function Home() {
-  const { notes: rows, error } = await loadNotes();
+  const session = await auth();
+  const { notes: rows, error } = await loadNotes(Boolean(session));
 
   return (
     <div className="flex flex-1 flex-col gap-8">
