@@ -1,5 +1,5 @@
-import { PDFParse } from "pdf-parse";
 import type { ExtractedSource } from "./types";
+import { loadPdfParse } from "./pdf-runtime";
 
 const MAX_CHARS = 20000;
 
@@ -8,6 +8,7 @@ export async function extractFromPdf(fileUrl: string, filename: string): Promise
   if (!res.ok) throw new Error(`Failed to download PDF: HTTP ${res.status}`);
   const data = Buffer.from(await res.arrayBuffer());
 
+  const { PDFParse } = await loadPdfParse();
   const parser = new PDFParse({ data });
   try {
     const result = await parser.getText();
