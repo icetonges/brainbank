@@ -32,8 +32,6 @@ export const mediaKindEnum = pgEnum("media_kind", [
   "other",
 ]);
 export const mediaProviderEnum = pgEnum("media_provider", ["cloudinary", "r2"]);
-export type MediaKind = (typeof mediaKindEnum.enumValues)[number];
-export type MediaProvider = (typeof mediaProviderEnum.enumValues)[number];
 export const edgeTypeEnum = pgEnum("edge_type", [
   "link",
   "related",
@@ -46,6 +44,13 @@ export const jobStatusEnum = pgEnum("job_status", [
   "succeeded",
   "failed",
 ]);
+
+export type NoteStatus = (typeof noteStatusEnum.enumValues)[number];
+export type SourceType = (typeof sourceTypeEnum.enumValues)[number];
+export type MediaKind = (typeof mediaKindEnum.enumValues)[number];
+export type MediaProvider = (typeof mediaProviderEnum.enumValues)[number];
+export type EdgeType = (typeof edgeTypeEnum.enumValues)[number];
+export type JobStatus = (typeof jobStatusEnum.enumValues)[number];
 
 // --- tables ---
 export const users = pgTable("users", {

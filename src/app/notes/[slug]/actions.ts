@@ -2,11 +2,12 @@
 
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
-import { notes, noteContent, tags, noteTags, media } from "@/lib/db/schema";
+import { notes, noteContent, tags, noteTags, media, ingestionJobs } from "@/lib/db/schema";
 import type { MediaKind, MediaProvider } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { translateNote, summarizeNote, suggestTags } from "@/lib/ai/tasks";
+import { inngest } from "@/lib/inngest/client";
 import type { ModelId } from "@/lib/ai/models";
 
 async function requireOwner() {
@@ -158,5 +159,38 @@ export async function attachMediaAction(
 export async function deleteMediaAction(mediaId: number, slug: string) {
   await requireOwner();
   await db.delete(media).where(eq(media.id, mediaId));
+  revalidatePath(`/notes/${slug}`);
+}
+
+export async function retryIngestionAction(noteId: number, slug: string) {
+  await requireOwner();
+
+  const note = await db.query.notes.findFirst({ where: eq(notes.id, noteId) });
+  if (!note) throw new Error("Note not found");
+
+  let mediaUrl: string | undefined;
+  let filename: string | undefined;
+
+  if (!note.sourceUrl && note.sourceType !== "manual") {
+    const mediaRow = await db.query.media.findFirst({ where: eq(media.noteId, noteId) });
+    if (mediaRow) {
+      mediaUrl = mediaRow.url;
+      filename = mediaRow.url.split("/").pop();
+    }
+  }
+
+  await db.insert(ingestionJobs).values({ noteId, status: "queued", stage: "queued" });
+
+  await inngest.send({
+    name: "note/ingest.requested",
+    data: {
+      noteId,
+      sourceType: note.sourceType,
+      sourceUrl: note.sourceUrl ?? undefined,
+      mediaUrl,
+      filename,
+    },
+  });
+
   revalidatePath(`/notes/${slug}`);
 }

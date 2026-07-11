@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
-import { notes, noteContent, noteTags, tags as tagsTable, media as mediaTable } from "@/lib/db/schema";
-import { eq, and } from "drizzle-orm";
+import { notes, noteContent, noteTags, tags as tagsTable, media as mediaTable, ingestionJobs } from "@/lib/db/schema";
+import { eq, and, desc } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
 import { renderWithWikilinks } from "@/lib/notes/render-wikilinks";
 import { UploadWidget } from "@/components/upload-widget";
 import { MediaGallery } from "@/components/media-gallery";
+import { IngestStatusBanner } from "@/components/ingest-status-banner";
 import {
   translateNoteAction,
   summarizeNoteAction,
@@ -57,6 +58,11 @@ export default async function NotePage({
     .from(mediaTable)
     .where(eq(mediaTable.noteId, note.id));
 
+  const latestJob = await db.query.ingestionJobs.findFirst({
+    where: eq(ingestionJobs.noteId, note.id),
+    orderBy: desc(ingestionJobs.createdAt),
+  });
+
   const translateAction = translateNoteAction.bind(null, note.id, slug, otherLanguage, undefined);
   const summarizeAction = summarizeNoteAction.bind(null, note.id, slug, language, undefined);
   const tagAction = suggestTagsAction.bind(null, note.id, slug, language, undefined);
@@ -98,6 +104,16 @@ export default async function NotePage({
           </div>
         )}
       </header>
+
+      {latestJob && (latestJob.status === "queued" || latestJob.status === "running" || latestJob.status === "failed") && (
+        <IngestStatusBanner
+          noteId={note.id}
+          slug={slug}
+          initialStatus={latestJob.status}
+          initialStage={latestJob.stage}
+          initialError={latestJob.error}
+        />
+      )}
 
       {session && (
         <div className="flex flex-wrap gap-2 border-y border-border py-3">

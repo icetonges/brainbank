@@ -2,9 +2,10 @@
 
 Phase 1 is scaffolded: Next.js app, database schema, single-owner auth, and
 the dark/light theme shell. The AI layer (model registry, AI Assist,
-translate/summarize/tag), the interactive graph, and file uploads
-(Cloudflare R2 + Cloudinary) are wired up too — see steps 3 and 3c. The
-ingestion pipeline and background jobs come in later phases per `PLAN.md`.
+translate/summarize/tag), the interactive graph, file uploads (Cloudflare
+R2 + Cloudinary), and the auto-ingestion pipeline (paste a URL/YouTube
+link or upload a PDF/docx/xlsx and get a drafted page back) are all wired
+up — see steps 3, 3c, and 3d.
 
 ## 1. Install
 
@@ -76,6 +77,32 @@ provider a file goes to is decided by mime type
 (`src/lib/storage/media-kind.ts`): images/video → Cloudinary, everything
 else → R2.
 
+## 3d. Ingestion pipeline (optional, needs an AI key + the Inngest dev server)
+
+Pasting a URL/YouTube link or uploading a PDF/docx/xlsx on `/new` creates a
+draft note immediately and runs the actual fetch/parse/AI-draft work as a
+background job (Inngest — PLAN.md §5), because that can easily take longer
+than a normal request allows.
+
+1. In a second terminal, alongside `npm run dev`, run:
+   ```
+   npx inngest-cli dev
+   ```
+   This starts a local Inngest Dev Server (UI at http://localhost:8288)
+   that auto-discovers your app's `/api/inngest` endpoint — no
+   `INNGEST_EVENT_KEY`/`INNGEST_SIGNING_KEY` needed for local dev, those
+   are only for pointing at Inngest Cloud in production.
+2. Ingestion also needs at least one AI provider key set (step 3b) — the
+   drafting step is the one part of the pipeline that has to be an LLM.
+3. Watch progress either on the note page itself (it polls and shows a
+   "Processing…" banner) or in the Inngest Dev Server UI, which shows each
+   step and lets you replay a failed run.
+
+For production on Vercel, create a free account at https://inngest.com,
+connect your Vercel project (there's an official Inngest×Vercel
+integration that sets the env vars for you), or set
+`INNGEST_EVENT_KEY`/`INNGEST_SIGNING_KEY` manually.
+
 ## 4. Run it
 
 ```
@@ -94,7 +121,8 @@ renders with a "database not connected yet" notice instead of crashing.
 
 ## Not wired up yet (future phases, see PLAN.md)
 
-- URL / YouTube / PDF / docx / xlsx auto-ingestion pipeline (uploads work;
-  turning an uploaded PDF into a summarized/tagged page is the next step)
-- Inngest background jobs
 - Obsidian one-way sync
+- Images/video don't go through auto-ingestion yet — the intake form only
+  handles PDF/docx/xlsx/URLs/YouTube; attach images/video to an existing
+  note via the upload widget on the note page instead
+- No manual "edit an existing note" UI, and no publish/unpublish toggle

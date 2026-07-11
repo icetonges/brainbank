@@ -5,17 +5,19 @@ becomes a connected page structured as **what → how → why**. See
 [`PLAN.md`](./PLAN.md) for the full architecture and requirements plan, and
 [`SETUP.md`](./SETUP.md) to run this locally.
 
-**Status:** Phase 1 + AI layer + graph + uploads — app scaffold, database
-schema, single-owner auth, the dark/light theme shell, a provider-agnostic
-AI chain (AI Assist, translate, summarize, tag suggestions), an interactive
-Obsidian-style [[wikilink]] graph, and direct-to-R2/Cloudinary file uploads
-are in place. The auto-ingestion pipeline (turning an uploaded file or
-pasted URL into a summarized page) is next.
+**Status:** Phases 1–6 — app scaffold, database schema, single-owner auth,
+the dark/light theme shell, a provider-agnostic AI chain (AI Assist,
+translate, summarize, tag suggestions), an interactive Obsidian-style
+[[wikilink]] graph, direct-to-R2/Cloudinary file uploads, and a background
+ingestion pipeline (paste a URL/YouTube link or upload a PDF/docx/xlsx and
+get a drafted what/how/why/other page back, via Inngest) are all in place.
+Obsidian sync and note editing/publish-state UI are next.
 
 ## Stack
 
 Next.js (App Router) · Neon Postgres + Drizzle ORM · NextAuth (single owner
 account) · Tailwind CSS v4 · Vercel AI SDK (Google / Groq / Anthropic) ·
+Cloudflare R2 + Cloudinary (storage) · Inngest (background jobs) ·
 deployed on Vercel.
 
 ## Quick start

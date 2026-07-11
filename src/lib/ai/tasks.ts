@@ -20,13 +20,14 @@ import { DEFAULT_MODEL_ID, type ModelId } from "./models";
 // override, so the AI Assist panel's model picker can point any task at
 // any registered model.
 
-export type TaskName = "assist" | "summarize" | "tag-and-link" | "translate";
+export type TaskName = "assist" | "summarize" | "tag-and-link" | "translate" | "draft";
 
 export const TASK_MODELS: Record<TaskName, ModelId> = {
   assist: DEFAULT_MODEL_ID,
   summarize: "gemini-3.1-flash-lite",
   "tag-and-link": "gemini-3.1-flash-lite",
   translate: DEFAULT_MODEL_ID,
+  draft: DEFAULT_MODEL_ID,
 };
 
 function modelFor(task: TaskName, override?: ModelId) {
@@ -152,4 +153,56 @@ export function streamAssist(messages: ModelMessage[], modelId?: ModelId) {
       "You are the AI assist panel inside brainbank, a personal knowledge base. Help the user draft or refine a note's What (the concept/fact), How (mechanism or steps), and Why (context/reasoning). Be concise and concrete; prefer structured, scannable answers over long prose.",
     messages,
   });
+}
+
+// --- draft (ingestion pipeline: raw extracted text -> a structured note) ---
+
+const draftedNoteSchema = z.object({
+  title: z
+    .string()
+    .describe("A concise, specific title for this note (not just the source's own title if a better one fits the content)"),
+  what: z.string().describe("The core concept or fact, in your own words"),
+  how: z.string().describe("The mechanism, process, or steps to apply it — empty string if not applicable"),
+  why: z.string().describe("The context, reasoning, or motivation behind it — empty string if not applicable"),
+  other: z.string().describe("Anything else worth keeping: caveats, open questions — empty string if none"),
+  summary: z.string().describe("A single dense sentence summarizing the note"),
+  tags: z
+    .array(z.string())
+    .describe("3-6 short lowercase tags, reusable across notes"),
+});
+
+export type DraftedNote = z.infer<typeof draftedNoteSchema>;
+
+export interface DraftSourceInput {
+  sourceTitle: string;
+  sourceText: string;
+  sourceUrl?: string | null;
+}
+
+/**
+ * Turns raw extracted text (from a URL, YouTube transcript, PDF, docx, or
+ * xlsx — see src/lib/ingest/extract.ts) into a structured note in the
+ * app's what/how/why/other template, with a summary and starter tags.
+ * This is the one step in the ingestion pipeline that has to be an LLM —
+ * everything upstream of it (fetching, parsing) is plain code per
+ * PLAN.md §13.
+ */
+export async function draftNoteFromSource(
+  input: DraftSourceInput,
+  modelId?: ModelId,
+): Promise<DraftedNote> {
+  const { object } = await generateObject({
+    model: modelFor("draft", modelId),
+    schema: draftedNoteSchema,
+    system:
+      "You turn raw source material into a personal knowledge-base note using the what/how/why/other template: what is the core idea, how does it work or get applied, why does it matter, and anything else worth keeping. Be concrete and specific to the source, not generic. Leave a field as an empty string if the source genuinely has nothing for it — don't pad.",
+    prompt: [
+      `Source title: ${input.sourceTitle}`,
+      input.sourceUrl ? `Source URL: ${input.sourceUrl}` : null,
+      `Source text:\n${input.sourceText}`,
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
+  });
+  return object;
 }
