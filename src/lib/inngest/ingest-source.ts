@@ -19,6 +19,30 @@ export interface IngestEventData {
   rawText?: string;
 }
 
+/** Executes one ingestion without depending on Inngest Cloud registration. */
+export async function runIngestionDirect(data: IngestEventData) {
+  const { noteId, sourceType, sourceUrl, mediaUrl, filename, rawText } = data;
+
+  try {
+    await markJobRunning(noteId, "extracting");
+    const extracted = await extractSource({ sourceType, sourceUrl, mediaUrl, filename, rawText });
+    await markJobStage(noteId, "drafting");
+    const draft = await draftNoteFromSource({
+      sourceTitle: extracted.title,
+      sourceText: extracted.text,
+      sourceUrl,
+    });
+    await markJobStage(noteId, "saving");
+    const slug = await saveDraftedNote(noteId, draft, extracted.imageUrl);
+    await markJobSucceeded(noteId);
+    return { noteId, slug };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Ingestion failed";
+    await markJobFailed(noteId, message);
+    throw err;
+  }
+}
+
 // The full pipeline from PLAN.md §5: fetch/parse the source (plain code,
 // see src/lib/ingest/extract.ts) → draft a what/how/why/other note from it
 // (the one LLM step, tasks.ts) → save. Runs as a background job because
@@ -31,36 +55,8 @@ export const ingestSource = inngest.createFunction(
     triggers: [{ event: "note/ingest.requested" }],
   },
   async ({ event, step }) => {
-    const { noteId, sourceType, sourceUrl, mediaUrl, filename, rawText } = event.data as IngestEventData;
-
-    try {
-      await step.run("mark-running", () => markJobRunning(noteId, "extracting"));
-
-      const extracted = await step.run("extract", () =>
-        extractSource({ sourceType, sourceUrl, mediaUrl, filename, rawText }),
-      );
-
-      await step.run("mark-drafting", () => markJobStage(noteId, "drafting"));
-
-      const draft = await step.run("draft", () =>
-        draftNoteFromSource({
-          sourceTitle: extracted.title,
-          sourceText: extracted.text,
-          sourceUrl,
-        }),
-      );
-
-      await step.run("mark-saving", () => markJobStage(noteId, "saving"));
-
-      const slug = await step.run("save", () => saveDraftedNote(noteId, draft, extracted.imageUrl));
-
-      await step.run("mark-succeeded", () => markJobSucceeded(noteId));
-
-      return { noteId, slug };
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Ingestion failed";
-      await step.run("mark-failed", () => markJobFailed(noteId, message));
-      throw err;
-    }
+    return step.run("process-ingestion", () =>
+      runIngestionDirect(event.data as IngestEventData),
+    );
   },
 );

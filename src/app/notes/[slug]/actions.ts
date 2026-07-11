@@ -8,7 +8,7 @@ import { eq, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { translateNote, summarizeNote, suggestTags } from "@/lib/ai/tasks";
-import { inngest } from "@/lib/inngest/client";
+import { dispatchIngestionJob } from "@/lib/background-jobs";
 import type { ModelId } from "@/lib/ai/models";
 import { linkWikilinksFromText } from "@/lib/notes/link-wikilinks";
 
@@ -183,15 +183,12 @@ export async function retryIngestionAction(noteId: number, slug: string) {
 
   await db.insert(ingestionJobs).values({ noteId, status: "queued", stage: "queued" });
 
-  await inngest.send({
-    name: "note/ingest.requested",
-    data: {
-      noteId,
-      sourceType: note.sourceType,
-      sourceUrl: note.sourceUrl ?? undefined,
-      mediaUrl,
-      filename,
-    },
+  dispatchIngestionJob({
+    noteId,
+    sourceType: note.sourceType,
+    sourceUrl: note.sourceUrl ?? undefined,
+    mediaUrl,
+    filename,
   });
 
   revalidatePath(`/notes/${slug}`);

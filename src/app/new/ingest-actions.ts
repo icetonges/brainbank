@@ -5,7 +5,7 @@ import { db } from "@/lib/db";
 import { notes, noteContent, ingestionJobs, media } from "@/lib/db/schema";
 import type { SourceType, MediaKind } from "@/lib/db/schema";
 import { slugify } from "@/lib/slug";
-import { inngest } from "@/lib/inngest/client";
+import { dispatchIngestionJob } from "@/lib/background-jobs";
 import { redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { assertSafePublicUrl } from "@/lib/intake";
@@ -65,10 +65,7 @@ export async function startUrlIngestion(formData: FormData) {
   const sourceType: SourceType = isYoutubeUrl(url) ? "youtube" : "url";
   const { noteId, slug } = await createPendingNote(parsed.hostname, sourceType, url);
 
-  await inngest.send({
-    name: "note/ingest.requested",
-    data: { noteId, sourceType, sourceUrl: url },
-  });
+  dispatchIngestionJob({ noteId, sourceType, sourceUrl: url });
 
   redirect(`/notes/${slug}`);
 }
@@ -82,10 +79,7 @@ export async function startTextIngestion(formData: FormData) {
 
   const firstLine = text.split(/\r?\n/).find(Boolean)?.slice(0, 80) || "Text capture";
   const { noteId, slug } = await createPendingNote(firstLine, "manual");
-  await inngest.send({
-    name: "note/ingest.requested",
-    data: { noteId, sourceType: "manual", rawText: text },
-  });
+  dispatchIngestionJob({ noteId, sourceType: "manual", rawText: text });
   redirect(`/notes/${slug}`);
 }
 
@@ -127,10 +121,7 @@ export async function startFileIngestion(
     await db.insert(media).values({ noteId, kind, provider: "r2", url: mediaUrl, mimeType: null });
   }
 
-  await inngest.send({
-    name: "note/ingest.requested",
-    data: { noteId, sourceType, mediaUrl, filename },
-  });
+  dispatchIngestionJob({ noteId, sourceType, mediaUrl, filename });
 
   return { slug: note.slug };
 }

@@ -1,7 +1,8 @@
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import { obsidianSyncRuns } from "@/lib/db/schema";
-import { desc } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
+import { staleJobMessage } from "@/lib/job-health";
 
 export const runtime = "nodejs";
 
@@ -17,6 +18,21 @@ export async function GET() {
 
   if (!run) {
     return Response.json({ status: null, filesTotal: null, filesProcessed: 0, filesFailed: 0, error: null });
+  }
+
+  const staleError = staleJobMessage(run.status, run.startedAt ?? run.createdAt);
+  if (staleError) {
+    await db
+      .update(obsidianSyncRuns)
+      .set({ status: "failed", error: staleError, finishedAt: new Date() })
+      .where(eq(obsidianSyncRuns.id, run.id));
+    return Response.json({
+      status: "failed",
+      filesTotal: run.filesTotal,
+      filesProcessed: run.filesProcessed,
+      filesFailed: run.filesFailed,
+      error: staleError,
+    });
   }
 
   return Response.json({

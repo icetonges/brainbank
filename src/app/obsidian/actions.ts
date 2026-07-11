@@ -1,7 +1,7 @@
 "use server";
 
 import { auth } from "@/auth";
-import { inngest } from "@/lib/inngest/client";
+import { dispatchObsidianSync } from "@/lib/background-jobs";
 import { createSyncRun } from "@/lib/obsidian/persist";
 import { isObsidianSyncConfigured } from "@/lib/obsidian/github";
 import { revalidatePath } from "next/cache";
@@ -15,10 +15,7 @@ export async function triggerObsidianSyncAction() {
 
   const runId = await createSyncRun();
 
-  await inngest.send({
-    name: "obsidian/sync.requested",
-    data: { runId },
-  });
+  dispatchObsidianSync(runId);
 
   revalidatePath("/obsidian");
 }
