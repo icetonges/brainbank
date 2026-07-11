@@ -32,6 +32,8 @@ export const mediaKindEnum = pgEnum("media_kind", [
   "other",
 ]);
 export const mediaProviderEnum = pgEnum("media_provider", ["cloudinary", "r2"]);
+export type MediaKind = (typeof mediaKindEnum.enumValues)[number];
+export type MediaProvider = (typeof mediaProviderEnum.enumValues)[number];
 export const edgeTypeEnum = pgEnum("edge_type", [
   "link",
   "related",

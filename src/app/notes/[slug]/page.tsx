@@ -1,10 +1,12 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
-import { notes, noteContent, noteTags, tags as tagsTable } from "@/lib/db/schema";
+import { notes, noteContent, noteTags, tags as tagsTable, media as mediaTable } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
 import { renderWithWikilinks } from "@/lib/notes/render-wikilinks";
+import { UploadWidget } from "@/components/upload-widget";
+import { MediaGallery } from "@/components/media-gallery";
 import {
   translateNoteAction,
   summarizeNoteAction,
@@ -43,6 +45,17 @@ export default async function NotePage({
   // For resolving [[Wikilinks]] in the body text to real /notes/<slug> links.
   const allNotes = await db.select({ title: notes.title, slug: notes.slug }).from(notes);
   const titleToSlug = new Map(allNotes.map((n) => [n.title.toLowerCase(), n.slug]));
+
+  const mediaRows = await db
+    .select({
+      id: mediaTable.id,
+      kind: mediaTable.kind,
+      url: mediaTable.url,
+      mimeType: mediaTable.mimeType,
+      sizeBytes: mediaTable.sizeBytes,
+    })
+    .from(mediaTable)
+    .where(eq(mediaTable.noteId, note.id));
 
   const translateAction = translateNoteAction.bind(null, note.id, slug, otherLanguage, undefined);
   const summarizeAction = summarizeNoteAction.bind(null, note.id, slug, language, undefined);
@@ -129,6 +142,14 @@ export default async function NotePage({
       <Layer title="How" body={content?.how} titleToSlug={titleToSlug} />
       <Layer title="Why" body={content?.why} titleToSlug={titleToSlug} />
       <Layer title="Other" body={content?.other} titleToSlug={titleToSlug} />
+
+      <MediaGallery items={mediaRows} slug={slug} canEdit={Boolean(session)} />
+
+      {session && (
+        <div className="rounded-lg border border-dashed border-border p-4">
+          <UploadWidget noteId={note.id} slug={slug} />
+        </div>
+      )}
     </article>
   );
 }

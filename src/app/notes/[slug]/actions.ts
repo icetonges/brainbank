@@ -2,7 +2,8 @@
 
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
-import { notes, noteContent, tags, noteTags } from "@/lib/db/schema";
+import { notes, noteContent, tags, noteTags, media } from "@/lib/db/schema";
+import type { MediaKind, MediaProvider } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { translateNote, summarizeNote, suggestTags } from "@/lib/ai/tasks";
@@ -126,5 +127,36 @@ export async function suggestTagsAction(
     }
   }
 
+  revalidatePath(`/notes/${slug}`);
+}
+
+export async function attachMediaAction(
+  noteId: number,
+  slug: string,
+  input: {
+    kind: MediaKind;
+    provider: MediaProvider;
+    url: string;
+    sizeBytes: number;
+    mimeType: string;
+  },
+) {
+  await requireOwner();
+
+  await db.insert(media).values({
+    noteId,
+    kind: input.kind,
+    provider: input.provider,
+    url: input.url,
+    sizeBytes: input.sizeBytes,
+    mimeType: input.mimeType,
+  });
+
+  revalidatePath(`/notes/${slug}`);
+}
+
+export async function deleteMediaAction(mediaId: number, slug: string) {
+  await requireOwner();
+  await db.delete(media).where(eq(media.id, mediaId));
   revalidatePath(`/notes/${slug}`);
 }

@@ -5,11 +5,12 @@ becomes a connected page structured as **what → how → why**. See
 [`PLAN.md`](./PLAN.md) for the full architecture and requirements plan, and
 [`SETUP.md`](./SETUP.md) to run this locally.
 
-**Status:** Phase 1 + AI layer + graph — app scaffold, database schema,
-single-owner auth, the dark/light theme shell, a provider-agnostic AI chain
-(AI Assist, translate, summarize, tag suggestions), and an interactive
-Obsidian-style [[wikilink]] graph are in place. Uploads and the
-auto-ingestion pipeline come in later phases.
+**Status:** Phase 1 + AI layer + graph + uploads — app scaffold, database
+schema, single-owner auth, the dark/light theme shell, a provider-agnostic
+AI chain (AI Assist, translate, summarize, tag suggestions), an interactive
+Obsidian-style [[wikilink]] graph, and direct-to-R2/Cloudinary file uploads
+are in place. The auto-ingestion pipeline (turning an uploaded file or
+pasted URL into a summarized page) is next.
 
 ## Stack
 

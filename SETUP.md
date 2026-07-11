@@ -2,9 +2,9 @@
 
 Phase 1 is scaffolded: Next.js app, database schema, single-owner auth, and
 the dark/light theme shell. The AI layer (model registry, AI Assist,
-translate/summarize/tag) is wired up too — see step 3. Uploads, the
-ingestion pipeline, background jobs, and the interactive graph come in
-later phases per `PLAN.md`.
+translate/summarize/tag), the interactive graph, and file uploads
+(Cloudflare R2 + Cloudinary) are wired up too — see steps 3 and 3c. The
+ingestion pipeline and background jobs come in later phases per `PLAN.md`.
 
 ## 1. Install
 
@@ -53,6 +53,29 @@ Summarize / Suggest tags on a note page — runs through
 new model means adding one entry to `src/lib/ai/models.ts`; nothing else
 needs to change.
 
+## 3c. Uploads (optional, but the upload button on a note page needs both)
+
+- **Cloudflare R2** (free tier, 10GB) — for anything that isn't an image or
+  video: PDFs, docx, xlsx, md, 50MB+ files.
+  1. Create an R2 bucket at https://dash.cloudflare.com → R2
+  2. Create an API token scoped to that bucket → `R2_ACCOUNT_ID`,
+     `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`
+  3. Set `R2_BUCKET` to the bucket name
+  4. Enable public access (or a custom domain) on the bucket and set
+     `R2_PUBLIC_URL` to that base URL — this is what note pages link to
+- **Cloudinary** (free tier) — for images and video, so they render with
+  Cloudinary's CDN/transformations instead of just linking out.
+  1. Sign up at https://cloudinary.com, grab your Dashboard's cloud name,
+     API key, and API secret → `CLOUDINARY_CLOUD_NAME`,
+     `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`
+
+Uploads go straight from your browser to R2/Cloudinary using a short-lived
+signed URL from `/api/upload/sign` (`src/lib/storage/`) — file bytes never
+pass through a Vercel function, which caps request bodies at 4.5MB. Which
+provider a file goes to is decided by mime type
+(`src/lib/storage/media-kind.ts`): images/video → Cloudinary, everything
+else → R2.
+
 ## 4. Run it
 
 ```
@@ -71,7 +94,7 @@ renders with a "database not connected yet" notice instead of crashing.
 
 ## Not wired up yet (future phases, see PLAN.md)
 
-- Cloudflare R2 / Cloudinary uploads
-- URL / YouTube / PDF / docx / xlsx ingestion pipeline
+- URL / YouTube / PDF / docx / xlsx auto-ingestion pipeline (uploads work;
+  turning an uploaded PDF into a summarized/tagged page is the next step)
 - Inngest background jobs
 - Obsidian one-way sync
