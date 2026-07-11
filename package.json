@@ -13,15 +13,20 @@
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.12",
+    "@ai-sdk/google": "^4.0.12",
+    "@ai-sdk/groq": "^4.0.7",
+    "@ai-sdk/react": "^4.0.23",
     "@neondatabase/serverless": "^1.1.0",
+    "@next/env": "^16.2.10",
+    "ai": "^7.0.22",
     "bcryptjs": "^3.0.3",
     "drizzle-orm": "^0.45.2",
     "next": "16.2.10",
     "next-auth": "^5.0.0-beta.31",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "zod": "^4.4.3",
-    "@next/env": "^16.2.10"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

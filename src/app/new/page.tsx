@@ -1,4 +1,5 @@
 import { createNote } from "./actions";
+import { AiAssistPanel } from "@/components/ai-assist-panel";
 
 export default function NewNotePage() {
   return (
@@ -11,6 +12,8 @@ export default function NewNotePage() {
           §5).
         </p>
       </div>
+
+      <AiAssistPanel />
 
       <form action={createNote} className="flex flex-col gap-5">
         <Field label="Title" name="title" required />

@@ -1,9 +1,10 @@
 # Local setup
 
 Phase 1 is scaffolded: Next.js app, database schema, single-owner auth, and
-the dark/light theme shell. Nothing external is wired up yet except what's
-below — everything else (uploads, ingestion pipeline, AI tasks, graph data)
-comes in later phases per `PLAN.md`.
+the dark/light theme shell. The AI layer (model registry, AI Assist,
+translate/summarize/tag) is wired up too — see step 3. Uploads, the
+ingestion pipeline, background jobs, and the interactive graph come in
+later phases per `PLAN.md`.
 
 ## 1. Install
 
@@ -33,6 +34,25 @@ node -e "console.log(require('bcryptjs').hashSync('your-password', 10))"
 Put the printed hash into `OWNER_PASSWORD_HASH`, and your email into
 `OWNER_EMAIL`. That's the only account the app has.
 
+## 3b. AI providers (optional, but AI Assist / translate / tag need at least one)
+
+The model picker (`src/lib/ai/models.ts`) lists models from Google, Groq,
+and Anthropic. You only need a key for the provider(s) you want to use —
+the app works fine with zero AI keys set, those features just show an error
+when clicked until a key is added.
+
+- **Google AI Studio** (free, powers the default model): key at
+  https://aistudio.google.com/apikey → `GOOGLE_GENERATIVE_AI_API_KEY`
+- **Groq** (free, fastest): key at https://console.groq.com/keys →
+  `GROQ_API_KEY`
+- **Anthropic** (paid): `ANTHROPIC_API_KEY`
+
+Everything AI-related — the AI Assist panel on `/new`, and Translate /
+Summarize / Suggest tags on a note page — runs through
+`src/lib/ai/tasks.ts`, which is the only file that calls a model. Adding a
+new model means adding one entry to `src/lib/ai/models.ts`; nothing else
+needs to change.
+
 ## 4. Run it
 
 ```
@@ -54,6 +74,5 @@ renders with a "database not connected yet" notice instead of crashing.
 - Cloudflare R2 / Cloudinary uploads
 - URL / YouTube / PDF / docx / xlsx ingestion pipeline
 - Inngest background jobs
-- AI task registry (summarize/tag/translate/link-suggest)
 - Interactive graph (currently a placeholder page)
 - Obsidian one-way sync
