@@ -21,6 +21,7 @@ export const sourceTypeEnum = pgEnum("source_type", [
   "xlsx",
   "image",
   "video",
+  "obsidian",
 ]);
 export const languageEnum = pgEnum("language", ["en", "zh"]);
 export const mediaKindEnum = pgEnum("media_kind", [
@@ -67,6 +68,12 @@ export const notes = pgTable("notes", {
   status: noteStatusEnum("status").default("draft").notNull(),
   sourceType: sourceTypeEnum("source_type").default("manual").notNull(),
   sourceUrl: text("source_url"),
+  // Set only for notes synced in from an Obsidian vault (source_type
+  // "obsidian") — the file's path within the vault repo (e.g.
+  // "notes/foo.md") and its git blob sha, used to detect changed files on
+  // the next sync without re-fetching/re-diffing every file's content.
+  sourcePath: text("source_path"),
+  sourceSha: varchar("source_sha", { length: 64 }),
   primaryLanguage: languageEnum("primary_language").default("en").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
@@ -134,6 +141,22 @@ export const ingestionJobs = pgTable("ingestion_jobs", {
   noteId: integer("note_id").references(() => notes.id, { onDelete: "cascade" }),
   status: jobStatusEnum("status").default("queued").notNull(),
   stage: varchar("stage", { length: 100 }),
+  error: text("error"),
+  startedAt: timestamp("started_at", { withTimezone: true }),
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// Tracks one run of the Obsidian one-way sync (PLAN.md §8) — a single
+// vault-wide pass, as opposed to ingestion_jobs which tracks one source
+// (URL/file) each. filesTotal/filesProcessed/filesFailed let the UI show
+// progress across a vault with many notes.
+export const obsidianSyncRuns = pgTable("obsidian_sync_runs", {
+  id: serial("id").primaryKey(),
+  status: jobStatusEnum("status").default("queued").notNull(),
+  filesTotal: integer("files_total"),
+  filesProcessed: integer("files_processed").default(0),
+  filesFailed: integer("files_failed").default(0),
   error: text("error"),
   startedAt: timestamp("started_at", { withTimezone: true }),
   finishedAt: timestamp("finished_at", { withTimezone: true }),

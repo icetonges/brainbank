@@ -43,6 +43,12 @@ export async function Header() {
           {session ? (
             <>
               <Link
+                href="/obsidian"
+                className="rounded-md px-3 py-1.5 text-sm font-medium text-fg-secondary hover:text-accent transition-colors"
+              >
+                Obsidian
+              </Link>
+              <Link
                 href="/new"
                 className="rounded-md bg-accent px-3 py-1.5 text-sm font-semibold text-accent-fg hover:opacity-90 transition-opacity"
               >

@@ -3,9 +3,10 @@
 Phase 1 is scaffolded: Next.js app, database schema, single-owner auth, and
 the dark/light theme shell. The AI layer (model registry, AI Assist,
 translate/summarize/tag), the interactive graph, file uploads (Cloudflare
-R2 + Cloudinary), and the auto-ingestion pipeline (paste a URL/YouTube
-link or upload a PDF/docx/xlsx and get a drafted page back) are all wired
-up — see steps 3, 3c, and 3d.
+R2 + Cloudinary), the auto-ingestion pipeline (paste a URL/YouTube link or
+upload a PDF/docx/xlsx and get a drafted page back), note editing/status/
+delete, search, and Obsidian one-way sync are all wired up — see steps 3,
+3c, 3d, and 3e.
 
 ## 1. Install
 
@@ -103,26 +104,16 @@ connect your Vercel project (there's an official Inngest×Vercel
 integration that sets the env vars for you), or set
 `INNGEST_EVENT_KEY`/`INNGEST_SIGNING_KEY` manually.
 
-## 4. Run it
+## 3e. Obsidian sync (optional — one-way, vault → site)
 
-```
-npm run dev
-```
+Lets you write notes in Obsidian and pull them in, instead of (or
+alongside) using the web app's own editor (PLAN.md §8).
 
-Visit http://localhost:3000. Without `DATABASE_URL` set, the homepage still
-renders with a "database not connected yet" notice instead of crashing.
-
-## 5. Deploy (Vercel)
-
-1. `vercel link` (or import the GitHub repo in the Vercel dashboard)
-2. Add every variable from `.env.example` to the Vercel project's
-   Environment Variables
-3. Push to `main` — Vercel deploys automatically
-
-## Not wired up yet (future phases, see PLAN.md)
-
-- Obsidian one-way sync
-- Images/video don't go through auto-ingestion yet — the intake form only
-  handles PDF/docx/xlsx/URLs/YouTube; attach images/video to an existing
-  note via the upload widget on the note page instead
-- No manual "edit an existing note" UI, and no publish/unpublish toggle
+1. Push your vault, or just the notes you want synced, to a `notes/`
+   folder in a GitHub repo — the same `brainbank` repo or a separate
+   private one both work. The
+   [Obsidian Git plugin](https://github.com/denolehov/obsidian-git) can
+   automate the push, or just `git add`/`commit`/`push` by hand.
+2. Create a GitHub personal access token with read-only access to that
+   repo's contents (a fine-grained PAT scoped to just that repo is enough:
+   https://github.com/settings/tokens?type=beta) → `GITHUB_TOKEN
