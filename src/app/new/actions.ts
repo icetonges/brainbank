@@ -6,6 +6,7 @@ import { notes, noteContent } from "@/lib/db/schema";
 import { slugify } from "@/lib/slug";
 import { redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
+import { linkWikilinksFromText } from "@/lib/notes/link-wikilinks";
 
 export async function createNote(formData: FormData) {
   const session = await auth();
@@ -48,6 +49,9 @@ export async function createNote(formData: FormData) {
     why,
     other,
   });
+
+  // [[Wikilinks]] in any of these fields become graph edges automatically.
+  await linkWikilinksFromText(note.id, what, how, why, other);
 
   redirect(`/notes/${slug}`);
 }

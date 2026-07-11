@@ -14,17 +14,18 @@ import { DEFAULT_MODEL_ID, type ModelId } from "./models";
 // server actions call `summarizeNote()` / `translateText()` / etc., never
 // `resolveModel()` or an @ai-sdk/* package themselves.
 //
-// Each task has a default model tuned for that job (fast+free for cheap
-// mechanical tasks, the flagship free model for anything that needs more
-// care) but every function accepts an explicit override, so the AI Assist
-// panel's model picker can point any task at any registered model.
+// Each task has a default model tuned for that job (the cheapest capable
+// model for high-volume mechanical tasks, the flagship default for
+// anything that needs more care) but every function accepts an explicit
+// override, so the AI Assist panel's model picker can point any task at
+// any registered model.
 
 export type TaskName = "assist" | "summarize" | "tag-and-link" | "translate";
 
 export const TASK_MODELS: Record<TaskName, ModelId> = {
   assist: DEFAULT_MODEL_ID,
-  summarize: "gemini-2.5-flash-lite",
-  "tag-and-link": "gemini-2.5-flash-lite",
+  summarize: "gemini-3.1-flash-lite",
+  "tag-and-link": "gemini-3.1-flash-lite",
   translate: DEFAULT_MODEL_ID,
 };
 

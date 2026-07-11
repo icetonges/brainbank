@@ -4,6 +4,7 @@ import { notes, noteContent, noteTags, tags as tagsTable } from "@/lib/db/schema
 import { eq, and } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
+import { renderWithWikilinks } from "@/lib/notes/render-wikilinks";
 import {
   translateNoteAction,
   summarizeNoteAction,
@@ -38,6 +39,10 @@ export default async function NotePage({
     .from(noteTags)
     .innerJoin(tagsTable, eq(noteTags.tagId, tagsTable.id))
     .where(eq(noteTags.noteId, note.id));
+
+  // For resolving [[Wikilinks]] in the body text to real /notes/<slug> links.
+  const allNotes = await db.select({ title: notes.title, slug: notes.slug }).from(notes);
+  const titleToSlug = new Map(allNotes.map((n) => [n.title.toLowerCase(), n.slug]));
 
   const translateAction = translateNoteAction.bind(null, note.id, slug, otherLanguage, undefined);
   const summarizeAction = summarizeNoteAction.bind(null, note.id, slug, language, undefined);
@@ -96,6 +101,12 @@ export default async function NotePage({
           <form action={tagAction}>
             <ActionButton disabled={!content}>Suggest tags</ActionButton>
           </form>
+          <Link
+            href="/graph"
+            className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-fg-secondary hover:border-accent hover:text-accent transition-colors"
+          >
+            View in graph
+          </Link>
         </div>
       )}
 
@@ -114,10 +125,10 @@ export default async function NotePage({
         </p>
       )}
 
-      <Layer title="What" body={content?.what} />
-      <Layer title="How" body={content?.how} />
-      <Layer title="Why" body={content?.why} />
-      <Layer title="Other" body={content?.other} />
+      <Layer title="What" body={content?.what} titleToSlug={titleToSlug} />
+      <Layer title="How" body={content?.how} titleToSlug={titleToSlug} />
+      <Layer title="Why" body={content?.why} titleToSlug={titleToSlug} />
+      <Layer title="Other" body={content?.other} titleToSlug={titleToSlug} />
     </article>
   );
 }
@@ -140,14 +151,24 @@ function ActionButton({
   );
 }
 
-function Layer({ title, body }: { title: string; body?: string | null }) {
+function Layer({
+  title,
+  body,
+  titleToSlug,
+}: {
+  title: string;
+  body?: string | null;
+  titleToSlug: Map<string, string>;
+}) {
   if (!body) return null;
   return (
     <section className="rounded-lg border border-border bg-bg-elevated p-5">
       <h2 className="text-sm font-semibold uppercase tracking-wide text-accent">
         {title}
       </h2>
-      <p className="mt-2 whitespace-pre-wrap text-fg">{body}</p>
+      <p className="mt-2 whitespace-pre-wrap text-fg">
+        {renderWithWikilinks(body, titleToSlug)}
+      </p>
     </section>
   );
 }

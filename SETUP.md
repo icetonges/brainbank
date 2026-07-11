@@ -74,5 +74,4 @@ renders with a "database not connected yet" notice instead of crashing.
 - Cloudflare R2 / Cloudinary uploads
 - URL / YouTube / PDF / docx / xlsx ingestion pipeline
 - Inngest background jobs
-- Interactive graph (currently a placeholder page)
 - Obsidian one-way sync

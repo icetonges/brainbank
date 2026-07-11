@@ -5,11 +5,11 @@ becomes a connected page structured as **what → how → why**. See
 [`PLAN.md`](./PLAN.md) for the full architecture and requirements plan, and
 [`SETUP.md`](./SETUP.md) to run this locally.
 
-**Status:** Phase 1 + AI layer — app scaffold, database schema,
-single-owner auth, the dark/light theme shell, and a provider-agnostic AI
-chain (AI Assist, translate, summarize, tag suggestions) are in place.
-Uploads, the auto-ingestion pipeline, and the interactive graph come in
-later phases.
+**Status:** Phase 1 + AI layer + graph — app scaffold, database schema,
+single-owner auth, the dark/light theme shell, a provider-agnostic AI chain
+(AI Assist, translate, summarize, tag suggestions), and an interactive
+Obsidian-style [[wikilink]] graph are in place. Uploads and the
+auto-ingestion pipeline come in later phases.
 
 ## Stack
 

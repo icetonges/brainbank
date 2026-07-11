@@ -9,7 +9,9 @@ export default function NewNotePage() {
         <p className="mt-1 text-fg-secondary">
           Manual entry today; pasting a URL, video link, or uploading a
           document to auto-build this page arrives in a later phase (PLAN.md
-          §5).
+          §5). Write{" "}
+          <code className="text-accent">[[Another Note&apos;s Title]]</code>{" "}
+          anywhere below to link it in the graph.
         </p>
       </div>
 

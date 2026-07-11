@@ -9,15 +9,15 @@
 export type ProviderId = "google" | "groq" | "anthropic";
 
 export type ModelId =
+  | "gemini-3.5-flash"
+  | "gemini-3.1-flash-lite"
   | "gemini-2.5-flash"
-  | "gemini-2.5-flash-lite"
-  | "groq/compound-beta"
-  | "meta-llama/llama-4-scout-17b-16e-instruct"
-  | "llama-3.3-70b-versatile"
-  | "llama-3.1-8b-instant"
-  | "gemma2-9b-it"
-  | "claude-sonnet-4-6"
-  | "claude-opus-4-6"
+  | "groq/compound"
+  | "openai/gpt-oss-120b"
+  | "openai/gpt-oss-20b"
+  | "qwen/qwen3.6-27b"
+  | "claude-sonnet-5"
+  | "claude-opus-4-8"
   | "claude-haiku-4-5-20251001";
 
 export interface ModelInfo {
@@ -37,131 +37,142 @@ export interface ModelInfo {
 }
 
 export const MODELS: ModelInfo[] = [
-  // Google Gemini (free via Google AI Studio)
+  // Google Gemini (via Google AI Studio)
+  {
+    id: "gemini-3.5-flash",
+    name: "Gemini 3.5 Flash",
+    provider: "google",
+    providerLabel: "Google",
+    providerColor: "#4285f4",
+    inputPricePer1M: 1.5,
+    outputPricePer1M: 9.0,
+    contextWindow: "1M",
+    description:
+      "Flagship value model - ultimate balance of intelligence, speed, and deep thinking capabilities.",
+    isFree: false,
+    supportsVision: true,
+    isDefault: true,
+    badge: "Recommended",
+  },
+  {
+    id: "gemini-3.1-flash-lite",
+    name: "Gemini 3.1 Flash-Lite",
+    provider: "google",
+    providerLabel: "Google",
+    providerColor: "#4285f4",
+    inputPricePer1M: 0.25,
+    outputPricePer1M: 1.5,
+    contextWindow: "1M",
+    description:
+      "High-volume agentic tasks - ultra-low latency option optimized for massive scale.",
+    isFree: false,
+    supportsVision: true,
+  },
   {
     id: "gemini-2.5-flash",
     name: "Gemini 2.5 Flash",
     provider: "google",
     providerLabel: "Google",
     providerColor: "#4285f4",
-    inputPricePer1M: 0,
-    outputPricePer1M: 0,
-    description: "Best free model - 1M context - thinking mode",
+    inputPricePer1M: 0.3,
+    outputPricePer1M: 2.5,
     contextWindow: "1M",
-    isFree: true,
+    description:
+      "Proven reasoning staple - exceptional price-to-performance ratio with 1M token context.",
+    isFree: false,
     supportsVision: true,
-    isDefault: true,
-    badge: "Recommended",
-  },
-  {
-    id: "gemini-2.5-flash-lite",
-    name: "Gemini 2.5 Flash-Lite",
-    provider: "google",
-    providerLabel: "Google",
-    providerColor: "#4285f4",
-    inputPricePer1M: 0,
-    outputPricePer1M: 0,
-    description: "Fastest and most budget-friendly - 1M context",
-    contextWindow: "1M",
-    isFree: true,
-    supportsVision: true,
-    badge: "Fastest",
   },
 
-  // Groq -- Compound (agentic, built-in web search)
+  // Groq -- Compound (agentic, built-in web search + code execution).
+  // GA since Oct 1, 2025 — 'compound-beta' no longer exists.
   {
-    id: "groq/compound-beta",
-    name: "Compound Beta",
+    id: "groq/compound",
+    name: "Compound",
     provider: "groq",
     providerLabel: "Groq",
     providerColor: "#f55036",
     inputPricePer1M: 0,
     outputPricePer1M: 0,
-    description: "Agentic - built-in web search - auto tool use",
+    description:
+      "Agentic system - built-in web search & code execution - up to 10 tool calls/request",
     contextWindow: "128K",
     isFree: true,
     supportsVision: false,
-    badge: "New",
+    badge: "Agentic",
   },
 
-  // Groq -- Llama (free tier, ultra-fast)
+  // Groq -- OpenAI GPT-OSS. Groq's official replacements for the
+  // deprecated Llama 3.x/4 lineup.
   {
-    id: "meta-llama/llama-4-scout-17b-16e-instruct",
-    name: "Llama 4 Scout",
+    id: "openai/gpt-oss-120b",
+    name: "GPT-OSS 120B",
     provider: "groq",
     providerLabel: "Groq",
     providerColor: "#f55036",
-    inputPricePer1M: 0,
-    outputPricePer1M: 0,
-    description: "Llama 4 - MoE architecture - vision - 128K",
+    inputPricePer1M: 0.15,
+    outputPricePer1M: 0.6,
+    description:
+      "Flagship open-weight reasoning model - replaces Llama 4 Scout & Llama 3.3 70B - 128K",
     contextWindow: "128K",
-    isFree: true,
-    supportsVision: true,
+    isFree: false,
+    supportsVision: false,
+    badge: "Recommended",
   },
   {
-    id: "llama-3.3-70b-versatile",
-    name: "Llama 3.3 70B",
+    id: "openai/gpt-oss-20b",
+    name: "GPT-OSS 20B",
     provider: "groq",
     providerLabel: "Groq",
     providerColor: "#f55036",
-    inputPricePer1M: 0,
-    outputPricePer1M: 0,
-    description: "Best Llama 3 - ultra-fast inference - 128K",
+    inputPricePer1M: 0.075,
+    outputPricePer1M: 0.3,
+    description:
+      "Lightweight & ultra-fast (~1000 t/s) - replaces Llama 3.1 8B Instant - 128K",
     contextWindow: "128K",
-    isFree: true,
+    isFree: false,
     supportsVision: false,
     badge: "Fast",
   },
   {
-    id: "llama-3.1-8b-instant",
-    name: "Llama 3.1 8B Instant",
+    id: "qwen/qwen3.6-27b",
+    name: "Qwen 3.6 27B",
     provider: "groq",
     providerLabel: "Groq",
     providerColor: "#f55036",
-    inputPricePer1M: 0,
-    outputPricePer1M: 0,
-    description: "Lightning-fast - great for simple tasks - 128K",
+    inputPricePer1M: 0.6,
+    outputPricePer1M: 3.0,
+    description:
+      "Multimodal (text + vision) - thinking/non-thinking modes - Groq preview - only vision option since Llama 4 Scout retires",
     contextWindow: "128K",
-    isFree: true,
-    supportsVision: false,
-  },
-  {
-    id: "gemma2-9b-it",
-    name: "Gemma 2 9B",
-    provider: "groq",
-    providerLabel: "Groq",
-    providerColor: "#f55036",
-    inputPricePer1M: 0,
-    outputPricePer1M: 0,
-    description: "Google's compact open model - 8K",
-    contextWindow: "8K",
-    isFree: true,
-    supportsVision: false,
+    isFree: false,
+    supportsVision: true,
+    badge: "Preview",
   },
 
   // Anthropic Claude (paid)
   {
-    id: "claude-sonnet-4-6",
-    name: "Claude Sonnet 4.6",
+    id: "claude-sonnet-5",
+    name: "Claude Sonnet 5",
     provider: "anthropic",
     providerLabel: "Anthropic",
     providerColor: "#c85a3a",
-    inputPricePer1M: 3,
-    outputPricePer1M: 15,
-    description: "Balanced performance - 200K",
+    inputPricePer1M: 2,
+    outputPricePer1M: 10,
+    description:
+      "Balanced performance - 200K - intro pricing through 8/31/26, then $3/$15",
     contextWindow: "200K",
     isFree: false,
     supportsVision: true,
     badge: "Balanced",
   },
   {
-    id: "claude-opus-4-6",
-    name: "Claude Opus 4.6",
+    id: "claude-opus-4-8",
+    name: "Claude Opus 4.8",
     provider: "anthropic",
     providerLabel: "Anthropic",
     providerColor: "#c85a3a",
-    inputPricePer1M: 15,
-    outputPricePer1M: 75,
+    inputPricePer1M: 5,
+    outputPricePer1M: 25,
     description: "Most capable - 200K",
     contextWindow: "200K",
     isFree: false,
@@ -173,8 +184,8 @@ export const MODELS: ModelInfo[] = [
     provider: "anthropic",
     providerLabel: "Anthropic",
     providerColor: "#c85a3a",
-    inputPricePer1M: 0.8,
-    outputPricePer1M: 4,
+    inputPricePer1M: 1,
+    outputPricePer1M: 5,
     description: "Fastest Anthropic model - 200K",
     contextWindow: "200K",
     isFree: false,
@@ -183,7 +194,7 @@ export const MODELS: ModelInfo[] = [
 ];
 
 export const DEFAULT_MODEL_ID: ModelId =
-  MODELS.find((m) => m.isDefault)?.id ?? "gemini-2.5-flash";
+  MODELS.find((m) => m.isDefault)?.id ?? "gemini-3.5-flash";
 
 export function getModel(id: ModelId): ModelInfo {
   const model = MODELS.find((m) => m.id === id);
