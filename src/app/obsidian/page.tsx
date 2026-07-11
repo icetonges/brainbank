@@ -63,4 +63,29 @@ export default async function ObsidianPage() {
               </p>
             ) : (
               <p className="mt-1">
-                Set <code className="text-accent">GITHUB_WEBHOOK_SECRET</code> and a
+                Set <code className="text-accent">GITHUB_WEBHOOK_SECRET</code> and add a GitHub push
+                webhook targeting <code className="text-accent">/api/obsidian-webhook</code>.
+              </p>
+            )}
+          </div>
+          <ObsidianSyncStatus
+            initialStatus={latestRun?.status ?? null}
+            initialFilesTotal={latestRun?.filesTotal ?? null}
+            initialFilesProcessed={latestRun?.filesProcessed ?? null}
+            initialFilesFailed={latestRun?.filesFailed ?? null}
+            initialError={latestRun?.error ?? null}
+          />
+          <form action={triggerObsidianSyncAction} className="mt-4">
+            <button
+              type="submit"
+              disabled={syncing}
+              className="rounded-md bg-accent px-4 py-2 text-sm font-semibold text-accent-fg hover:opacity-90 disabled:opacity-50 transition-opacity"
+            >
+              {syncing ? "Syncing…" : "Sync now"}
+            </button>
+          </form>
+        </div>
+      )}
+    </div>
+  );
+}

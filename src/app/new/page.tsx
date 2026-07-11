@@ -76,4 +76,36 @@ export default function NewNotePage() {
           type="submit"
           className="self-start rounded-md bg-accent px-4 py-2 font-semibold text-accent-fg hover:opacity-90 transition-opacity"
         >
-          Create p
+          Create page
+        </button>
+      </form>
+    </div>
+  );
+}
+
+function Field({
+  label,
+  name,
+  required,
+  textarea,
+}: {
+  label: string;
+  name: string;
+  required?: boolean;
+  textarea?: boolean;
+}) {
+  const className =
+    "rounded-md border border-border bg-bg-elevated px-3 py-2 text-fg outline-none focus:border-accent";
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label htmlFor={name} className="text-sm font-medium text-fg-secondary">
+        {label}
+      </label>
+      {textarea ? (
+        <textarea id={name} name={name} rows={3} className={className} />
+      ) : (
+        <input id={name} name={name} required={required} className={className} />
+      )}
+    </div>
+  );
+}

@@ -61,4 +61,8 @@ export async function extractFromUrl(url: string): Promise<ExtractedSource> {
 
   return {
     title: article.title || doc.title || url,
-    text: article.textContent.trim().slice(0, MAX_C
+    text: article.textContent.trim().slice(0, MAX_CHARS),
+    excerpt: article.excerpt ?? undefined,
+    imageUrl: ogImage,
+  };
+}

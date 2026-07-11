@@ -100,4 +100,21 @@ export async function saveDraftedNote(noteId: number, draft: DraftedNote, imageU
     }
   }
 
-  await linkWikilinksFromText(noteId, draft.what, draft.how, draft.why, draft.oth
+  await linkWikilinksFromText(noteId, draft.what, draft.how, draft.why, draft.other);
+
+  if (imageUrl) {
+    const existingImage = await db.query.media.findFirst({
+      where: and(eq(media.noteId, noteId), eq(media.url, imageUrl)),
+    });
+    if (!existingImage) {
+      await db.insert(media).values({
+        noteId,
+        kind: "image",
+        provider: "cloudinary",
+        url: imageUrl,
+      });
+    }
+  }
+
+  return newSlug;
+}

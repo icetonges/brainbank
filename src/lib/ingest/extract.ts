@@ -36,4 +36,9 @@ export async function extractSource(input: ExtractInput): Promise<ExtractedSourc
       if (!input.mediaUrl) throw new Error("Missing mediaUrl for docx ingestion");
       return extractFromDocx(input.mediaUrl, input.filename ?? "document.docx");
     case "xlsx":
-      if (!input.mediaUrl) throw new Error("Missi
+      if (!input.mediaUrl) throw new Error("Missing mediaUrl for xlsx ingestion");
+      return extractFromXlsx(input.mediaUrl, input.filename ?? "spreadsheet.xlsx");
+    default:
+      throw new Error(`Unsupported ingestion source type: ${input.sourceType}`);
+  }
+}

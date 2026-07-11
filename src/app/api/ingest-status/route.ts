@@ -20,4 +20,14 @@ export async function GET(req: Request) {
 
   if (!job) return Response.json({ status: "succeeded", stage: null, error: null });
 
-  const staleError = staleJobMessa
+  const staleError = staleJobMessage(job.status, job.startedAt ?? job.createdAt);
+  if (staleError) {
+    await db
+      .update(ingestionJobs)
+      .set({ status: "failed", error: staleError, finishedAt: new Date() })
+      .where(eq(ingestionJobs.id, job.id));
+    return Response.json({ status: "failed", stage: job.stage, error: staleError });
+  }
+
+  return Response.json({ status: job.status, stage: job.stage, error: job.error });
+}

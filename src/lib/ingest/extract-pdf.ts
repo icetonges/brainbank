@@ -15,4 +15,8 @@ export async function extractFromPdf(fileUrl: string, filename: string): Promise
     return {
       title: filename.replace(/\.pdf$/i, ""),
       text: result.text.trim().slice(0, MAX_CHARS),
-  
+    };
+  } finally {
+    await parser.destroy();
+  }
+}
