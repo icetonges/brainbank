@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { auth } from "@/auth";
 import { db, isDatabaseConfigured } from "@/lib/db";
 import { notes } from "@/lib/db/schema";
@@ -26,9 +27,24 @@ async function loadNotes(isOwner: boolean) {
   }
 }
 
-export default async function Home() {
+export default async function Home({
+  searchParams,
+}: {
+  searchParams: Promise<{ lang?: string }>;
+}) {
   const session = await auth();
   const { notes: rows, error } = await loadNotes(Boolean(session));
+
+  // The header's EN/中文 toggle (src/components/language-toggle.tsx) sets
+  // both a ?lang= query param on the current page and a `lang` cookie so
+  // the preference survives navigation. The homepage doesn't have any
+  // per-language content of its own (note titles aren't translated), but
+  // it must carry the preference forward into each note link — otherwise
+  // toggling language from here does nothing and every note opens in
+  // English regardless of what was selected.
+  const { lang: langParam } = await searchParams;
+  const cookieStore = await cookies();
+  const lang = langParam === "zh" ? "zh" : langParam === "en" ? "en" : cookieStore.get("lang")?.value === "zh" ? "zh" : "en";
 
   return (
     <div className="flex flex-1 flex-col gap-8">
@@ -82,7 +98,7 @@ export default async function Home() {
           {rows.map((note) => (
             <li key={note.id} className="p-5">
               <Link
-                href={`/notes/${note.slug}`}
+                href={`/notes/${note.slug}?lang=${lang}`}
                 className="text-lg font-medium text-fg hover:text-accent transition-colors"
               >
                 {note.title}

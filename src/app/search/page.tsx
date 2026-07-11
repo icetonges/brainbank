@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { and, or, ilike, eq, desc } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db, isDatabaseConfigured } from "@/lib/db";
@@ -50,13 +51,19 @@ async function search(q: string, isOwner: boolean) {
 export default async function SearchPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string }>;
+  searchParams: Promise<{ q?: string; lang?: string }>;
 }) {
-  const { q } = await searchParams;
+  const { q, lang: langParam } = await searchParams;
   const query = (q ?? "").trim();
   const session = await auth();
 
   const results = query && isDatabaseConfigured ? await search(query, Boolean(session)) : [];
+
+  // Same lang-preference carry-through as the homepage (src/app/page.tsx) —
+  // search results otherwise always link to the English version of a note
+  // regardless of the header's EN/中文 toggle.
+  const cookieStore = await cookies();
+  const lang = langParam === "zh" ? "zh" : langParam === "en" ? "en" : cookieStore.get("lang")?.value === "zh" ? "zh" : "en";
 
   return (
     <div className="flex flex-1 flex-col gap-6">
@@ -95,7 +102,7 @@ export default async function SearchPage({
           {results.map((note) => (
             <li key={note.id} className="p-5">
               <Link
-                href={`/notes/${note.slug}`}
+                href={`/notes/${note.slug}?lang=${lang}`}
                 className="text-lg font-medium text-fg hover:text-accent transition-colors"
               >
                 {note.title}
