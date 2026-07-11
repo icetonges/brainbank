@@ -171,12 +171,14 @@ export async function retryIngestionAction(noteId: number, slug: string) {
   if (!note) throw new Error("Note not found");
 
   let mediaUrl: string | undefined;
+  let mediaProvider: "cloudinary" | "r2" | undefined;
   let filename: string | undefined;
 
   if (!note.sourceUrl && note.sourceType !== "manual") {
     const mediaRow = await db.query.media.findFirst({ where: eq(media.noteId, noteId) });
     if (mediaRow) {
       mediaUrl = mediaRow.url;
+      mediaProvider = mediaRow.provider;
       filename = mediaRow.url.split("/").pop();
     }
   }
@@ -188,6 +190,7 @@ export async function retryIngestionAction(noteId: number, slug: string) {
     sourceType: note.sourceType,
     sourceUrl: note.sourceUrl ?? undefined,
     mediaUrl,
+    mediaProvider,
     filename,
   });
 

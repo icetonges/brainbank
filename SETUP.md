@@ -170,8 +170,10 @@ renders with a "database not connected yet" notice instead of crashing.
 
 ## Not wired up yet
 
-- Images/video don't go through auto-ingestion yet — the intake form only
-  handles PDF/docx/xlsx/URLs/YouTube; attach images/video to an existing
-  note via the upload widget on the note page instead
 - Obsidian sync is one-way (vault → site) with no deletion handling — see
   step 3e
+
+Images and video now auto-build a page too (upload widget on `/new`):
+since there's no text to draft a What/How/Why/Other page from, this skips
+the AI step and publishes immediately with the upload as the note's media —
+fill in What/How/Why by hand (or with AI Assist) afterward.

@@ -14,6 +14,15 @@ export interface ExtractInput {
   rawText?: string | null;
 }
 
+/** Turns "my-vacation-photo_2024.jpg" into "My vacation photo 2024" — a
+ * reasonable default title for media with no other metadata to draw from. */
+function titleFromFilename(filename: string): string {
+  const base = filename.replace(/\.[a-z0-9]+$/i, "").replace(/[_-]+/g, " ").trim();
+  const withSpaces = base.length > 0 ? base : "Untitled upload";
+  const capitalized = withSpaces.charAt(0).toUpperCase() + withSpaces.slice(1);
+  return capitalized.slice(0, 200);
+}
+
 /** Single dispatch point: given a source type and where to find it, return
  * the raw extracted title/text. Every extractor here is plain code, no
  * LLM — the AI only enters at the drafting step afterward (tasks.ts),
@@ -38,6 +47,24 @@ export async function extractSource(input: ExtractInput): Promise<ExtractedSourc
     case "xlsx":
       if (!input.mediaUrl) throw new Error("Missing mediaUrl for xlsx ingestion");
       return extractFromXlsx(input.mediaUrl, input.filename ?? "spreadsheet.xlsx");
+    case "image":
+      // No text to extract — the upload itself is the content. Skips the
+      // AI drafting step entirely (see runIngestionDirect in
+      // src/lib/inngest/ingest-source.ts): title comes from the filename,
+      // the image becomes the note's media, and What/How/Why are left for
+      // the owner (or AI Assist) to fill in.
+      if (!input.mediaUrl) throw new Error("Missing mediaUrl for image ingestion");
+      return {
+        title: titleFromFilename(input.filename ?? "image"),
+        text: "",
+        imageUrl: input.mediaUrl,
+      };
+    case "video":
+      if (!input.mediaUrl) throw new Error("Missing mediaUrl for video ingestion");
+      return {
+        title: titleFromFilename(input.filename ?? "video"),
+        text: "",
+      };
     default:
       throw new Error(`Unsupported ingestion source type: ${input.sourceType}`);
   }

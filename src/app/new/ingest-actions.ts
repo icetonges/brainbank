@@ -91,14 +91,16 @@ export async function createDraftNoteForUpload(filename: string, sourceType: Sou
   return createPendingNote(filename, sourceType);
 }
 
-/** Called after the file has finished uploading to R2. Returns the final
- * slug; the widget navigates there itself (kept separate from
- * startUrlIngestion's redirect() since this one's invoked outside a
+/** Called after the file has finished uploading to R2 or Cloudinary.
+ * Returns the final slug; the widget navigates there itself (kept separate
+ * from startUrlIngestion's redirect() since this one's invoked outside a
  * <form action>). */
 const SOURCE_TYPE_TO_MEDIA_KIND: Partial<Record<SourceType, MediaKind>> = {
   pdf: "pdf",
   docx: "doc",
   xlsx: "spreadsheet",
+  image: "image",
+  video: "video",
 };
 
 export async function startFileIngestion(
@@ -106,6 +108,7 @@ export async function startFileIngestion(
   mediaUrl: string,
   filename: string,
   sourceType: SourceType,
+  mediaProvider: "cloudinary" | "r2" = "r2",
 ): Promise<{ slug: string }> {
   await requireOwner();
 
@@ -118,10 +121,10 @@ export async function startFileIngestion(
   // re-reads from if the first attempt fails.
   const kind = SOURCE_TYPE_TO_MEDIA_KIND[sourceType];
   if (kind) {
-    await db.insert(media).values({ noteId, kind, provider: "r2", url: mediaUrl, mimeType: null });
+    await db.insert(media).values({ noteId, kind, provider: mediaProvider, url: mediaUrl, mimeType: null });
   }
 
-  dispatchIngestionJob({ noteId, sourceType, mediaUrl, filename });
+  dispatchIngestionJob({ noteId, sourceType, mediaUrl, mediaProvider, filename });
 
   return { slug: note.slug };
 }

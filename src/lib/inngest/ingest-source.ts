@@ -7,6 +7,7 @@ import {
   markJobSucceeded,
   markJobFailed,
   saveDraftedNote,
+  saveMediaOnlyNote,
 } from "@/lib/ingest/persist";
 import type { SourceType } from "@/lib/db/schema";
 
@@ -15,17 +16,35 @@ export interface IngestEventData {
   sourceType: SourceType;
   sourceUrl?: string;
   mediaUrl?: string;
+  mediaProvider?: "cloudinary" | "r2";
   filename?: string;
   rawText?: string;
 }
 
 /** Executes one ingestion without depending on Inngest Cloud registration. */
 export async function runIngestionDirect(data: IngestEventData) {
-  const { noteId, sourceType, sourceUrl, mediaUrl, filename, rawText } = data;
+  const { noteId, sourceType, sourceUrl, mediaUrl, mediaProvider, filename, rawText } = data;
 
   try {
     await markJobRunning(noteId, "extracting");
     const extracted = await extractSource({ sourceType, sourceUrl, mediaUrl, filename, rawText });
+
+    // Images/video have nothing to draft a What/How/Why/Other page from —
+    // skip the AI step and publish directly with the upload as media (see
+    // extractSource + saveMediaOnlyNote for why).
+    if (sourceType === "image" || sourceType === "video") {
+      await markJobStage(noteId, "saving");
+      const slug = await saveMediaOnlyNote(
+        noteId,
+        extracted.title,
+        mediaUrl!,
+        sourceType,
+        mediaProvider ?? "cloudinary",
+      );
+      await markJobSucceeded(noteId);
+      return { noteId, slug };
+    }
+
     await markJobStage(noteId, "drafting");
     const draft = await draftNoteFromSource({
       sourceTitle: extracted.title,

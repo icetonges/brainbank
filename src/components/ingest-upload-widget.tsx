@@ -25,6 +25,8 @@ function sourceTypeForFile(file: File): SourceType | null {
   ) {
     return "xlsx";
   }
+  if (file.type.startsWith("image/")) return "image";
+  if (file.type.startsWith("video/")) return "video";
   return null;
 }
 
@@ -43,9 +45,7 @@ export function IngestUploadWidget() {
     setError(null);
     const sourceType = sourceTypeForFile(file);
     if (!sourceType) {
-      setError(
-        "Only PDF, docx, and xlsx/csv are supported for auto-build right now. For images or video, create a note first and attach media there.",
-      );
+      setError("This file type isn't supported for auto-build yet.");
       if (inputRef.current) inputRef.current.value = "";
       return;
     }
@@ -56,10 +56,10 @@ export function IngestUploadWidget() {
       const { noteId, slug } = await createDraftNoteForUpload(file.name, sourceType);
 
       setStage("Uploading");
-      const { url } = await signAndUploadFile(noteId, file, setProgress);
+      const { url, provider } = await signAndUploadFile(noteId, file, setProgress);
 
-      setStage("Starting AI build");
-      await startFileIngestion(noteId, url, file.name, sourceType);
+      setStage(sourceType === "image" || sourceType === "video" ? "Publishing" : "Starting AI build");
+      await startFileIngestion(noteId, url, file.name, sourceType, provider);
 
       router.push(`/notes/${slug}`);
     } catch (err) {
@@ -74,11 +74,13 @@ export function IngestUploadWidget() {
   return (
     <div className="flex flex-col gap-2">
       <label className="cursor-pointer self-start rounded-md border border-border px-3 py-1.5 text-sm font-medium text-fg hover:border-accent hover:text-accent transition-colors">
-        {stage ? `${stage}${progress !== null ? ` ${progress}%` : "…"}` : "Upload a PDF, docx, or spreadsheet"}
+        {stage
+          ? `${stage}${progress !== null ? ` ${progress}%` : "…"}`
+          : "Upload a PDF, docx, spreadsheet, image, or video"}
         <input
           ref={inputRef}
           type="file"
-          accept=".pdf,.doc,.docx,.xlsx,.csv"
+          accept=".pdf,.doc,.docx,.xlsx,.csv,image/*,video/*"
           className="hidden"
           disabled={stage !== null}
           onChange={(e) => {

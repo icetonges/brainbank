@@ -26,7 +26,12 @@ test("loads canvas before pdf-parse", async () => {
   class FakeDOMMatrix {}
   class FakeImageData {}
   class FakePath2D {}
-  class FakePDFParse {}
+  class FakePDFParse {
+    async getText() {
+      return { text: "" };
+    }
+    async destroy() {}
+  }
 
   const runtime = await loadPdfParse(
     target,

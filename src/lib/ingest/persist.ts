@@ -118,3 +118,35 @@ export async function saveDraftedNote(noteId: number, draft: DraftedNote, imageU
 
   return newSlug;
 }
+
+/**
+ * Code-only counterpart to saveDraftedNote for image/video uploads (PLAN.md
+ * §5, §13): there's no text to draft a What/How/Why/Other page from, so
+ * this skips the AI step entirely — renames the note from its placeholder
+ * title/slug to one derived from the filename, publishes it, and attaches
+ * the uploaded file as its media. The owner (or AI Assist afterward) fills
+ * in What/How/Why by hand.
+ */
+export async function saveMediaOnlyNote(
+  noteId: number,
+  title: string,
+  mediaUrl: string,
+  kind: "image" | "video",
+  provider: "cloudinary" | "r2",
+): Promise<string> {
+  const newSlug = await uniqueSlug(slugify(title), noteId);
+
+  await db
+    .update(notes)
+    .set({ title, slug: newSlug, status: "published", updatedAt: new Date() })
+    .where(eq(notes.id, noteId));
+
+  const existingMedia = await db.query.media.findFirst({
+    where: and(eq(media.noteId, noteId), eq(media.url, mediaUrl)),
+  });
+  if (!existingMedia) {
+    await db.insert(media).values({ noteId, kind, provider, url: mediaUrl });
+  }
+
+  return newSlug;
+}
