@@ -76,6 +76,12 @@ export function GraphView({ nodes, edges }: { nodes: GraphNode[]; edges: GraphEd
           if (!p) return null;
           const isHovered = hoveredId === node.id;
           const dimmed = connected ? !connected.has(node.id) : false;
+          // Labels drawn to the right get clipped by the SVG viewBox for
+          // any node in the right third of the canvas (and force-layout
+          // only keeps the node's own point in bounds, not its label's
+          // text extent) — flip the label to the left of the node there
+          // instead of letting it run off the edge.
+          const flipLeft = p.x > WIDTH * 0.7;
           return (
             <g
               key={node.id}
@@ -93,8 +99,9 @@ export function GraphView({ nodes, edges }: { nodes: GraphNode[]; edges: GraphEd
                 strokeWidth={2}
               />
               <text
-                x={12}
+                x={flipLeft ? -12 : 12}
                 y={4}
+                textAnchor={flipLeft ? "end" : "start"}
                 fontSize={12}
                 fill={isHovered ? "var(--color-accent)" : "var(--color-fg-secondary)"}
                 className="select-none"
