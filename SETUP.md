@@ -129,6 +129,23 @@ alongside) using the web app's own editor (PLAN.md §8).
    Frontmatter (`title`, `tags: [a, b]`, `status`, `language`) is read if
    present.
 
+### Automatic sync on every GitHub push
+
+1. Generate a dedicated webhook secret:
+   ```
+   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+   ```
+2. Save it as `GITHUB_WEBHOOK_SECRET` in Vercel Production and redeploy.
+3. In the configured GitHub repository, open **Settings → Webhooks → Add webhook**.
+4. Set **Payload URL** to `https://aibrainbank.vercel.app/api/obsidian-webhook`.
+5. Set **Content type** to `application/json`, paste the same secret, choose
+   **Just the push event**, and activate the webhook.
+
+GitHub push deliveries are verified with HMAC-SHA256. Only pushes to the
+configured repository/branch that change `.md` files under the configured
+vault path trigger a sync. The existing blob-SHA comparison ensures unchanged
+notes are not reprocessed.
+
 Re-syncing only processes files whose git blob sha changed since the last
 run, so it's cheap to run repeatedly. It's one-way — editing a note in the
 web app does not write back to the vault, and there's no deletion

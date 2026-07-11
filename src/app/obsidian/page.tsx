@@ -6,6 +6,7 @@ import { desc } from "drizzle-orm";
 import { isObsidianSyncConfigured } from "@/lib/obsidian/github";
 import { triggerObsidianSyncAction } from "./actions";
 import { ObsidianSyncStatus } from "@/components/obsidian-sync-status";
+import { isObsidianWebhookConfigured } from "@/lib/obsidian/webhook";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +15,7 @@ export default async function ObsidianPage() {
   if (!session) redirect("/login");
 
   const configured = isObsidianSyncConfigured();
+  const automaticSyncConfigured = isObsidianWebhookConfigured();
   const latestRun = configured
     ? await db.query.obsidianSyncRuns.findFirst({ orderBy: desc(obsidianSyncRuns.createdAt) })
     : undefined;
@@ -25,9 +27,9 @@ export default async function ObsidianPage() {
       <div>
         <h1 className="text-2xl font-semibold text-fg">Obsidian sync</h1>
         <p className="mt-1 text-fg-secondary">
-          One-way: write notes in your Obsidian vault, push them to a{" "}
+          One-way: write notes in your Obsidian vault and push them to a{" "}
           <code className="text-accent">notes/</code> folder in a GitHub repo, and sync them in
-          here. Notes with{" "}
+          automatically. Notes with{" "}
           <code className="text-accent">## What</code> / <code className="text-accent">## How</code>{" "}
           / <code className="text-accent">## Why</code> / <code className="text-accent">## Other</code>{" "}
           headers are used as-is; anything else is drafted into that template by AI, same as any
@@ -50,6 +52,22 @@ export default async function ObsidianPage() {
         </div>
       ) : (
         <div className="rounded-lg border border-border bg-bg-elevated p-5">
+          <div className="mb-4 rounded-md border border-border bg-bg p-3 text-sm text-fg-secondary">
+            <p className="font-medium text-fg">
+              Automatic GitHub sync: {automaticSyncConfigured ? "ready" : "setup required"}
+            </p>
+            {automaticSyncConfigured ? (
+              <p className="mt-1">
+                Pushes affecting Markdown files under <code className="text-accent">notes/</code>{" "}
+                trigger this importer automatically.
+              </p>
+            ) : (
+              <p className="mt-1">
+                Set <code className="text-accent">GITHUB_WEBHOOK_SECRET</code> and add a GitHub push
+                webhook targeting <code className="text-accent">/api/obsidian-webhook</code>.
+              </p>
+            )}
+          </div>
           <ObsidianSyncStatus
             initialStatus={latestRun?.status ?? null}
             initialFilesTotal={latestRun?.filesTotal ?? null}
