@@ -23,23 +23,4 @@ export async function GET() {
   const staleError = staleJobMessage(run.status, run.startedAt ?? run.createdAt);
   if (staleError) {
     await db
-      .update(obsidianSyncRuns)
-      .set({ status: "failed", error: staleError, finishedAt: new Date() })
-      .where(eq(obsidianSyncRuns.id, run.id));
-    return Response.json({
-      status: "failed",
-      filesTotal: run.filesTotal,
-      filesProcessed: run.filesProcessed,
-      filesFailed: run.filesFailed,
-      error: staleError,
-    });
-  }
-
-  return Response.json({
-    status: run.status,
-    filesTotal: run.filesTotal,
-    filesProcessed: run.filesProcessed,
-    filesFailed: run.filesFailed,
-    error: run.error,
-  });
-}
+      .update(

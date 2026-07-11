@@ -7,6 +7,7 @@ const nextConfig: NextConfig = {
     "/api/inngest": [
       "./node_modules/@napi-rs/canvas/**/*",
       "./node_modules/@napi-rs/canvas-*/**/*",
+      "./node_modules/pdfjs-dist/**/*",
     ],
   },
   async headers() {

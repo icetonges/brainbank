@@ -31,17 +31,4 @@ export function LanguageToggle() {
     document.documentElement.lang = next === "zh" ? "zh-CN" : "en";
     const params = new URLSearchParams(searchParams.toString());
     params.set("lang", next);
-    router.push(`${pathname}?${params.toString()}`);
-  }
-
-  return (
-    <button
-      onClick={toggle}
-      type="button"
-      className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-fg hover:border-accent hover:text-accent transition-colors"
-      aria-label="Toggle English and Chinese"
-    >
-      {lang === "en" ? "中文" : "EN"}
-    </button>
-  );
-}
+    router.push(`${pathname}?${params.toString()}

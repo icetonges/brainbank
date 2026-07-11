@@ -149,29 +149,4 @@ notes are not reprocessed.
 Re-syncing only processes files whose git blob sha changed since the last
 run, so it's cheap to run repeatedly. It's one-way — editing a note in the
 web app does not write back to the vault, and there's no deletion
-handling yet (removing a file from the vault doesn't remove or unpublish
-the corresponding note).
-
-## 4. Run it
-
-```
-npm run dev
-```
-
-Visit http://localhost:3000. Without `DATABASE_URL` set, the homepage still
-renders with a "database not connected yet" notice instead of crashing.
-
-## 5. Deploy (Vercel)
-
-1. `vercel link` (or import the GitHub repo in the Vercel dashboard)
-2. Add every variable from `.env.example` to the Vercel project's
-   Environment Variables
-3. Push to `main` — Vercel deploys automatically
-
-## Not wired up yet
-
-- Images/video don't go through auto-ingestion yet — the intake form only
-  handles PDF/docx/xlsx/URLs/YouTube; attach images/video to an existing
-  note via the upload widget on the note page instead
-- Obsidian sync is one-way (vault → site) with no deletion handling — see
-  step 3e
+handling yet (removing a file fr

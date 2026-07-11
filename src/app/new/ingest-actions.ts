@@ -110,18 +110,4 @@ export async function startFileIngestion(
   await requireOwner();
 
   const note = await db.query.notes.findFirst({ where: eq(notes.id, noteId) });
-  if (!note) throw new Error("Note not found");
-
-  // Record the uploaded source file as media too — it's the original
-  // document, worth keeping visible/downloadable regardless of how the AI
-  // draft turns out, and it's what a retry (see retryIngestionAction)
-  // re-reads from if the first attempt fails.
-  const kind = SOURCE_TYPE_TO_MEDIA_KIND[sourceType];
-  if (kind) {
-    await db.insert(media).values({ noteId, kind, provider: "r2", url: mediaUrl, mimeType: null });
-  }
-
-  dispatchIngestionJob({ noteId, sourceType, mediaUrl, filename });
-
-  return { slug: note.slug };
-}
+  if (!note) throw new Error("Note not found

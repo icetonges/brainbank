@@ -56,14 +56,3 @@ export async function POST(req: Request) {
     }
 
     const key = `notes/${body.noteId}/${Date.now()}-${sanitizeFilename(body.filename)}`;
-    const target = await createR2UploadTarget(key, body.mimeType);
-    return Response.json({
-      provider: "r2" as const,
-      uploadUrl: target.uploadUrl,
-      publicUrl: target.publicUrl,
-    });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Upload signing failed";
-    return new Response(message, { status: 500 });
-  }
-}

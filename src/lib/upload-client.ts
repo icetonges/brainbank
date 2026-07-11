@@ -77,5 +77,4 @@ export async function signAndUploadFile(
     { "Content-Type": file.type || "application/octet-stream" },
     onProgress,
   );
-  return { provider: "r2", url: signed.publicUrl! };
-}
+  return { provider: "r2", 

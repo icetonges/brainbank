@@ -42,33 +42,4 @@ export async function createNote(formData: FormData) {
       title: english.title,
       status: "published",
       sourceType: "manual",
-      primaryLanguage,
-    })
-    .returning();
-
-  await db.insert(noteContent).values({
-    noteId: note.id,
-    language: "en",
-    bodyMarkdown: "",
-    what: english.what,
-    how: english.how,
-    why: english.why,
-    other: english.other,
-  });
-
-  if (primaryLanguage === "zh") {
-    await db.insert(noteContent).values({
-      noteId: note.id,
-      language: "zh",
-      what,
-      how,
-      why,
-      other,
-    });
-  }
-
-  // [[Wikilinks]] in any of these fields become graph edges automatically.
-  await linkWikilinksFromText(note.id, what, how, why, other);
-
-  redirect(`/notes/${slug}`);
-}
+      primar

@@ -273,3 +273,4 @@ export async function deleteNoteAction(noteId: number) {
   revalidatePath("/");
   redirect("/");
 }
+                                                
