@@ -96,6 +96,13 @@ export const notes = pgTable("notes", {
   primaryLanguage: languageEnum("primary_language").default("en").notNull(),
   // Non-null only for AI Classroom articles — which subtab they live under.
   category: classroomCategoryEnum("category"),
+  // Free-text, user-defined finer-grained label within a category (e.g.
+  // "Newsletters", "Claude Code Deep Dive from Leaked Code") — unlike
+  // `category` this isn't a fixed enum, so the composer offers existing
+  // values to pick from (via a <datalist>, populated from distinct values
+  // already in use) but also accepts a brand new one typed in. Optional;
+  // null/empty means uncategorized within its subtab.
+  subcategory: varchar("subcategory", { length: 120 }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });

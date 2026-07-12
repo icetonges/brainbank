@@ -39,9 +39,11 @@ interface TabOption {
  */
 export function ClassroomComposer({
   categories,
+  existingSubcategories = [],
   lang = "en",
 }: {
   categories: TabOption[];
+  existingSubcategories?: string[];
   lang?: Lang;
 }) {
   const s = t(lang).classroom;
@@ -130,7 +132,42 @@ export function ClassroomComposer({
             </option>
           ))}
         </select>
+        {/* Mandatory — the article page's single Translate button targets
+            whichever language this ISN'T, so it has to be known up front
+            rather than guessed from the content (auto-detection was the
+            previous behavior and is why the translate button sometimes
+            didn't show up where expected). */}
+        <select
+          name="language"
+          required
+          defaultValue=""
+          className="rounded-md border border-border bg-bg-elevated px-3 py-2 text-sm text-fg outline-none focus:border-accent invalid:text-fg-secondary"
+        >
+          <option value="" disabled>
+            {s.languagePrompt}
+          </option>
+          <option value="en">{s.languageEnglish}</option>
+          <option value="zh">{s.languageChinese}</option>
+        </select>
       </div>
+
+      {/* Optional finer-grained label within the subtab above (e.g.
+          "Newsletters", "Claude Code Deep Dive from Leaked Code") — a
+          plain text input with a <datalist> of everything already used,
+          so picking an existing one is one click but typing a brand new
+          one just works too, no separate "add new" mode needed. */}
+      <input
+        type="text"
+        name="subcategory"
+        list="subcategory-options"
+        placeholder={s.subcategoryPlaceholder}
+        className="rounded-md border border-border bg-bg-elevated px-3 py-2 text-fg outline-none focus:border-accent"
+      />
+      <datalist id="subcategory-options">
+        {existingSubcategories.map((sc) => (
+          <option key={sc} value={sc} />
+        ))}
+      </datalist>
 
       <textarea
         ref={bodyRef}

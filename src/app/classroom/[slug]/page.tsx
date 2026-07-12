@@ -82,11 +82,17 @@ export default async function ClassroomArticlePage({
   const learningMap =
     lang === "zh" ? guide?.learningMapZh || guide?.learningMap : guide?.learningMap;
   const handsOn = lang === "zh" ? guide?.handsOnZh || guide?.handsOn : guide?.handsOn;
-  const guideNeedsZh =
-    lang === "zh" && Boolean(guide && guide.learningMap && !guide.learningMapZh);
 
   const regenerate = regenerateGuideAction.bind(null, note.id, slug);
-  const translate = translateClassroomArticleAction.bind(null, note.id, slug, lang);
+  // Always targets the article's *other* language, independent of which
+  // language you're currently viewing the page in (lang) — a Chinese
+  // article always offers "Translate to English" and vice versa. Tying
+  // this to the view toggle instead (the old behavior) meant the button
+  // only appeared once you happened to switch the site to the language
+  // that was missing, so a freshly published article — viewed in its own
+  // language, as it is by default — never showed a translate button.
+  const otherLang: "en" | "zh" = note.primaryLanguage === "zh" ? "en" : "zh";
+  const translate = translateClassroomArticleAction.bind(null, note.id, slug, otherLang);
   const tabLabel =
     lang === "zh" ? CLASSROOM_TAB_LABELS_ZH[note.category] : CLASSROOM_TAB_LABELS[note.category];
 
@@ -104,6 +110,11 @@ export default async function ClassroomArticlePage({
           >
             {tabLabel}
           </Link>
+          {note.subcategory && (
+            <span className="rounded-full border border-border px-2.5 py-0.5 text-xs font-medium text-fg-secondary">
+              {note.subcategory}
+            </span>
+          )}
         </div>
 
         <h1 className="text-3xl font-semibold text-fg">{displayTitle}</h1>
@@ -143,15 +154,13 @@ export default async function ClassroomArticlePage({
               className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-fg hover:border-accent hover:text-accent transition-colors disabled:opacity-60"
             />
           </form>
-          {(isFallback || guideNeedsZh) && (
-            <form action={translate}>
-              <PendingFormButton
-                label={lang === "zh" ? s.translateToZh : s.translateToEn}
-                pendingLabel={s.translating}
-                className="rounded-md border border-accent/60 px-3 py-1.5 text-sm font-medium text-accent hover:bg-accent hover:text-accent-fg transition-colors disabled:opacity-60"
-              />
-            </form>
-          )}
+          <form action={translate}>
+            <PendingFormButton
+              label={otherLang === "zh" ? s.translateToZh : s.translateToEn}
+              pendingLabel={s.translating}
+              className="rounded-md border border-accent/60 px-3 py-1.5 text-sm font-medium text-accent hover:bg-accent hover:text-accent-fg transition-colors disabled:opacity-60"
+            />
+          </form>
           <div className="ml-auto">
             <DeleteArticleButton noteId={note.id} title={note.title} />
           </div>

@@ -106,6 +106,10 @@ const en = {
       "One box for everything — write or paste content, links, YouTube videos, and images. Saving creates the knowledge page and AI publish assist adds a learning map, hands-on steps, and the top 3 sources.",
     topicPlaceholder: "Topic (leave blank — AI will name it from the content)",
     categoryAuto: "Subtab: auto (AI decides)",
+    languagePrompt: "Article language…",
+    languageEnglish: "English",
+    languageChinese: "中文 (Chinese)",
+    subcategoryPlaceholder: "Subcategory (optional) — pick an existing one or type a new one",
     bodyPlaceholder:
       "Drop everything here — text, markdown formatting, URLs, YouTube links…\nPaste or attach images and they'll upload and appear as markdown.\n\nClick Save and AI publish assist will build the knowledge page: a learning map, step-by-step hands-on instructions, the top 3 sources, and tags for the right AI Classroom subtab.",
     save: "Save",
@@ -233,6 +237,10 @@ const zh: typeof en = {
       "一个输入框搞定一切——撰写或粘贴内容、链接、YouTube 视频和图片。保存后会创建知识页面，AI 发布助手会自动生成学习地图、动手步骤和三大推荐资源。",
     topicPlaceholder: "主题（留空则由 AI 根据内容自动命名）",
     categoryAuto: "子栏目：自动（由 AI 判断）",
+    languagePrompt: "文章语言……",
+    languageEnglish: "English（英文）",
+    languageChinese: "中文",
+    subcategoryPlaceholder: "子分类（可选）——可选择已有的，也可以直接输入新的",
     bodyPlaceholder:
       "把所有内容放进来——文字、Markdown 格式、网址、YouTube 链接……\n粘贴或添加图片会自动上传并以 Markdown 形式插入。\n\n点击保存后，AI 发布助手会生成知识页面：学习地图、分步动手指南、三大推荐资源，以及对应 AI 课堂子栏目的标签。",
     save: "保存",

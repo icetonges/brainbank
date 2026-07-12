@@ -1,5 +1,8 @@
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
+import { db } from "@/lib/db";
+import { notes } from "@/lib/db/schema";
+import { isNotNull } from "drizzle-orm";
 import { CLASSROOM_TABS } from "@/lib/classroom";
 import { getLang } from "@/lib/i18n-server";
 import { t, CLASSROOM_TAB_LABELS_ZH } from "@/lib/i18n";
@@ -17,6 +20,22 @@ export default async function NewClassroomArticlePage({
   const lang = await getLang(langParam);
   const s = t(lang).classroom;
 
+  // Feeds the subcategory field's <datalist> — every distinct value
+  // already in use, so picking one is a click instead of retyping it.
+  let existingSubcategories: string[] = [];
+  try {
+    const rows = await db
+      .selectDistinct({ subcategory: notes.subcategory })
+      .from(notes)
+      .where(isNotNull(notes.subcategory));
+    existingSubcategories = rows
+      .map((r) => r.subcategory)
+      .filter((v): v is string => Boolean(v))
+      .sort((a, b) => a.localeCompare(b));
+  } catch (err) {
+    console.error("Failed to load existing subcategories:", err);
+  }
+
   return (
     <div className="flex w-full flex-col gap-6">
       <div>
@@ -30,6 +49,7 @@ export default async function NewClassroomArticlePage({
           value,
           label: lang === "zh" ? CLASSROOM_TAB_LABELS_ZH[value] : label,
         }))}
+        existingSubcategories={existingSubcategories}
       />
     </div>
   );

@@ -29,6 +29,7 @@ export default async function ClassroomPage({
     title: string;
     createdAt: Date;
     status: string;
+    subcategory: string | null;
   }[] = [];
   let loadError = false;
 
@@ -39,6 +40,7 @@ export default async function ClassroomPage({
         title: notes.title,
         createdAt: notes.createdAt,
         status: notes.status,
+        subcategory: notes.subcategory,
       })
       .from(notes)
       .where(eq(notes.category, activeTab))
@@ -113,7 +115,14 @@ export default async function ClassroomPage({
                 href={`/classroom/${a.slug}?lang=${lang}`}
                 className="flex flex-col gap-1 rounded-lg border border-border bg-bg-elevated p-4 hover:border-accent transition-colors"
               >
-                <span className="font-semibold text-fg">{a.title}</span>
+                <span className="flex items-center gap-2">
+                  <span className="font-semibold text-fg">{a.title}</span>
+                  {a.subcategory && (
+                    <span className="rounded-full border border-border px-2 py-0.5 text-xs text-fg-secondary">
+                      {a.subcategory}
+                    </span>
+                  )}
+                </span>
                 <span className="text-xs text-fg-secondary">
                   {new Date(a.createdAt).toLocaleString(dateLocale)}
                   {a.status !== "published" ? ` · ${a.status}` : ""}

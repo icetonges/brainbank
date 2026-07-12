@@ -1,7 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { notes, noteContent } from "@/lib/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, isNotNull } from "drizzle-orm";
 import { auth } from "@/auth";
 import { CLASSROOM_TABS } from "@/lib/classroom";
 import { getLang } from "@/lib/i18n-server";
@@ -34,6 +34,20 @@ export default async function EditClassroomArticlePage({
     where: and(eq(noteContent.noteId, note.id), eq(noteContent.language, note.primaryLanguage)),
   });
 
+  let existingSubcategories: string[] = [];
+  try {
+    const rows = await db
+      .selectDistinct({ subcategory: notes.subcategory })
+      .from(notes)
+      .where(isNotNull(notes.subcategory));
+    existingSubcategories = rows
+      .map((r) => r.subcategory)
+      .filter((v): v is string => Boolean(v))
+      .sort((a, b) => a.localeCompare(b));
+  } catch (err) {
+    console.error("Failed to load existing subcategories:", err);
+  }
+
   const save = updateClassroomArticle.bind(null, note.id, slug);
 
   return (
@@ -61,6 +75,20 @@ export default async function EditClassroomArticlePage({
             ))}
           </select>
         </div>
+
+        <input
+          type="text"
+          name="subcategory"
+          list="subcategory-options"
+          defaultValue={note.subcategory ?? ""}
+          placeholder={s.subcategoryPlaceholder}
+          className="rounded-md border border-border bg-bg-elevated px-3 py-2 text-fg outline-none focus:border-accent"
+        />
+        <datalist id="subcategory-options">
+          {existingSubcategories.map((sc) => (
+            <option key={sc} value={sc} />
+          ))}
+        </datalist>
 
         <textarea
           name="body"

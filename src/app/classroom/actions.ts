@@ -13,7 +13,6 @@ import type { ClassroomCategory } from "@/lib/db/schema";
 import { isClassroomCategory } from "@/lib/classroom";
 import { slugify } from "@/lib/slug";
 import { publishAssist, translateText, type PublishAssistResult } from "@/lib/ai/tasks";
-import { detectPrimaryLanguage } from "@/lib/intake";
 import { linkWikilinksFromText } from "@/lib/notes/link-wikilinks";
 import { linkRelatedByTags } from "@/lib/notes/link-related";
 import { eq, and } from "drizzle-orm";
@@ -114,10 +113,15 @@ export async function publishClassroomArticle(formData: FormData) {
   const draftNoteId = Number(formData.get("noteId") || 0) || undefined;
   const topic = String(formData.get("topic") ?? "").trim();
   const rawCategory = String(formData.get("category") ?? "").trim();
+  const rawLanguage = String(formData.get("language") ?? "").trim();
+  const subcategory = String(formData.get("subcategory") ?? "").trim().slice(0, 120) || null;
   const body = String(formData.get("body") ?? "").trim();
 
   if (body.length < 10) throw new Error("Write at least a few words first");
   if (body.length > 100_000) throw new Error("Content is limited to 100,000 characters");
+  if (rawLanguage !== "en" && rawLanguage !== "zh") {
+    throw new Error("Pick the article's language");
+  }
 
   const category: ClassroomCategory | undefined = isClassroomCategory(rawCategory)
     ? rawCategory
@@ -134,7 +138,13 @@ export async function publishClassroomArticle(formData: FormData) {
   const finalTopic =
     (assist?.topic || topic || body.split(/\r?\n/).find(Boolean)?.slice(0, 80) || "Untitled").slice(0, 500);
   const finalCategory: ClassroomCategory = assist?.category ?? category ?? "ai";
-  const primaryLanguage = detectPrimaryLanguage([finalTopic, body].join("\n"));
+  // The author states the language explicitly (composer's required <select
+  // name="language">) rather than it being auto-detected — the article
+  // page's Translate button targets whichever language this isn't, so
+  // guessing wrong here used to mean the button translated the wrong
+  // direction or (when detection landed on the language already being
+  // viewed) didn't visibly appear at all.
+  const primaryLanguage: "en" | "zh" = rawLanguage;
 
   const slug = await uniqueSlug(slugify(finalTopic), draftNoteId);
 
@@ -148,6 +158,7 @@ export async function publishClassroomArticle(formData: FormData) {
         title: finalTopic,
         status: "published",
         category: finalCategory,
+        subcategory,
         primaryLanguage,
         updatedAt: new Date(),
       })
@@ -182,6 +193,7 @@ export async function publishClassroomArticle(formData: FormData) {
         status: "published",
         sourceType: "manual",
         category: finalCategory,
+        subcategory,
         primaryLanguage,
       })
       .returning();
@@ -257,6 +269,7 @@ export async function updateClassroomArticle(
 
   const topic = String(formData.get("topic") ?? "").trim();
   const rawCategory = String(formData.get("category") ?? "").trim();
+  const subcategory = String(formData.get("subcategory") ?? "").trim().slice(0, 120) || null;
   const body = String(formData.get("body") ?? "").trim();
   const regenerate = formData.get("regenerate") === "on";
 
@@ -268,7 +281,7 @@ export async function updateClassroomArticle(
 
   await db
     .update(notes)
-    .set({ title: topic.slice(0, 500), category: rawCategory, updatedAt: new Date() })
+    .set({ title: topic.slice(0, 500), category: rawCategory, subcategory, updatedAt: new Date() })
     .where(eq(notes.id, noteId));
 
   // Edits land in the original (primary-language) row; a stale translation
