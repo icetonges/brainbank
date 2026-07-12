@@ -1,8 +1,8 @@
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
-import { notes } from "@/lib/db/schema";
-import { isNotNull } from "drizzle-orm";
+import { classroomSubcategories } from "@/lib/db/schema";
+import { asc } from "drizzle-orm";
 import { CLASSROOM_TABS } from "@/lib/classroom";
 import { getLang } from "@/lib/i18n-server";
 import { t, CLASSROOM_TAB_LABELS_ZH } from "@/lib/i18n";
@@ -20,20 +20,17 @@ export default async function NewClassroomArticlePage({
   const lang = await getLang(langParam);
   const s = t(lang).classroom;
 
-  // Feeds the subcategory field's <datalist> — every distinct value
-  // already in use, so picking one is a click instead of retyping it.
-  let existingSubcategories: string[] = [];
+  // Feeds the subcategory picker — sorted ascending by name (default A→Z)
+  // so "General Knowledge" sits above "Newsletters" regardless of
+  // insertion order.
+  let subcategories: { id: number; name: string }[] = [];
   try {
-    const rows = await db
-      .selectDistinct({ subcategory: notes.subcategory })
-      .from(notes)
-      .where(isNotNull(notes.subcategory));
-    existingSubcategories = rows
-      .map((r) => r.subcategory)
-      .filter((v): v is string => Boolean(v))
-      .sort((a, b) => a.localeCompare(b));
+    subcategories = await db
+      .select({ id: classroomSubcategories.id, name: classroomSubcategories.name })
+      .from(classroomSubcategories)
+      .orderBy(asc(classroomSubcategories.name));
   } catch (err) {
-    console.error("Failed to load existing subcategories:", err);
+    console.error("Failed to load subcategories:", err);
   }
 
   return (
@@ -49,7 +46,7 @@ export default async function NewClassroomArticlePage({
           value,
           label: lang === "zh" ? CLASSROOM_TAB_LABELS_ZH[value] : label,
         }))}
-        existingSubcategories={existingSubcategories}
+        subcategories={subcategories}
       />
     </div>
   );

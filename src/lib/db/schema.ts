@@ -96,15 +96,27 @@ export const notes = pgTable("notes", {
   primaryLanguage: languageEnum("primary_language").default("en").notNull(),
   // Non-null only for AI Classroom articles — which subtab they live under.
   category: classroomCategoryEnum("category"),
-  // Free-text, user-defined finer-grained label within a category (e.g.
-  // "Newsletters", "Claude Code Deep Dive from Leaked Code") — unlike
-  // `category` this isn't a fixed enum, so the composer offers existing
-  // values to pick from (via a <datalist>, populated from distinct values
-  // already in use) but also accepts a brand new one typed in. Optional;
-  // null/empty means uncategorized within its subtab.
-  subcategory: varchar("subcategory", { length: 120 }),
+  // User-defined finer-grained label within a category (e.g.
+  // "Newsletters", "Claude Code Deep Dive from Leaked Code") — backed by
+  // classroomSubcategories below (its own table, like tags/noteTags)
+  // rather than a fixed enum like `category`, since the list is meant to
+  // grow. Optional; null means uncategorized within its subtab. Deleting
+  // a subcategory clears it here rather than deleting the article.
+  subcategoryId: integer("subcategory_id").references(() => classroomSubcategories.id, {
+    onDelete: "set null",
+  }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// The AI Classroom's user-managed subcategory list (e.g. "General
+// Knowledge", "Newsletters") — a real table, not a free-text column, so
+// the composer's picker can list, sort, and reuse existing values instead
+// of scraping distinct strings off notes.
+export const classroomSubcategories = pgTable("classroom_subcategories", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 120 }).notNull().unique(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
 export const noteContent = pgTable("note_content", {

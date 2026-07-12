@@ -1,11 +1,12 @@
 import { notFound, redirect } from "next/navigation";
 import { db } from "@/lib/db";
-import { notes, noteContent } from "@/lib/db/schema";
-import { eq, and, isNotNull } from "drizzle-orm";
+import { notes, noteContent, classroomSubcategories } from "@/lib/db/schema";
+import { eq, and, asc } from "drizzle-orm";
 import { auth } from "@/auth";
 import { CLASSROOM_TABS } from "@/lib/classroom";
 import { getLang } from "@/lib/i18n-server";
 import { t, CLASSROOM_TAB_LABELS_ZH } from "@/lib/i18n";
+import { SubcategoryField } from "@/components/subcategory-field";
 import { updateClassroomArticle } from "../../actions";
 
 export const dynamic = "force-dynamic";
@@ -34,39 +35,38 @@ export default async function EditClassroomArticlePage({
     where: and(eq(noteContent.noteId, note.id), eq(noteContent.language, note.primaryLanguage)),
   });
 
-  let existingSubcategories: string[] = [];
+  let subcategories: { id: number; name: string }[] = [];
   try {
-    const rows = await db
-      .selectDistinct({ subcategory: notes.subcategory })
-      .from(notes)
-      .where(isNotNull(notes.subcategory));
-    existingSubcategories = rows
-      .map((r) => r.subcategory)
-      .filter((v): v is string => Boolean(v))
-      .sort((a, b) => a.localeCompare(b));
+    subcategories = await db
+      .select({ id: classroomSubcategories.id, name: classroomSubcategories.name })
+      .from(classroomSubcategories)
+      .orderBy(asc(classroomSubcategories.name));
   } catch (err) {
-    console.error("Failed to load existing subcategories:", err);
+    console.error("Failed to load subcategories:", err);
   }
 
   const save = updateClassroomArticle.bind(null, note.id, slug);
+  const selectClass =
+    "rounded-md border border-border bg-bg-elevated px-3 py-2 text-sm text-fg outline-none focus:border-accent";
 
   return (
     <div className="flex w-full flex-col gap-6">
       <h1 className="text-2xl font-semibold text-fg">{s.editTitle}</h1>
 
       <form action={save} className="flex min-h-[70vh] flex-col gap-4">
+        <input
+          type="text"
+          name="topic"
+          required
+          defaultValue={note.title}
+          className="rounded-md border border-border bg-bg-elevated px-3 py-2 text-fg outline-none focus:border-accent"
+        />
+
         <div className="flex flex-col gap-3 sm:flex-row">
-          <input
-            type="text"
-            name="topic"
-            required
-            defaultValue={note.title}
-            className="flex-1 rounded-md border border-border bg-bg-elevated px-3 py-2 text-fg outline-none focus:border-accent"
-          />
           <select
             name="category"
             defaultValue={note.category}
-            className="rounded-md border border-border bg-bg-elevated px-3 py-2 text-sm text-fg outline-none focus:border-accent"
+            className={`flex-1 ${selectClass} sm:min-w-[160px]`}
           >
             {CLASSROOM_TABS.map((c) => (
               <option key={c.value} value={c.value}>
@@ -74,21 +74,17 @@ export default async function EditClassroomArticlePage({
               </option>
             ))}
           </select>
+          <SubcategoryField
+            options={subcategories}
+            defaultId={note.subcategoryId}
+            className={selectClass}
+            labels={{
+              none: s.subcategoryNone,
+              addNew: s.subcategoryAddNew,
+              newPlaceholder: s.subcategoryNewPlaceholder,
+            }}
+          />
         </div>
-
-        <input
-          type="text"
-          name="subcategory"
-          list="subcategory-options"
-          defaultValue={note.subcategory ?? ""}
-          placeholder={s.subcategoryPlaceholder}
-          className="rounded-md border border-border bg-bg-elevated px-3 py-2 text-fg outline-none focus:border-accent"
-        />
-        <datalist id="subcategory-options">
-          {existingSubcategories.map((sc) => (
-            <option key={sc} value={sc} />
-          ))}
-        </datalist>
 
         <textarea
           name="body"

@@ -7,6 +7,7 @@ import {
   noteTags,
   tags as tagsTable,
   learningGuides,
+  classroomSubcategories,
 } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { auth } from "@/auth";
@@ -38,6 +39,7 @@ export default async function ClassroomArticlePage({
   let contents: (typeof noteContent.$inferSelect)[] = [];
   let guide: typeof learningGuides.$inferSelect | undefined;
   let tagRows: { name: string }[] = [];
+  let subcategoryName: string | null = null;
 
   try {
     note = await db.query.notes.findFirst({ where: eq(notes.slug, slug) });
@@ -53,6 +55,12 @@ export default async function ClassroomArticlePage({
         .from(noteTags)
         .innerJoin(tagsTable, eq(noteTags.tagId, tagsTable.id))
         .where(eq(noteTags.noteId, note.id));
+      if (note.subcategoryId) {
+        const sub = await db.query.classroomSubcategories.findFirst({
+          where: eq(classroomSubcategories.id, note.subcategoryId),
+        });
+        subcategoryName = sub?.name ?? null;
+      }
     }
   } catch (err) {
     console.error(`Failed to load classroom article "${slug}":`, err);
@@ -110,9 +118,9 @@ export default async function ClassroomArticlePage({
           >
             {tabLabel}
           </Link>
-          {note.subcategory && (
+          {subcategoryName && (
             <span className="rounded-full border border-border px-2.5 py-0.5 text-xs font-medium text-fg-secondary">
-              {note.subcategory}
+              {subcategoryName}
             </span>
           )}
         </div>

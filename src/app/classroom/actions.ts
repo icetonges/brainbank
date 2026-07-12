@@ -8,6 +8,7 @@ import {
   noteTags,
   tags,
   learningGuides,
+  classroomSubcategories,
 } from "@/lib/db/schema";
 import type { ClassroomCategory } from "@/lib/db/schema";
 import { isClassroomCategory } from "@/lib/classroom";
@@ -33,6 +34,31 @@ async function uniqueSlug(base: string, keepNoteId?: number): Promise<string> {
     suffix += 1;
     slug = `${base}-${suffix}`;
   }
+}
+
+/**
+ * Resolves the composer/edit form's subcategory fields to a subcategoryId.
+ * `newName` (the "or add a new one" field) wins when both are present —
+ * picking an existing option AND typing a new name at the same time means
+ * the new name is what the user actually wants filed under. Returns null
+ * for "no subcategory", same as leaving it blank.
+ */
+async function resolveSubcategoryId(
+  selectedId: string,
+  newName: string,
+): Promise<number | null> {
+  const trimmedName = newName.trim().slice(0, 120);
+  if (trimmedName) {
+    let row = await db.query.classroomSubcategories.findFirst({
+      where: eq(classroomSubcategories.name, trimmedName),
+    });
+    if (!row) {
+      [row] = await db.insert(classroomSubcategories).values({ name: trimmedName }).returning();
+    }
+    return row.id;
+  }
+  const id = Number(selectedId);
+  return Number.isInteger(id) && id > 0 ? id : null;
 }
 
 /** Attach the AI-suggested tags to a note (creating tag rows as needed). */
@@ -114,7 +140,6 @@ export async function publishClassroomArticle(formData: FormData) {
   const topic = String(formData.get("topic") ?? "").trim();
   const rawCategory = String(formData.get("category") ?? "").trim();
   const rawLanguage = String(formData.get("language") ?? "").trim();
-  const subcategory = String(formData.get("subcategory") ?? "").trim().slice(0, 120) || null;
   const body = String(formData.get("body") ?? "").trim();
 
   if (body.length < 10) throw new Error("Write at least a few words first");
@@ -122,6 +147,11 @@ export async function publishClassroomArticle(formData: FormData) {
   if (rawLanguage !== "en" && rawLanguage !== "zh") {
     throw new Error("Pick the article's language");
   }
+
+  const subcategoryId = await resolveSubcategoryId(
+    String(formData.get("subcategoryId") ?? ""),
+    String(formData.get("newSubcategory") ?? ""),
+  );
 
   const category: ClassroomCategory | undefined = isClassroomCategory(rawCategory)
     ? rawCategory
@@ -158,7 +188,7 @@ export async function publishClassroomArticle(formData: FormData) {
         title: finalTopic,
         status: "published",
         category: finalCategory,
-        subcategory,
+        subcategoryId,
         primaryLanguage,
         updatedAt: new Date(),
       })
@@ -193,7 +223,7 @@ export async function publishClassroomArticle(formData: FormData) {
         status: "published",
         sourceType: "manual",
         category: finalCategory,
-        subcategory,
+        subcategoryId,
         primaryLanguage,
       })
       .returning();
@@ -269,19 +299,23 @@ export async function updateClassroomArticle(
 
   const topic = String(formData.get("topic") ?? "").trim();
   const rawCategory = String(formData.get("category") ?? "").trim();
-  const subcategory = String(formData.get("subcategory") ?? "").trim().slice(0, 120) || null;
   const body = String(formData.get("body") ?? "").trim();
   const regenerate = formData.get("regenerate") === "on";
 
   if (!topic) throw new Error("Topic is required");
   if (!isClassroomCategory(rawCategory)) throw new Error("Pick a category");
 
+  const subcategoryId = await resolveSubcategoryId(
+    String(formData.get("subcategoryId") ?? ""),
+    String(formData.get("newSubcategory") ?? ""),
+  );
+
   const note = await db.query.notes.findFirst({ where: eq(notes.id, noteId) });
   if (!note) throw new Error("Article not found");
 
   await db
     .update(notes)
-    .set({ title: topic.slice(0, 500), category: rawCategory, subcategory, updatedAt: new Date() })
+    .set({ title: topic.slice(0, 500), category: rawCategory, subcategoryId, updatedAt: new Date() })
     .where(eq(notes.id, noteId));
 
   // Edits land in the original (primary-language) row; a stale translation

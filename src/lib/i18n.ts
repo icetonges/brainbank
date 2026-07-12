@@ -109,7 +109,9 @@ const en = {
     languagePrompt: "Article language…",
     languageEnglish: "English",
     languageChinese: "中文 (Chinese)",
-    subcategoryPlaceholder: "Subcategory (optional) — pick an existing one or type a new one",
+    subcategoryNone: "Subcategory: none",
+    subcategoryAddNew: "+ Add new subcategory…",
+    subcategoryNewPlaceholder: "New subcategory name",
     bodyPlaceholder:
       "Drop everything here — text, markdown formatting, URLs, YouTube links…\nPaste or attach images and they'll upload and appear as markdown.\n\nClick Save and AI publish assist will build the knowledge page: a learning map, step-by-step hands-on instructions, the top 3 sources, and tags for the right AI Classroom subtab.",
     save: "Save",
@@ -240,7 +242,9 @@ const zh: typeof en = {
     languagePrompt: "文章语言……",
     languageEnglish: "English（英文）",
     languageChinese: "中文",
-    subcategoryPlaceholder: "子分类（可选）——可选择已有的，也可以直接输入新的",
+    subcategoryNone: "子分类：无",
+    subcategoryAddNew: "+ 添加新子分类……",
+    subcategoryNewPlaceholder: "新子分类名称",
     bodyPlaceholder:
       "把所有内容放进来——文字、Markdown 格式、网址、YouTube 链接……\n粘贴或添加图片会自动上传并以 Markdown 形式插入。\n\n点击保存后，AI 发布助手会生成知识页面：学习地图、分步动手指南、三大推荐资源，以及对应 AI 课堂子栏目的标签。",
     save: "保存",

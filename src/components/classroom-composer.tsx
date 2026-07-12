@@ -11,6 +11,7 @@ import {
   publishClassroomArticle,
 } from "@/app/classroom/actions";
 import { t, type Lang } from "@/lib/i18n";
+import { SubcategoryField } from "@/components/subcategory-field";
 
 // Converts pasted rich HTML (from a rendered webpage, Google Doc, Notion,
 // Word, another classroom article, etc.) into the markdown syntax this
@@ -39,11 +40,11 @@ interface TabOption {
  */
 export function ClassroomComposer({
   categories,
-  existingSubcategories = [],
+  subcategories = [],
   lang = "en",
 }: {
   categories: TabOption[];
-  existingSubcategories?: string[];
+  subcategories?: { id: number; name: string }[];
   lang?: Lang;
 }) {
   const s = t(lang).classroom;
@@ -113,17 +114,18 @@ export function ClassroomComposer({
     <form action={publishClassroomArticle} className="flex min-h-[80vh] flex-col gap-4">
       {draft && <input type="hidden" name="noteId" value={draft.noteId} />}
 
+      <input
+        type="text"
+        name="topic"
+        placeholder={s.topicPlaceholder}
+        className="rounded-md border border-border bg-bg-elevated px-3 py-2 text-fg outline-none focus:border-accent"
+      />
+
       <div className="flex flex-col gap-3 sm:flex-row">
-        <input
-          type="text"
-          name="topic"
-          placeholder={s.topicPlaceholder}
-          className="flex-1 rounded-md border border-border bg-bg-elevated px-3 py-2 text-fg outline-none focus:border-accent"
-        />
         <select
           name="category"
           defaultValue=""
-          className="rounded-md border border-border bg-bg-elevated px-3 py-2 text-sm text-fg outline-none focus:border-accent"
+          className="flex-1 rounded-md border border-border bg-bg-elevated px-3 py-2 text-sm text-fg outline-none focus:border-accent sm:min-w-[160px]"
         >
           <option value="">{s.categoryAuto}</option>
           {categories.map((c) => (
@@ -141,7 +143,7 @@ export function ClassroomComposer({
           name="language"
           required
           defaultValue=""
-          className="rounded-md border border-border bg-bg-elevated px-3 py-2 text-sm text-fg outline-none focus:border-accent invalid:text-fg-secondary"
+          className="flex-1 rounded-md border border-border bg-bg-elevated px-3 py-2 text-sm text-fg outline-none focus:border-accent invalid:text-fg-secondary sm:min-w-[160px]"
         >
           <option value="" disabled>
             {s.languagePrompt}
@@ -149,25 +151,20 @@ export function ClassroomComposer({
           <option value="en">{s.languageEnglish}</option>
           <option value="zh">{s.languageChinese}</option>
         </select>
+        {/* Optional finer-grained label within the subtab above (e.g.
+            "Newsletters", "Claude Code Deep Dive from Leaked Code") —
+            backed by the classroom_subcategories table, sorted A→Z by the
+            server; "+ Add new subcategory…" reveals a name field. */}
+        <SubcategoryField
+          options={subcategories}
+          className="rounded-md border border-border bg-bg-elevated px-3 py-2 text-sm text-fg outline-none focus:border-accent"
+          labels={{
+            none: s.subcategoryNone,
+            addNew: s.subcategoryAddNew,
+            newPlaceholder: s.subcategoryNewPlaceholder,
+          }}
+        />
       </div>
-
-      {/* Optional finer-grained label within the subtab above (e.g.
-          "Newsletters", "Claude Code Deep Dive from Leaked Code") — a
-          plain text input with a <datalist> of everything already used,
-          so picking an existing one is one click but typing a brand new
-          one just works too, no separate "add new" mode needed. */}
-      <input
-        type="text"
-        name="subcategory"
-        list="subcategory-options"
-        placeholder={s.subcategoryPlaceholder}
-        className="rounded-md border border-border bg-bg-elevated px-3 py-2 text-fg outline-none focus:border-accent"
-      />
-      <datalist id="subcategory-options">
-        {existingSubcategories.map((sc) => (
-          <option key={sc} value={sc} />
-        ))}
-      </datalist>
 
       <textarea
         ref={bodyRef}

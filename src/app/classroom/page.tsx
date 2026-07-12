@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
-import { notes } from "@/lib/db/schema";
+import { notes, classroomSubcategories } from "@/lib/db/schema";
 import type { ClassroomCategory } from "@/lib/db/schema";
 import { auth } from "@/auth";
 import { CLASSROOM_TABS, isClassroomCategory } from "@/lib/classroom";
@@ -40,9 +40,10 @@ export default async function ClassroomPage({
         title: notes.title,
         createdAt: notes.createdAt,
         status: notes.status,
-        subcategory: notes.subcategory,
+        subcategory: classroomSubcategories.name,
       })
       .from(notes)
+      .leftJoin(classroomSubcategories, eq(notes.subcategoryId, classroomSubcategories.id))
       .where(eq(notes.category, activeTab))
       .orderBy(desc(notes.createdAt));
 
