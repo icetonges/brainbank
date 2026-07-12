@@ -41,11 +41,12 @@ export function ClassroomComposer({
   const [uploadPct, setUploadPct] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  function insertAtCursor(snippet: string) {
+  // Inserts at an explicit [start, end) range rather than re-reading
+  // el.selectionStart live, because by the time this runs the cursor may
+  // no longer be where the user left it (see handleImage below).
+  function insertAt(snippet: string, start: number, end: number) {
     const el = bodyRef.current;
     if (!el) return;
-    const start = el.selectionStart ?? el.value.length;
-    const end = el.selectionEnd ?? el.value.length;
     el.value = el.value.slice(0, start) + snippet + el.value.slice(end);
     const pos = start + snippet.length;
     el.setSelectionRange(pos, pos);
@@ -55,6 +56,17 @@ export function ClassroomComposer({
   async function handleImage(file: File) {
     setError(null);
     setUploadPct(0);
+
+    // Capture the cursor position *before* any async work. Opening the
+    // native file picker (or the upload round-trips themselves) moves
+    // focus away from the textarea, and by the time the upload finishes
+    // el.selectionStart has usually collapsed to the end of the text —
+    // which is why images were landing at the bottom instead of where
+    // the user was typing.
+    const el = bodyRef.current;
+    const insertStart = el?.selectionStart ?? el?.value.length ?? 0;
+    const insertEnd = el?.selectionEnd ?? insertStart;
+
     try {
       let target = draft;
       if (!target) {
@@ -72,7 +84,7 @@ export function ClassroomComposer({
         mimeType: file.type || "application/octet-stream",
       });
 
-      insertAtCursor(`\n![${file.name}](${url})\n`);
+      insertAt(`\n![${file.name}](${url})\n`, insertStart, insertEnd);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Image upload failed");
     } finally {
