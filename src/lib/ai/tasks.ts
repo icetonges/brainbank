@@ -42,6 +42,25 @@ function modelFor(task: TaskName, override?: ModelId) {
   return resolveModel(override ?? TASK_MODELS[task]);
 }
 
+// Some models occasionally answer with real line breaks escaped as the
+// literal two-character sequence "\" + "n" (and "\t" for tabs) instead of
+// actual whitespace — collapsing headings/lists/code fences into one
+// unreadable line with "\n" printed as text instead of a break. This
+// happens both on plain generateText output (translate) and inside
+// generateObject's structured fields (publishAssist's learningMap/handsOn,
+// draftNoteFromSource, translateNote) — a model that decides to represent
+// a multi-line value as an escaped string does so the same way whether
+// it's producing raw text or a JSON field, so every multi-line AI field
+// that ends up rendered as markdown needs this same cleanup, not just the
+// translate path. Rewriting the escapes back to real whitespace fixes the
+// overwhelming majority of cases; the only false-positive risk is a code
+// sample that legitimately contains a literal backslash-n (e.g. a regex
+// pattern), which is rare enough to accept as a trade-off for everything
+// else rendering correctly.
+function unescapeLiteralWhitespace(text: string): string {
+  return text.replace(/\\r\\n/g, "\n").replace(/\\n/g, "\n").replace(/\\t/g, "\t");
+}
+
 // --- summarize ---
 
 export interface NoteForAi {
@@ -106,22 +125,6 @@ export async function suggestTags(
 
 // --- translate ---
 
-// Some models occasionally answer with real line breaks escaped as the
-// literal two-character sequence "\" + "n" (and "\t" for tabs) instead of
-// actual whitespace — most visible on Chinese output, where it collapses
-// headings/lists/code fences into one unreadable line with "\n" printed
-// as text. This doesn't happen on the English originals (generated
-// directly, not through this translation call), so it's specific to how
-// the translation response comes back. Rewriting the escape sequences
-// back to real whitespace fixes the overwhelming majority of cases; the
-// only false-positive risk is a code sample that legitimately contains a
-// literal backslash-n (e.g. a regex pattern), which is rare enough to
-// accept as a trade-off for every other translated article rendering
-// correctly.
-function unescapeLiteralWhitespace(text: string): string {
-  return text.replace(/\\r\\n/g, "\n").replace(/\\n/g, "\n").replace(/\\t/g, "\t");
-}
-
 export async function translateText(
   text: string,
   target: "en" | "zh",
@@ -171,7 +174,13 @@ export async function translateNote(
     system: `Translate every field into ${targetLabel}. Keep empty fields empty. Preserve meaning and tone, return only the translated fields.`,
     prompt: JSON.stringify(note),
   });
-  return object;
+  return {
+    title: unescapeLiteralWhitespace(object.title),
+    what: unescapeLiteralWhitespace(object.what),
+    how: unescapeLiteralWhitespace(object.how),
+    why: unescapeLiteralWhitespace(object.why),
+    other: unescapeLiteralWhitespace(object.other),
+  };
 }
 
 // --- assist (streaming chat) ---
@@ -292,6 +301,7 @@ export async function publishAssist(
       "Categories: knowledge (concepts/theory), skill (abilities to practice), mcp (Model Context Protocol), api (APIs/SDKs), best-practices, use-cases, step-by-step (tutorials/guides), ai-evaluation (evals/benchmarks), ai-models (specific models), ai (general/anything else).",
       "Resources must be real and well-known (official documentation, GitHub repositories, established courses/channels). If unsure a URL is real, pick a better-known resource instead — never fabricate links.",
       "Write the topic, summary, learning map, and hands-on steps in the same language as the user's content (English or Chinese). Tags stay lowercase English.",
+      "Write learningMap and handsOn as real markdown with real line breaks between headings, list items, and paragraphs — never the two characters backslash-n as literal text in place of a line break.",
       input.topic ? "Keep the user's topic unless it's clearly unusable; you may lightly clean it up." : "",
       input.category ? `The user already chose the category "${input.category}" — keep it.` : "",
     ]
@@ -309,6 +319,9 @@ export async function publishAssist(
     ...object,
     topic: input.topic || object.topic,
     category: input.category ?? object.category,
+    summary: unescapeLiteralWhitespace(object.summary),
+    learningMap: unescapeLiteralWhitespace(object.learningMap),
+    handsOn: unescapeLiteralWhitespace(object.handsOn),
   };
 }
 
@@ -329,5 +342,12 @@ export async function draftNoteFromSource(
       .filter(Boolean)
       .join("\n\n"),
   });
-  return object;
+  return {
+    ...object,
+    what: unescapeLiteralWhitespace(object.what),
+    how: unescapeLiteralWhitespace(object.how),
+    why: unescapeLiteralWhitespace(object.why),
+    other: unescapeLiteralWhitespace(object.other),
+    summary: unescapeLiteralWhitespace(object.summary),
+  };
 }
