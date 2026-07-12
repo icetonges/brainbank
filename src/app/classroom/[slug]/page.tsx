@@ -157,7 +157,7 @@ export default async function ClassroomArticlePage({
 
       {isFallback && (
         <p className="rounded-lg border border-border bg-bg-elevated p-3 text-sm text-fg-secondary">
-          {s.notTranslatedYet}
+          {lang === "zh" ? s.notTranslatedYetToZh : s.notTranslatedYetToEn}
         </p>
       )}
 
