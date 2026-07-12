@@ -115,7 +115,11 @@ export async function translateText(
   const targetLabel = target === "zh" ? "Simplified Chinese" : "English";
   const { text: translated } = await generateText({
     model: modelFor("translate", modelId),
-    system: `Translate the given text into ${targetLabel}. Preserve meaning and tone. Return only the translation, no commentary.`,
+    system: `Translate the given text into ${targetLabel}. Preserve meaning and tone.
+
+If the text contains markdown, preserve its structure exactly — keep every heading marker (#, ##, ###), bullet (-, *) and numbered list marker, blank line between blocks, bold (**text**) and italic (*text*) marker, and table pipe/row layout in place; translate only the prose inside those elements. Leave code blocks (fenced with \`\`\`), inline code (\`text\`), URLs, and link targets ([text](url) — translate the link text, not the URL) untouched. A run of short list items must come back as the same number of separate list items, not collapsed into one paragraph.
+
+Return only the translation, no commentary.`,
     prompt: text,
   });
   return translated.trim();

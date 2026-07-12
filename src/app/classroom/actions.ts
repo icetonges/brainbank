@@ -333,9 +333,13 @@ export async function translateClassroomArticleAction(
   }
   if (!sourceContent?.bodyMarkdown) throw new Error("Nothing to translate yet");
 
-  const [body, summary] = await Promise.all([
+  // note.title is always the *original* language's title (see
+  // publishClassroomArticle) — translate it alongside the body so the
+  // heading isn't left in the wrong language when viewing a translation.
+  const [body, summary, title] = await Promise.all([
     translateText(sourceContent.bodyMarkdown, target),
     translateText(sourceContent.summary ?? "", target),
+    note.primaryLanguage === target ? Promise.resolve("") : translateText(note.title, target),
   ]);
 
   const existing = await db.query.noteContent.findFirst({
@@ -344,10 +348,10 @@ export async function translateClassroomArticleAction(
   if (existing) {
     await db
       .update(noteContent)
-      .set({ bodyMarkdown: body, summary })
+      .set({ bodyMarkdown: body, summary, title })
       .where(eq(noteContent.id, existing.id));
   } else {
-    await db.insert(noteContent).values({ noteId, language: target, bodyMarkdown: body, summary });
+    await db.insert(noteContent).values({ noteId, language: target, bodyMarkdown: body, summary, title });
   }
 
   // Translate the learning guide too.

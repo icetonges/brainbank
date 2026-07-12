@@ -106,6 +106,12 @@ export const noteContent = pgTable("note_content", {
     .notNull()
     .references(() => notes.id, { onDelete: "cascade" }),
   language: languageEnum("language").notNull(),
+  // Per-language title — only set for classroom articles' *translated* row
+  // (the original-language title lives on notes.title, same as before, so
+  // this stays empty until the translate button fills it in). The article
+  // page falls back to notes.title when this is empty, so nothing else
+  // needs to change for untranslated articles or regular notes.
+  title: text("title").default(""),
   bodyMarkdown: text("body_markdown").default("").notNull(),
   what: text("what").default(""),
   how: text("how").default(""),

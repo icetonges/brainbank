@@ -15,6 +15,7 @@ import { getLang } from "@/lib/i18n-server";
 import { t, CLASSROOM_TAB_LABELS_ZH } from "@/lib/i18n";
 import { Markdown } from "@/components/markdown";
 import { DeleteArticleButton } from "@/components/delete-article-button";
+import { PendingFormButton } from "@/components/pending-form-button";
 import { regenerateGuideAction, translateClassroomArticleAction } from "../actions";
 
 export const dynamic = "force-dynamic";
@@ -72,6 +73,10 @@ export default async function ClassroomArticlePage({
   const fallback = contents.find((c) => c.bodyMarkdown);
   const content = wanted ?? fallback;
   const isFallback = !wanted && Boolean(fallback);
+  // notes.title is always the original language's title — a translated
+  // title (set by the translate button) lives on the language-matched
+  // note_content row instead, falling back to the original if untranslated.
+  const displayTitle = (lang === note.primaryLanguage ? note.title : content?.title) || note.title;
 
   // Guide text in the requested language (zh columns fall back to base).
   const learningMap =
@@ -101,7 +106,7 @@ export default async function ClassroomArticlePage({
           </Link>
         </div>
 
-        <h1 className="text-3xl font-semibold text-fg">{note.title}</h1>
+        <h1 className="text-3xl font-semibold text-fg">{displayTitle}</h1>
         <p className="text-sm text-fg-secondary">
           {new Date(note.createdAt).toLocaleString(dateLocale)}
           {note.updatedAt.getTime() !== note.createdAt.getTime()
@@ -132,21 +137,19 @@ export default async function ClassroomArticlePage({
             {s.edit}
           </Link>
           <form action={regenerate}>
-            <button
-              type="submit"
-              className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-fg hover:border-accent hover:text-accent transition-colors"
-            >
-              {guide ? s.regenerateGuide : s.generateGuide}
-            </button>
+            <PendingFormButton
+              label={guide ? s.regenerateGuide : s.generateGuide}
+              pendingLabel={s.generatingGuide}
+              className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-fg hover:border-accent hover:text-accent transition-colors disabled:opacity-60"
+            />
           </form>
           {(isFallback || guideNeedsZh) && (
             <form action={translate}>
-              <button
-                type="submit"
-                className="rounded-md border border-accent/60 px-3 py-1.5 text-sm font-medium text-accent hover:bg-accent hover:text-accent-fg transition-colors"
-              >
-                {lang === "zh" ? s.translateToZh : s.translateToEn}
-              </button>
+              <PendingFormButton
+                label={lang === "zh" ? s.translateToZh : s.translateToEn}
+                pendingLabel={s.translating}
+                className="rounded-md border border-accent/60 px-3 py-1.5 text-sm font-medium text-accent hover:bg-accent hover:text-accent-fg transition-colors disabled:opacity-60"
+              />
             </form>
           )}
           <div className="ml-auto">
