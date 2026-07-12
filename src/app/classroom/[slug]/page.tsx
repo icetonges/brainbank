@@ -8,33 +8,41 @@ import {
   tags as tagsTable,
   learningGuides,
 } from "@/lib/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { auth } from "@/auth";
 import { CLASSROOM_TAB_LABELS } from "@/lib/classroom";
+import { getLang } from "@/lib/i18n-server";
+import { t, CLASSROOM_TAB_LABELS_ZH } from "@/lib/i18n";
 import { Markdown } from "@/components/markdown";
 import { DeleteArticleButton } from "@/components/delete-article-button";
-import { regenerateGuideAction } from "../actions";
+import { regenerateGuideAction, translateClassroomArticleAction } from "../actions";
 
 export const dynamic = "force-dynamic";
 
 export default async function ClassroomArticlePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string }>;
+  searchParams: Promise<{ lang?: string }>;
 }) {
   const { slug } = await params;
+  const { lang: langParam } = await searchParams;
   const session = await auth();
+  const lang = await getLang(langParam);
+  const s = t(lang).classroom;
+  const dateLocale = lang === "zh" ? "zh-CN" : undefined;
 
   let note: typeof notes.$inferSelect | undefined;
-  let content: typeof noteContent.$inferSelect | undefined;
+  let contents: (typeof noteContent.$inferSelect)[] = [];
   let guide: typeof learningGuides.$inferSelect | undefined;
   let tagRows: { name: string }[] = [];
 
   try {
     note = await db.query.notes.findFirst({ where: eq(notes.slug, slug) });
     if (note) {
-      content = await db.query.noteContent.findFirst({
-        where: and(eq(noteContent.noteId, note.id), eq(noteContent.language, "en")),
+      contents = await db.query.noteContent.findMany({
+        where: eq(noteContent.noteId, note.id),
       });
       guide = await db.query.learningGuides.findFirst({
         where: eq(learningGuides.noteId, note.id),
@@ -49,8 +57,8 @@ export default async function ClassroomArticlePage({
     console.error(`Failed to load classroom article "${slug}":`, err);
     return (
       <div className="rounded-lg border border-danger/40 bg-bg-elevated p-5 text-fg-secondary">
-        <p className="font-medium text-fg">Couldn&apos;t load this article.</p>
-        <p className="mt-1 text-sm">The database didn&apos;t respond — reload to try again.</p>
+        <p className="font-medium text-fg">{s.loadFailed}</p>
+        <p className="mt-1 text-sm">{s.reload}</p>
       </div>
     );
   }
@@ -58,40 +66,57 @@ export default async function ClassroomArticlePage({
   if (!note || !note.category) notFound();
   if (note.status !== "published" && !session) notFound();
 
+  // Content in the requested language, falling back to whatever exists
+  // (with a "not translated yet" hint + translate button for the owner).
+  const wanted = contents.find((c) => c.language === lang && c.bodyMarkdown);
+  const fallback = contents.find((c) => c.bodyMarkdown);
+  const content = wanted ?? fallback;
+  const isFallback = !wanted && Boolean(fallback);
+
+  // Guide text in the requested language (zh columns fall back to base).
+  const learningMap =
+    lang === "zh" ? guide?.learningMapZh || guide?.learningMap : guide?.learningMap;
+  const handsOn = lang === "zh" ? guide?.handsOnZh || guide?.handsOn : guide?.handsOn;
+  const guideNeedsZh =
+    lang === "zh" && Boolean(guide && guide.learningMap && !guide.learningMapZh);
+
   const regenerate = regenerateGuideAction.bind(null, note.id, slug);
+  const translate = translateClassroomArticleAction.bind(null, note.id, slug, lang);
+  const tabLabel =
+    lang === "zh" ? CLASSROOM_TAB_LABELS_ZH[note.category] : CLASSROOM_TAB_LABELS[note.category];
 
   return (
     <article className="flex flex-col gap-8">
       <header className="flex flex-col gap-3">
         <div className="flex items-center gap-2 text-sm">
-          <Link href="/classroom" className="text-fg-secondary hover:text-accent">
-            AI Classroom
+          <Link href={`/classroom?lang=${lang}`} className="text-fg-secondary hover:text-accent">
+            {s.title}
           </Link>
           <span className="text-fg-secondary">/</span>
           <Link
-            href={`/classroom?tab=${note.category}`}
+            href={`/classroom?tab=${note.category}&lang=${lang}`}
             className="rounded-full border border-accent/50 px-2.5 py-0.5 text-xs font-medium text-accent hover:bg-accent hover:text-accent-fg transition-colors"
           >
-            {CLASSROOM_TAB_LABELS[note.category]}
+            {tabLabel}
           </Link>
         </div>
 
         <h1 className="text-3xl font-semibold text-fg">{note.title}</h1>
         <p className="text-sm text-fg-secondary">
-          {new Date(note.createdAt).toLocaleString()}
+          {new Date(note.createdAt).toLocaleString(dateLocale)}
           {note.updatedAt.getTime() !== note.createdAt.getTime()
-            ? ` · updated ${new Date(note.updatedAt).toLocaleString()}`
+            ? ` · ${s.updated} ${new Date(note.updatedAt).toLocaleString(dateLocale)}`
             : ""}
         </p>
 
         {tagRows.length > 0 && (
           <div className="flex flex-wrap gap-2">
-            {tagRows.map((t) => (
+            {tagRows.map((tag) => (
               <span
-                key={t.name}
+                key={tag.name}
                 className="rounded-full border border-border px-2.5 py-0.5 text-xs text-fg-secondary"
               >
-                #{t.name}
+                #{tag.name}
               </span>
             ))}
           </div>
@@ -101,23 +126,39 @@ export default async function ClassroomArticlePage({
       {session && (
         <div className="flex flex-wrap items-center gap-2 border-y border-border py-3">
           <Link
-            href={`/classroom/${slug}/edit`}
+            href={`/classroom/${slug}/edit?lang=${lang}`}
             className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-fg hover:border-accent hover:text-accent transition-colors"
           >
-            Edit
+            {s.edit}
           </Link>
           <form action={regenerate}>
             <button
               type="submit"
               className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-fg hover:border-accent hover:text-accent transition-colors"
             >
-              {guide ? "Regenerate AI guide" : "Generate AI guide"}
+              {guide ? s.regenerateGuide : s.generateGuide}
             </button>
           </form>
+          {(isFallback || guideNeedsZh) && (
+            <form action={translate}>
+              <button
+                type="submit"
+                className="rounded-md border border-accent/60 px-3 py-1.5 text-sm font-medium text-accent hover:bg-accent hover:text-accent-fg transition-colors"
+              >
+                {lang === "zh" ? s.translateToZh : s.translateToEn}
+              </button>
+            </form>
+          )}
           <div className="ml-auto">
             <DeleteArticleButton noteId={note.id} title={note.title} />
           </div>
         </div>
+      )}
+
+      {isFallback && (
+        <p className="rounded-lg border border-border bg-bg-elevated p-3 text-sm text-fg-secondary">
+          {s.notTranslatedYet}
+        </p>
       )}
 
       {content?.summary && (
@@ -134,15 +175,19 @@ export default async function ClassroomArticlePage({
 
       {guide ? (
         <>
-          <GuideSection title="Learning map">
-            <Markdown>{guide.learningMap}</Markdown>
-          </GuideSection>
+          {learningMap && (
+            <GuideSection title={s.learningMap}>
+              <Markdown>{learningMap}</Markdown>
+            </GuideSection>
+          )}
 
-          <GuideSection title="Get hands-on — step by step">
-            <Markdown>{guide.handsOn}</Markdown>
-          </GuideSection>
+          {handsOn && (
+            <GuideSection title={s.handsOn}>
+              <Markdown>{handsOn}</Markdown>
+            </GuideSection>
+          )}
 
-          <GuideSection title="Top 3 sources">
+          <GuideSection title={s.topSources}>
             <ol className="flex flex-col gap-3">
               {guide.resources.map((r, i) => (
                 <li key={r.url} className="flex gap-3">
@@ -164,16 +209,13 @@ export default async function ClassroomArticlePage({
                 </li>
               ))}
             </ol>
-            <p className="mt-3 text-xs text-fg-secondary">
-              Links are AI-suggested — worth a quick sanity check before diving in.
-            </p>
+            <p className="mt-3 text-xs text-fg-secondary">{s.linksCaveat}</p>
           </GuideSection>
         </>
       ) : (
         session && (
           <div className="rounded-lg border border-dashed border-border p-5 text-fg-secondary">
-            No AI guide yet — use &quot;Generate AI guide&quot; above to build the
-            learning map, hands-on steps, and top sources.
+            {s.noGuideYet}
           </div>
         )
       )}

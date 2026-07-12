@@ -2,9 +2,15 @@ import Link from "next/link";
 import { auth, signOut } from "@/auth";
 import { ThemeToggle } from "./theme-toggle";
 import { LanguageToggle } from "./language-toggle";
+import { getLang } from "@/lib/i18n-server";
+import { t } from "@/lib/i18n";
 
 export async function Header() {
   const session = await auth();
+  // The LanguageToggle sets the `lang` cookie before navigating, so the
+  // header (which has no searchParams) can rely on the cookie alone.
+  const lang = await getLang();
+  const s = t(lang).header;
 
   return (
     <header className="border-b border-border bg-bg-elevated">
@@ -21,7 +27,7 @@ export async function Header() {
           <input
             type="text"
             name="q"
-            placeholder="Search…"
+            placeholder={s.searchPlaceholder}
             className="w-full rounded-md border border-border bg-bg px-3 py-1.5 text-sm text-fg outline-none focus:border-accent"
           />
         </form>
@@ -31,19 +37,19 @@ export async function Header() {
             href="/search"
             className="rounded-md px-3 py-1.5 text-sm font-medium text-fg-secondary hover:text-accent transition-colors sm:hidden"
           >
-            Search
+            {s.search}
           </Link>
           <Link
             href="/graph"
             className="rounded-md px-3 py-1.5 text-sm font-medium text-fg-secondary hover:text-accent transition-colors"
           >
-            Graph
+            {s.graph}
           </Link>
           <Link
             href="/classroom"
             className="rounded-md px-3 py-1.5 text-sm font-medium text-fg-secondary hover:text-accent transition-colors"
           >
-            AI Classroom
+            {s.classroom}
           </Link>
 
           {session ? (
@@ -52,13 +58,13 @@ export async function Header() {
                 href="/obsidian"
                 className="rounded-md px-3 py-1.5 text-sm font-medium text-fg-secondary hover:text-accent transition-colors"
               >
-                Obsidian
+                {s.obsidian}
               </Link>
               <Link
                 href="/new"
                 className="rounded-md bg-accent px-3 py-1.5 text-sm font-semibold text-accent-fg hover:opacity-90 transition-opacity"
               >
-                + New knowledge
+                {s.newKnowledge}
               </Link>
               <form
                 action={async () => {
@@ -70,7 +76,7 @@ export async function Header() {
                   type="submit"
                   className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-fg-secondary hover:text-accent hover:border-accent transition-colors"
                 >
-                  Sign out
+                  {s.signOut}
                 </button>
               </form>
             </>
@@ -79,7 +85,7 @@ export async function Header() {
               href="/login"
               className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-fg hover:border-accent hover:text-accent transition-colors"
             >
-              Sign in
+              {s.signIn}
             </Link>
           )}
 

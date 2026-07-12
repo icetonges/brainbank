@@ -185,6 +185,10 @@ export const learningGuides = pgTable("learning_guides", {
     .references(() => notes.id, { onDelete: "cascade" }),
   learningMap: text("learning_map").default("").notNull(),
   handsOn: text("hands_on").default("").notNull(),
+  // Chinese renditions of the guide, filled by the article page's translate
+  // button (translateClassroomArticleAction). Empty string = not translated.
+  learningMapZh: text("learning_map_zh").default("").notNull(),
+  handsOnZh: text("hands_on_zh").default("").notNull(),
   resources: jsonb("resources").$type<GuideResource[]>().default([]).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),

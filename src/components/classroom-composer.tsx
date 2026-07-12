@@ -9,6 +9,7 @@ import {
   createClassroomDraft,
   publishClassroomArticle,
 } from "@/app/classroom/actions";
+import { t, type Lang } from "@/lib/i18n";
 
 interface TabOption {
   value: string;
@@ -22,7 +23,14 @@ interface TabOption {
  * publishClassroomArticle() creates the knowledge page and the AI publish
  * assist builds its learning map, hands-on steps, resources, and tags.
  */
-export function ClassroomComposer({ categories }: { categories: TabOption[] }) {
+export function ClassroomComposer({
+  categories,
+  lang = "en",
+}: {
+  categories: TabOption[];
+  lang?: Lang;
+}) {
+  const s = t(lang).classroom;
   const bodyRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -81,7 +89,7 @@ export function ClassroomComposer({ categories }: { categories: TabOption[] }) {
         <input
           type="text"
           name="topic"
-          placeholder="Topic (leave blank — AI will name it from the content)"
+          placeholder={s.topicPlaceholder}
           className="flex-1 rounded-md border border-border bg-bg-elevated px-3 py-2 text-fg outline-none focus:border-accent"
         />
         <select
@@ -89,7 +97,7 @@ export function ClassroomComposer({ categories }: { categories: TabOption[] }) {
           defaultValue=""
           className="rounded-md border border-border bg-bg-elevated px-3 py-2 text-sm text-fg outline-none focus:border-accent"
         >
-          <option value="">Subtab: auto (AI decides)</option>
+          <option value="">{s.categoryAuto}</option>
           {categories.map((c) => (
             <option key={c.value} value={c.value}>
               {c.label}
@@ -103,11 +111,7 @@ export function ClassroomComposer({ categories }: { categories: TabOption[] }) {
         name="body"
         required
         minLength={10}
-        placeholder={
-          "Drop everything here — text, markdown formatting, URLs, YouTube links…\n" +
-          "Paste or attach images and they'll upload and appear as markdown.\n\n" +
-          "Click Save and AI publish assist will build the knowledge page: a learning map, step-by-step hands-on instructions, the top 3 sources, and tags for the right AI Classroom subtab."
-        }
+        placeholder={s.bodyPlaceholder}
         onPaste={(e) => {
           const file = Array.from(e.clipboardData?.files ?? []).find((f) =>
             f.type.startsWith("image/"),
@@ -121,10 +125,10 @@ export function ClassroomComposer({ categories }: { categories: TabOption[] }) {
       />
 
       <div className="flex flex-wrap items-center gap-3">
-        <SaveButton />
+        <SaveButton lang={lang} />
 
         <label className="cursor-pointer rounded-md border border-border px-3 py-2 text-sm font-medium text-fg hover:border-accent hover:text-accent transition-colors">
-          {uploadPct === null ? "Add image" : `Uploading… ${uploadPct}%`}
+          {uploadPct === null ? s.addImage : `${s.uploading} ${uploadPct}%`}
           <input
             ref={fileInputRef}
             type="file"
@@ -144,8 +148,9 @@ export function ClassroomComposer({ categories }: { categories: TabOption[] }) {
   );
 }
 
-function SaveButton() {
+function SaveButton({ lang }: { lang: Lang }) {
   const { pending } = useFormStatus();
+  const s = t(lang).classroom;
   return (
     <div className="flex items-center gap-3">
       <button
@@ -153,12 +158,10 @@ function SaveButton() {
         disabled={pending}
         className="rounded-md bg-accent px-5 py-2 font-semibold text-accent-fg hover:opacity-90 disabled:opacity-60 transition-opacity"
       >
-        {pending ? "Publishing…" : "Save"}
+        {pending ? s.publishing : s.save}
       </button>
       {pending && (
-        <span className="text-sm text-fg-secondary">
-          AI publish assist is building the learning map, hands-on steps, and sources…
-        </span>
+        <span className="text-sm text-fg-secondary">{s.publishingHint}</span>
       )}
     </div>
   );

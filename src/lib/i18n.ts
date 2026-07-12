@@ -1,0 +1,282 @@
+import type { ClassroomCategory } from "@/lib/db/schema";
+
+// Site-wide EN/中文 UI strings. The header's LanguageToggle sets a `lang`
+// cookie and ?lang= param on every page; server components resolve the
+// language with getLang() (see i18n-server.ts) and pull their strings from
+// t(lang). `zh: typeof en` guarantees the two dictionaries never drift.
+//
+// This file is client-safe (no next/headers) so client components like the
+// classroom composer can import the dictionary directly.
+
+export type Lang = "en" | "zh";
+
+const en = {
+  header: {
+    search: "Search",
+    searchPlaceholder: "Search…",
+    graph: "Graph",
+    classroom: "AI Classroom",
+    obsidian: "Obsidian",
+    newKnowledge: "+ New knowledge",
+    signOut: "Sign out",
+    signIn: "Sign in",
+  },
+  footer: {
+    tagline: "brainbank — your daily knowledge base",
+  },
+  home: {
+    eyebrow: "The AI knowledge bank",
+    heroTitle1: "Master AI.",
+    heroTitle2: "Manage the change.",
+    heroLede:
+      "brainbank turns everything you learn about AI — articles, videos, documents, experiments — into connected knowledge pages with learning maps, hands-on steps, and curated sources. Knowledge management for the age of AI, and a field guide for the change it brings.",
+    ctaClassroom: "Explore the AI Classroom",
+    ctaCapture: "+ Capture knowledge",
+    ctaSearch: "Search the bank",
+    statPages: "Knowledge pages",
+    statArticles: "Classroom articles",
+    statConnections: "Connections",
+    statTopics: "Topics",
+    pillars: {
+      ai: {
+        title: "AI knowledge",
+        body: "Concepts, models, MCP, APIs, and evaluation — captured from articles, videos, and documents, then distilled into structured pages with learning maps and hands-on steps.",
+        cta: "Open the AI Classroom",
+      },
+      km: {
+        title: "Knowledge management",
+        body: "Every capture becomes a connected page — what, how, why — linked into a living graph so insight compounds instead of scattering across bookmarks and folders.",
+        cta: "Explore the graph",
+      },
+      cm: {
+        title: "Change management",
+        body: "Adopting AI is an organizational journey. Track best practices, use cases, and step-by-step playbooks that turn understanding into durable working habits.",
+        cta: "Browse the playbooks",
+      },
+    },
+    browseByCategory: "Browse by category",
+    allSubtabs: "All classroom subtabs →",
+    articleOne: "article",
+    articleMany: "articles",
+    latestClassroom: "Latest from the AI Classroom",
+    viewAll: "View all →",
+    recentPages: "Recent knowledge pages",
+    newKnowledgeLink: "+ New knowledge →",
+    noArticles: "No classroom articles yet.",
+    publishFirst: "Publish the first one",
+    noNotes: "No notes yet.",
+    createFirst: "Create your first one",
+    topicIndex: "Topic index",
+    dbNotConfigured: "Database not connected yet.",
+    dbNotConfiguredHint: "Set DATABASE_URL in .env.local to a Neon Postgres connection string, then run the migrations. See SETUP.md.",
+    dbFailed: "Couldn't reach the database.",
+    dbFailedHint: "Double-check DATABASE_URL and that migrations have been run.",
+  },
+  classroom: {
+    title: "AI Classroom",
+    description:
+      "Knowledge pages with an AI-built learning map, hands-on steps, and suggested sources — organized by topic.",
+    newArticle: "+ New article",
+    emptyTab: "Nothing under this subtab yet.",
+    createFirstArticle: "Create the first article",
+    autoFiled: "— the AI will file it under the right subtab automatically.",
+    loadFailed: "Couldn't load articles.",
+    reload: "The database didn't respond — reload to try again.",
+    // article page
+    updated: "updated",
+    edit: "Edit",
+    delete: "Delete",
+    regenerateGuide: "Regenerate AI guide",
+    generateGuide: "Generate AI guide",
+    learningMap: "Learning map",
+    handsOn: "Get hands-on — step by step",
+    topSources: "Top 3 sources",
+    linksCaveat: "Links are AI-suggested — worth a quick sanity check before diving in.",
+    noGuideYet:
+      "No AI guide yet — use \"Generate AI guide\" above to build the learning map, hands-on steps, and top sources.",
+    notTranslatedYet: "This article hasn't been translated to Chinese yet — showing the English original.",
+    translateToZh: "翻译为中文 (Translate to Chinese)",
+    translateToEn: "Translate to English",
+    translating: "Translating…",
+    // composer
+    newTitle: "New AI Classroom article",
+    newDescription:
+      "One box for everything — write or paste content, links, YouTube videos, and images. Saving creates the knowledge page and AI publish assist adds a learning map, hands-on steps, and the top 3 sources.",
+    topicPlaceholder: "Topic (leave blank — AI will name it from the content)",
+    categoryAuto: "Subtab: auto (AI decides)",
+    bodyPlaceholder:
+      "Drop everything here — text, markdown formatting, URLs, YouTube links…\nPaste or attach images and they'll upload and appear as markdown.\n\nClick Save and AI publish assist will build the knowledge page: a learning map, step-by-step hands-on instructions, the top 3 sources, and tags for the right AI Classroom subtab.",
+    save: "Save",
+    publishing: "Publishing…",
+    publishingHint: "AI publish assist is building the learning map, hands-on steps, and sources…",
+    addImage: "Add image",
+    uploading: "Uploading…",
+    // edit page
+    editTitle: "Edit article",
+    regenerateOnSave:
+      "Re-run AI publish assist (rebuilds the learning map, hands-on steps, sources, and tags from the edited content)",
+    saveChanges: "Save changes",
+    cancel: "Cancel",
+  },
+  newPage: {
+    title: "New knowledge",
+    intro1: "Auto-build a page from a link or document, or write one by hand below. Write ",
+    intro2: " anywhere to link it in the graph.",
+    autoBuild: "Auto-build from a source",
+    urlPlaceholder: "Paste a URL or YouTube link…",
+    fetchBuild: "Fetch & build",
+    textPlaceholder: "Paste an article, transcript, learning note, or Chinese text…",
+    buildFromText: "Build page from text",
+    pipelineHint:
+      "Fetches/parses the source, then an AI pass drafts the what/how/why/other page and suggests tags. Runs as a background job — the note shows a \"processing\" state until it's done.",
+    byHand: "Or write one by hand",
+    fieldTitle: "Title",
+    fieldWhat: "What (the concept or fact)",
+    fieldHow: "How (mechanism / steps to apply it)",
+    fieldWhy: "Why (context / reasoning)",
+    fieldOther: "Other (sources, open questions)",
+    createPage: "Create page",
+  },
+};
+
+const zh: typeof en = {
+  header: {
+    search: "搜索",
+    searchPlaceholder: "搜索…",
+    graph: "图谱",
+    classroom: "AI 课堂",
+    obsidian: "Obsidian",
+    newKnowledge: "+ 新知识",
+    signOut: "退出登录",
+    signIn: "登录",
+  },
+  footer: {
+    tagline: "brainbank — 你的每日知识库",
+  },
+  home: {
+    eyebrow: "AI 知识银行",
+    heroTitle1: "掌握 AI。",
+    heroTitle2: "驾驭变革。",
+    heroLede:
+      "brainbank 把你学到的一切 AI 知识——文章、视频、文档、实验——变成相互连接的知识页面，配有学习地图、动手步骤和精选资源。这是 AI 时代的知识管理，也是应对 AI 变革的实战指南。",
+    ctaClassroom: "探索 AI 课堂",
+    ctaCapture: "+ 捕捉知识",
+    ctaSearch: "搜索知识库",
+    statPages: "知识页面",
+    statArticles: "课堂文章",
+    statConnections: "知识连接",
+    statTopics: "主题",
+    pillars: {
+      ai: {
+        title: "AI 知识",
+        body: "概念、模型、MCP、API 与评测——从文章、视频和文档中捕捉，提炼成带学习地图和动手步骤的结构化页面。",
+        cta: "打开 AI 课堂",
+      },
+      km: {
+        title: "知识管理",
+        body: "每一次捕捉都会成为相互连接的页面——是什么、怎么做、为什么——汇入活的知识图谱，让洞见不断累积，而不是散落在书签和文件夹里。",
+        cta: "探索知识图谱",
+      },
+      cm: {
+        title: "变革管理",
+        body: "采用 AI 是一场组织变革之旅。跟踪最佳实践、应用场景和分步手册，把理解转化为持久的工作习惯。",
+        cta: "浏览实战手册",
+      },
+    },
+    browseByCategory: "按类别浏览",
+    allSubtabs: "全部课堂子栏目 →",
+    articleOne: "篇文章",
+    articleMany: "篇文章",
+    latestClassroom: "AI 课堂最新文章",
+    viewAll: "查看全部 →",
+    recentPages: "最近的知识页面",
+    newKnowledgeLink: "+ 新知识 →",
+    noArticles: "还没有课堂文章。",
+    publishFirst: "发布第一篇",
+    noNotes: "还没有笔记。",
+    createFirst: "创建第一条",
+    topicIndex: "主题索引",
+    dbNotConfigured: "数据库尚未连接。",
+    dbNotConfiguredHint: "在 .env.local 中将 DATABASE_URL 设置为 Neon Postgres 连接字符串，然后运行迁移。详见 SETUP.md。",
+    dbFailed: "无法连接数据库。",
+    dbFailedHint: "请检查 DATABASE_URL 并确认迁移已运行。",
+  },
+  classroom: {
+    title: "AI 课堂",
+    description: "带有 AI 生成的学习地图、动手步骤和推荐资源的知识页面——按主题分类整理。",
+    newArticle: "+ 新文章",
+    emptyTab: "该子栏目下还没有内容。",
+    createFirstArticle: "创建第一篇文章",
+    autoFiled: "——AI 会自动把它归入合适的子栏目。",
+    loadFailed: "文章加载失败。",
+    reload: "数据库没有响应——请刷新重试。",
+    updated: "更新于",
+    edit: "编辑",
+    delete: "删除",
+    regenerateGuide: "重新生成 AI 指南",
+    generateGuide: "生成 AI 指南",
+    learningMap: "学习地图",
+    handsOn: "动手实践——分步指南",
+    topSources: "三大推荐资源",
+    linksCaveat: "链接由 AI 推荐——使用前建议快速核实。",
+    noGuideYet: "还没有 AI 指南——点击上方“生成 AI 指南”来创建学习地图、动手步骤和推荐资源。",
+    notTranslatedYet: "这篇文章还没有中文版——当前显示英文原文。",
+    translateToZh: "翻译为中文",
+    translateToEn: "Translate to English (翻译为英文)",
+    translating: "翻译中…",
+    newTitle: "新建 AI 课堂文章",
+    newDescription:
+      "一个输入框搞定一切——撰写或粘贴内容、链接、YouTube 视频和图片。保存后会创建知识页面，AI 发布助手会自动生成学习地图、动手步骤和三大推荐资源。",
+    topicPlaceholder: "主题（留空则由 AI 根据内容自动命名）",
+    categoryAuto: "子栏目：自动（由 AI 判断）",
+    bodyPlaceholder:
+      "把所有内容放进来——文字、Markdown 格式、网址、YouTube 链接……\n粘贴或添加图片会自动上传并以 Markdown 形式插入。\n\n点击保存后，AI 发布助手会生成知识页面：学习地图、分步动手指南、三大推荐资源，以及对应 AI 课堂子栏目的标签。",
+    save: "保存",
+    publishing: "发布中…",
+    publishingHint: "AI 发布助手正在生成学习地图、动手步骤和推荐资源……",
+    addImage: "添加图片",
+    uploading: "上传中…",
+    editTitle: "编辑文章",
+    regenerateOnSave: "重新运行 AI 发布助手（根据编辑后的内容重建学习地图、动手步骤、资源和标签）",
+    saveChanges: "保存修改",
+    cancel: "取消",
+  },
+  newPage: {
+    title: "新知识",
+    intro1: "从链接或文档自动生成页面，或在下方手动撰写。在任意位置写 ",
+    intro2: " 即可在图谱中建立链接。",
+    autoBuild: "从来源自动生成",
+    urlPlaceholder: "粘贴网址或 YouTube 链接…",
+    fetchBuild: "抓取并生成",
+    textPlaceholder: "粘贴文章、字幕稿、学习笔记或中文文本…",
+    buildFromText: "从文本生成页面",
+    pipelineHint:
+      "先抓取/解析来源，再由 AI 起草“是什么/怎么做/为什么/其他”页面并推荐标签。作为后台任务运行——完成前笔记会显示“处理中”状态。",
+    byHand: "或手动撰写",
+    fieldTitle: "标题",
+    fieldWhat: "是什么（概念或事实）",
+    fieldHow: "怎么做（机制 / 应用步骤）",
+    fieldWhy: "为什么（背景 / 理由）",
+    fieldOther: "其他（来源、待解问题）",
+    createPage: "创建页面",
+  },
+};
+
+export function t(lang: Lang) {
+  return lang === "zh" ? zh : en;
+}
+
+/** Chinese labels for the AI Classroom subtabs (English labels live in
+ * src/lib/classroom.ts, next to the enum). */
+export const CLASSROOM_TAB_LABELS_ZH: Record<ClassroomCategory, string> = {
+  knowledge: "知识",
+  skill: "技能",
+  mcp: "MCP",
+  api: "API",
+  "best-practices": "最佳实践",
+  "use-cases": "应用场景",
+  "step-by-step": "分步指南",
+  "ai-evaluation": "AI 评测",
+  "ai-models": "AI 模型",
+  ai: "AI",
+};

@@ -3,6 +3,8 @@ import "./globals.css";
 import { ThemeScript } from "@/components/theme-script";
 import { Header } from "@/components/header";
 import { AppSessionProvider } from "@/components/session-provider";
+import { getLang } from "@/lib/i18n-server";
+import { t } from "@/lib/i18n";
 
 export const metadata: Metadata = {
   title: "brainbank",
@@ -10,13 +12,15 @@ export const metadata: Metadata = {
     "A daily knowledge base: capture text, links, videos and documents; connect them; understand what, how, and why.",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const lang = await getLang();
+
   return (
-    <html lang="en" className="h-full">
+    <html lang={lang === "zh" ? "zh-CN" : "en"} className="h-full">
       <head>
         <ThemeScript />
       </head>
@@ -27,7 +31,7 @@ export default function RootLayout({
             {children}
           </main>
           <footer className="border-t border-border py-6 text-center text-sm text-fg-secondary">
-            brainbank — your daily knowledge base
+            {t(lang).footer.tagline}
           </footer>
         </AppSessionProvider>
       </body>

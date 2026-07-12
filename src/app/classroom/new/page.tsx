@@ -1,26 +1,35 @@
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import { CLASSROOM_TABS } from "@/lib/classroom";
+import { getLang } from "@/lib/i18n-server";
+import { t, CLASSROOM_TAB_LABELS_ZH } from "@/lib/i18n";
 import { ClassroomComposer } from "@/components/classroom-composer";
 
-export default async function NewClassroomArticlePage() {
+export default async function NewClassroomArticlePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ lang?: string }>;
+}) {
   const session = await auth();
   if (!session) redirect("/login");
+
+  const { lang: langParam } = await searchParams;
+  const lang = await getLang(langParam);
+  const s = t(lang).classroom;
 
   return (
     <div className="flex w-full flex-col gap-6">
       <div>
-        <h1 className="text-2xl font-semibold text-fg">New AI Classroom article</h1>
-        <p className="mt-1 text-fg-secondary">
-          One box for everything — write or paste content, links, YouTube
-          videos, and images. Saving creates the knowledge page and AI
-          publish assist adds a learning map, hands-on steps, and the top 3
-          sources.
-        </p>
+        <h1 className="text-2xl font-semibold text-fg">{s.newTitle}</h1>
+        <p className="mt-1 text-fg-secondary">{s.newDescription}</p>
       </div>
 
       <ClassroomComposer
-        categories={CLASSROOM_TABS.map(({ value, label }) => ({ value, label }))}
+        lang={lang}
+        categories={CLASSROOM_TABS.map(({ value, label }) => ({
+          value,
+          label: lang === "zh" ? CLASSROOM_TAB_LABELS_ZH[value] : label,
+        }))}
       />
     </div>
   );

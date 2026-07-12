@@ -12,7 +12,7 @@ import {
 import type { ClassroomCategory } from "@/lib/db/schema";
 import { isClassroomCategory } from "@/lib/classroom";
 import { slugify } from "@/lib/slug";
-import { publishAssist, type PublishAssistResult } from "@/lib/ai/tasks";
+import { publishAssist, translateText, type PublishAssistResult } from "@/lib/ai/tasks";
 import { detectPrimaryLanguage } from "@/lib/intake";
 import { linkWikilinksFromText } from "@/lib/notes/link-wikilinks";
 import { linkRelatedByTags } from "@/lib/notes/link-related";
@@ -154,8 +154,11 @@ export async function publishClassroomArticle(formData: FormData) {
       .where(eq(notes.id, draftNoteId));
     noteId = draftNoteId;
 
+    // Store the body under its detected language so the EN/中文 toggle and
+    // the translate button treat it correctly (a Chinese article lives in
+    // the zh row, its English translation in the en row, and vice versa).
     const content = await db.query.noteContent.findFirst({
-      where: and(eq(noteContent.noteId, noteId), eq(noteContent.language, "en")),
+      where: and(eq(noteContent.noteId, noteId), eq(noteContent.language, primaryLanguage)),
     });
     if (content) {
       await db
@@ -165,7 +168,7 @@ export async function publishClassroomArticle(formData: FormData) {
     } else {
       await db.insert(noteContent).values({
         noteId,
-        language: "en",
+        language: primaryLanguage,
         bodyMarkdown: body,
         summary: assist?.summary ?? "",
       });
@@ -186,7 +189,7 @@ export async function publishClassroomArticle(formData: FormData) {
 
     await db.insert(noteContent).values({
       noteId,
-      language: "en",
+      language: primaryLanguage,
       bodyMarkdown: body,
       summary: assist?.summary ?? "",
     });
@@ -210,9 +213,17 @@ export async function regenerateGuideAction(noteId: number, slug: string) {
   await requireOwner();
 
   const note = await db.query.notes.findFirst({ where: eq(notes.id, noteId) });
-  const content = await db.query.noteContent.findFirst({
-    where: and(eq(noteContent.noteId, noteId), eq(noteContent.language, "en")),
-  });
+  // The original body lives in the primary-language row (see
+  // publishClassroomArticle); fall back to whichever row has content.
+  let content = note
+    ? await db.query.noteContent.findFirst({
+        where: and(eq(noteContent.noteId, noteId), eq(noteContent.language, note.primaryLanguage)),
+      })
+    : undefined;
+  if (!content?.bodyMarkdown) {
+    const rows = await db.query.noteContent.findMany({ where: eq(noteContent.noteId, noteId) });
+    content = rows.find((r) => r.bodyMarkdown);
+  }
   if (!note || !content?.bodyMarkdown) throw new Error("Nothing to build a guide from");
 
   const assist = await publishAssist({
@@ -252,18 +263,23 @@ export async function updateClassroomArticle(
   if (!topic) throw new Error("Topic is required");
   if (!isClassroomCategory(rawCategory)) throw new Error("Pick a category");
 
+  const note = await db.query.notes.findFirst({ where: eq(notes.id, noteId) });
+  if (!note) throw new Error("Article not found");
+
   await db
     .update(notes)
     .set({ title: topic.slice(0, 500), category: rawCategory, updatedAt: new Date() })
     .where(eq(notes.id, noteId));
 
+  // Edits land in the original (primary-language) row; a stale translation
+  // in the other row can be refreshed with the article page's translate button.
   const content = await db.query.noteContent.findFirst({
-    where: and(eq(noteContent.noteId, noteId), eq(noteContent.language, "en")),
+    where: and(eq(noteContent.noteId, noteId), eq(noteContent.language, note.primaryLanguage)),
   });
   if (content) {
     await db.update(noteContent).set({ bodyMarkdown: body }).where(eq(noteContent.id, content.id));
   } else {
-    await db.insert(noteContent).values({ noteId, language: "en", bodyMarkdown: body });
+    await db.insert(noteContent).values({ noteId, language: note.primaryLanguage, bodyMarkdown: body });
   }
 
   await linkWikilinksFromText(noteId, body);
@@ -287,6 +303,88 @@ export async function updateClassroomArticle(
   revalidatePath(`/classroom/${slug}`);
   revalidatePath("/classroom");
   redirect(`/classroom/${slug}`);
+}
+
+/**
+ * The article page's EN/中文 translate button. Translates the body and
+ * summary into the target language (stored as that language's note_content
+ * row) and, when the target is Chinese, also renders the learning guide's
+ * map and hands-on steps into the zh columns. English guides are the base
+ * columns; if the article was originally Chinese, translating to English
+ * moves the Chinese guide into the zh columns and puts English in the base.
+ */
+export async function translateClassroomArticleAction(
+  noteId: number,
+  slug: string,
+  target: "en" | "zh",
+) {
+  await requireOwner();
+
+  const note = await db.query.notes.findFirst({ where: eq(notes.id, noteId) });
+  if (!note) throw new Error("Article not found");
+
+  const source = target === "zh" ? "en" : "zh";
+  let sourceContent = await db.query.noteContent.findFirst({
+    where: and(eq(noteContent.noteId, noteId), eq(noteContent.language, source)),
+  });
+  if (!sourceContent?.bodyMarkdown) {
+    const rows = await db.query.noteContent.findMany({ where: eq(noteContent.noteId, noteId) });
+    sourceContent = rows.find((r) => r.bodyMarkdown && r.language !== target);
+  }
+  if (!sourceContent?.bodyMarkdown) throw new Error("Nothing to translate yet");
+
+  const [body, summary] = await Promise.all([
+    translateText(sourceContent.bodyMarkdown, target),
+    translateText(sourceContent.summary ?? "", target),
+  ]);
+
+  const existing = await db.query.noteContent.findFirst({
+    where: and(eq(noteContent.noteId, noteId), eq(noteContent.language, target)),
+  });
+  if (existing) {
+    await db
+      .update(noteContent)
+      .set({ bodyMarkdown: body, summary })
+      .where(eq(noteContent.id, existing.id));
+  } else {
+    await db.insert(noteContent).values({ noteId, language: target, bodyMarkdown: body, summary });
+  }
+
+  // Translate the learning guide too.
+  const guide = await db.query.learningGuides.findFirst({
+    where: eq(learningGuides.noteId, noteId),
+  });
+  if (guide && (guide.learningMap || guide.handsOn)) {
+    if (target === "zh") {
+      const [mapZh, handsOnZh] = await Promise.all([
+        guide.learningMap ? translateText(guide.learningMap, "zh") : Promise.resolve(""),
+        guide.handsOn ? translateText(guide.handsOn, "zh") : Promise.resolve(""),
+      ]);
+      await db
+        .update(learningGuides)
+        .set({ learningMapZh: mapZh, handsOnZh, updatedAt: new Date() })
+        .where(eq(learningGuides.id, guide.id));
+    } else if (note.primaryLanguage === "zh") {
+      // Base guide is Chinese: preserve it in the zh columns, put the new
+      // English rendition in the base columns.
+      const [mapEn, handsOnEn] = await Promise.all([
+        guide.learningMap ? translateText(guide.learningMap, "en") : Promise.resolve(""),
+        guide.handsOn ? translateText(guide.handsOn, "en") : Promise.resolve(""),
+      ]);
+      await db
+        .update(learningGuides)
+        .set({
+          learningMap: mapEn,
+          handsOn: handsOnEn,
+          learningMapZh: guide.learningMapZh || guide.learningMap,
+          handsOnZh: guide.handsOnZh || guide.handsOn,
+          updatedAt: new Date(),
+        })
+        .where(eq(learningGuides.id, guide.id));
+    }
+  }
+
+  revalidatePath(`/classroom/${slug}`);
 }
 
 export async function deleteClassroomArticle(noteId: number) {

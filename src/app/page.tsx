@@ -1,10 +1,11 @@
 import Link from "next/link";
-import { cookies } from "next/headers";
 import { auth } from "@/auth";
 import { db, isDatabaseConfigured } from "@/lib/db";
 import { notes, edges, tags, noteTags } from "@/lib/db/schema";
 import type { ClassroomCategory } from "@/lib/db/schema";
 import { CLASSROOM_TABS } from "@/lib/classroom";
+import { getLang } from "@/lib/i18n-server";
+import { t, CLASSROOM_TAB_LABELS_ZH } from "@/lib/i18n";
 import { desc, eq, and, isNotNull, isNull, count } from "drizzle-orm";
 import { HeroVisual, PillarIcon, CategoryGlyph } from "@/components/home-visuals";
 
@@ -87,30 +88,6 @@ async function loadHome(isOwner: boolean): Promise<{ data: HomeData | null; erro
   }
 }
 
-const PILLARS = [
-  {
-    kind: "ai" as const,
-    title: "AI knowledge",
-    body: "Concepts, models, MCP, APIs, and evaluation — captured from articles, videos, and documents, then distilled into structured pages with learning maps and hands-on steps.",
-    href: "/classroom",
-    cta: "Open the AI Classroom",
-  },
-  {
-    kind: "km" as const,
-    title: "Knowledge management",
-    body: "Every capture becomes a connected page — what, how, why — linked into a living graph so insight compounds instead of scattering across bookmarks and folders.",
-    href: "/graph",
-    cta: "Explore the graph",
-  },
-  {
-    kind: "cm" as const,
-    title: "Change management",
-    body: "Adopting AI is an organizational journey. Track best practices, use cases, and step-by-step playbooks that turn understanding into durable working habits.",
-    href: "/classroom?tab=best-practices",
-    cta: "Browse the playbooks",
-  },
-];
-
 export default async function Home({
   searchParams,
 }: {
@@ -119,12 +96,18 @@ export default async function Home({
   const session = await auth();
   const { data, error } = await loadHome(Boolean(session));
 
-  // Carry the header's EN/中文 preference into note links (see
-  // language-toggle.tsx) — same behavior as the previous homepage.
   const { lang: langParam } = await searchParams;
-  const cookieStore = await cookies();
-  const lang =
-    langParam === "zh" ? "zh" : langParam === "en" ? "en" : cookieStore.get("lang")?.value === "zh" ? "zh" : "en";
+  const lang = await getLang(langParam);
+  const s = t(lang).home;
+  const dateLocale = lang === "zh" ? "zh-CN" : undefined;
+  const tabLabel = (value: ClassroomCategory, enLabel: string) =>
+    lang === "zh" ? CLASSROOM_TAB_LABELS_ZH[value] : enLabel;
+
+  const pillars = [
+    { kind: "ai" as const, href: "/classroom", ...s.pillars.ai },
+    { kind: "km" as const, href: "/graph", ...s.pillars.km },
+    { kind: "cm" as const, href: "/classroom?tab=best-practices", ...s.pillars.cm },
+  ];
 
   return (
     <div className="flex flex-1 flex-col gap-14">
@@ -132,50 +115,44 @@ export default async function Home({
       <section className="grid items-center gap-10 md:grid-cols-[1.1fr_0.9fr]">
         <div className="flex flex-col gap-5">
           <p className="text-sm font-semibold uppercase tracking-[0.2em] text-accent">
-            The AI knowledge bank
+            {s.eyebrow}
           </p>
           <h1 className="text-4xl font-semibold leading-tight tracking-tight text-fg sm:text-5xl">
-            Master AI.
+            {s.heroTitle1}
             <br />
-            Manage the change.
+            {s.heroTitle2}
           </h1>
-          <p className="max-w-xl text-lg text-fg-secondary">
-            brainbank turns everything you learn about AI — articles, videos,
-            documents, experiments — into connected knowledge pages with
-            learning maps, hands-on steps, and curated sources. Knowledge
-            management for the age of AI, and a field guide for the change it
-            brings.
-          </p>
+          <p className="max-w-xl text-lg text-fg-secondary">{s.heroLede}</p>
           <div className="flex flex-wrap gap-3 pt-1">
             <Link
               href="/classroom"
               className="rounded-md bg-accent px-5 py-2.5 font-semibold text-accent-fg hover:opacity-90 transition-opacity"
             >
-              Explore the AI Classroom
+              {s.ctaClassroom}
             </Link>
             {session ? (
               <Link
                 href="/classroom/new"
                 className="rounded-md border border-border px-5 py-2.5 font-semibold text-fg hover:border-accent hover:text-accent transition-colors"
               >
-                + Capture knowledge
+                {s.ctaCapture}
               </Link>
             ) : (
               <Link
                 href="/search"
                 className="rounded-md border border-border px-5 py-2.5 font-semibold text-fg hover:border-accent hover:text-accent transition-colors"
               >
-                Search the bank
+                {s.ctaSearch}
               </Link>
             )}
           </div>
 
           {data && (
             <dl className="mt-2 grid grid-cols-2 gap-x-8 gap-y-3 border-t border-border pt-4 sm:grid-cols-4">
-              <Stat label="Knowledge pages" value={data.stats.pages} />
-              <Stat label="Classroom articles" value={data.stats.articles} />
-              <Stat label="Connections" value={data.stats.connections} />
-              <Stat label="Topics" value={data.stats.topics} />
+              <Stat label={s.statPages} value={data.stats.pages} />
+              <Stat label={s.statArticles} value={data.stats.articles} />
+              <Stat label={s.statConnections} value={data.stats.connections} />
+              <Stat label={s.statTopics} value={data.stats.topics} />
             </dl>
           )}
         </div>
@@ -188,28 +165,20 @@ export default async function Home({
       {/* ---- DB state banners ---- */}
       {error === "not-configured" && (
         <div className="rounded-lg border border-border bg-bg-elevated p-5 text-fg-secondary">
-          <p className="font-medium text-fg">Database not connected yet.</p>
-          <p className="mt-1 text-sm">
-            Set <code className="text-accent">DATABASE_URL</code> in{" "}
-            <code className="text-accent">.env.local</code> to a Neon Postgres
-            connection string, then run the migrations. See{" "}
-            <code className="text-accent">SETUP.md</code>.
-          </p>
+          <p className="font-medium text-fg">{s.dbNotConfigured}</p>
+          <p className="mt-1 text-sm">{s.dbNotConfiguredHint}</p>
         </div>
       )}
       {error === "connection-failed" && (
         <div className="rounded-lg border border-danger/40 bg-bg-elevated p-5 text-fg-secondary">
-          <p className="font-medium text-fg">Couldn&apos;t reach the database.</p>
-          <p className="mt-1 text-sm">
-            Double-check <code className="text-accent">DATABASE_URL</code> and
-            that migrations have been run.
-          </p>
+          <p className="font-medium text-fg">{s.dbFailed}</p>
+          <p className="mt-1 text-sm">{s.dbFailedHint}</p>
         </div>
       )}
 
       {/* ---- Three pillars ---- */}
       <section className="grid gap-4 md:grid-cols-3">
-        {PILLARS.map((p) => (
+        {pillars.map((p) => (
           <div
             key={p.kind}
             className="flex flex-col gap-3 rounded-xl border border-border bg-bg-elevated p-6"
@@ -229,9 +198,9 @@ export default async function Home({
       {/* ---- Category index ---- */}
       <section className="flex flex-col gap-4">
         <div className="flex items-baseline justify-between gap-4">
-          <h2 className="text-xl font-semibold text-fg">Browse by category</h2>
+          <h2 className="text-xl font-semibold text-fg">{s.browseByCategory}</h2>
           <Link href="/classroom" className="text-sm text-accent hover:underline">
-            All classroom subtabs →
+            {s.allSubtabs}
           </Link>
         </div>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
@@ -247,10 +216,10 @@ export default async function Home({
                   <CategoryGlyph category={value} />
                 </span>
                 <span className="font-medium text-fg group-hover:text-accent transition-colors">
-                  {label}
+                  {tabLabel(value, label)}
                 </span>
                 <span className="text-xs text-fg-secondary">
-                  {n} {n === 1 ? "article" : "articles"}
+                  {lang === "zh" ? `${n} ${s.articleMany}` : `${n} ${n === 1 ? s.articleOne : s.articleMany}`}
                 </span>
               </Link>
             );
@@ -262,9 +231,9 @@ export default async function Home({
       <section className="grid gap-8 lg:grid-cols-2">
         <div className="flex flex-col gap-4">
           <div className="flex items-baseline justify-between gap-4">
-            <h2 className="text-xl font-semibold text-fg">Latest from the AI Classroom</h2>
+            <h2 className="text-xl font-semibold text-fg">{s.latestClassroom}</h2>
             <Link href="/classroom" className="text-sm text-accent hover:underline">
-              View all →
+              {s.viewAll}
             </Link>
           </div>
           {data && data.latestArticles.length > 0 ? (
@@ -272,7 +241,7 @@ export default async function Home({
               {data.latestArticles.map((a) => (
                 <li key={a.slug} className="p-4">
                   <Link
-                    href={`/classroom/${a.slug}`}
+                    href={`/classroom/${a.slug}?lang=${lang}`}
                     className="font-medium text-fg hover:text-accent transition-colors"
                   >
                     {a.title}
@@ -280,20 +249,23 @@ export default async function Home({
                   <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-fg-secondary">
                     {a.category && (
                       <span className="rounded-full border border-accent/50 px-2 py-0.5 text-accent">
-                        {CLASSROOM_TABS.find((t) => t.value === a.category)?.label ?? a.category}
+                        {tabLabel(
+                          a.category,
+                          CLASSROOM_TABS.find((tab) => tab.value === a.category)?.label ?? a.category,
+                        )}
                       </span>
                     )}
-                    <span>{new Date(a.createdAt).toLocaleString()}</span>
+                    <span>{new Date(a.createdAt).toLocaleString(dateLocale)}</span>
                   </div>
                 </li>
               ))}
             </ul>
           ) : (
             <EmptyPanel>
-              No classroom articles yet.{" "}
+              {s.noArticles}{" "}
               {session && (
                 <Link href="/classroom/new" className="text-accent hover:underline">
-                  Publish the first one
+                  {s.publishFirst}
                 </Link>
               )}
             </EmptyPanel>
@@ -302,10 +274,10 @@ export default async function Home({
 
         <div className="flex flex-col gap-4">
           <div className="flex items-baseline justify-between gap-4">
-            <h2 className="text-xl font-semibold text-fg">Recent knowledge pages</h2>
+            <h2 className="text-xl font-semibold text-fg">{s.recentPages}</h2>
             {session && (
               <Link href="/new" className="text-sm text-accent hover:underline">
-                + New knowledge →
+                {s.newKnowledgeLink}
               </Link>
             )}
           </div>
@@ -320,17 +292,17 @@ export default async function Home({
                     {n.title}
                   </Link>
                   <div className="mt-1 text-xs text-fg-secondary">
-                    {n.status} · {n.sourceType} · {new Date(n.updatedAt).toLocaleDateString()}
+                    {n.status} · {n.sourceType} · {new Date(n.updatedAt).toLocaleDateString(dateLocale)}
                   </div>
                 </li>
               ))}
             </ul>
           ) : (
             <EmptyPanel>
-              No notes yet.{" "}
+              {s.noNotes}{" "}
               {session && (
                 <Link href="/new" className="text-accent hover:underline">
-                  Create your first one
+                  {s.createFirst}
                 </Link>
               )}
             </EmptyPanel>
@@ -341,16 +313,16 @@ export default async function Home({
       {/* ---- Topic index ---- */}
       {data && data.topTags.length > 0 && (
         <section className="flex flex-col gap-4">
-          <h2 className="text-xl font-semibold text-fg">Topic index</h2>
+          <h2 className="text-xl font-semibold text-fg">{s.topicIndex}</h2>
           <div className="flex flex-wrap gap-2">
-            {data.topTags.map((t) => (
+            {data.topTags.map((tag) => (
               <Link
-                key={t.name}
-                href={`/search?q=${encodeURIComponent(t.name)}`}
+                key={tag.name}
+                href={`/search?q=${encodeURIComponent(tag.name)}`}
                 className="rounded-full border border-border bg-bg-elevated px-3 py-1.5 text-sm text-fg-secondary hover:border-accent hover:text-accent transition-colors"
               >
-                #{t.name}
-                <span className="ml-1.5 text-xs opacity-70">{t.uses}</span>
+                #{tag.name}
+                <span className="ml-1.5 text-xs opacity-70">{tag.uses}</span>
               </Link>
             ))}
           </div>
