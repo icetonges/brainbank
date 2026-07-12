@@ -201,6 +201,10 @@ export const learningGuides = pgTable("learning_guides", {
 export const obsidianSyncRuns = pgTable("obsidian_sync_runs", {
   id: serial("id").primaryKey(),
   status: jobStatusEnum("status").default("queued").notNull(),
+  // How many vault .md files were found in the repo at all — filesTotal is
+  // only the *changed* subset, so without this a misconfigured repo/path
+  // (0 files found) looks identical to "everything already up to date".
+  filesScanned: integer("files_scanned"),
   filesTotal: integer("files_total"),
   filesProcessed: integer("files_processed").default(0),
   filesFailed: integer("files_failed").default(0),

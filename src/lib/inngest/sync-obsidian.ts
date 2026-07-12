@@ -19,6 +19,21 @@ export interface ObsidianSyncEventData {
 export async function runObsidianSyncDirect(runId: number) {
   try {
     const files = await listVaultFiles();
+
+    // 0 files found is almost always a setup problem (wrong repo, branch,
+    // or folder — or the vault was never pushed to GitHub), not a healthy
+    // no-op. Fail loudly with the exact config so it's fixable from the UI.
+    if (files.length === 0) {
+      const repo = process.env.GITHUB_OBSIDIAN_REPO;
+      const branch = process.env.GITHUB_OBSIDIAN_BRANCH || "main";
+      const vaultPath = process.env.GITHUB_OBSIDIAN_PATH || "notes";
+      throw new Error(
+        `No Markdown files found under "${vaultPath}/" on branch "${branch}" of ${repo}. ` +
+          `Push your Obsidian vault's .md files to that folder, or point GITHUB_OBSIDIAN_REPO / ` +
+          `GITHUB_OBSIDIAN_PATH / GITHUB_OBSIDIAN_BRANCH at the right place (see SETUP.md).`,
+      );
+    }
+
     const existing = await db
       .select({ sourcePath: notes.sourcePath, sourceSha: notes.sourceSha })
       .from(notes)
@@ -26,7 +41,7 @@ export async function runObsidianSyncDirect(runId: number) {
     const knownSha = new Map(existing.map((note) => [note.sourcePath as string, note.sourceSha]));
     const changed = files.filter((file) => knownSha.get(file.path) !== file.sha);
 
-    await markSyncRunning(runId, changed.length);
+    await markSyncRunning(runId, changed.length, files.length);
     let processed = 0;
     let failed = 0;
     for (const file of changed) {

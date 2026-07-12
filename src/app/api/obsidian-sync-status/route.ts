@@ -17,7 +17,14 @@ export async function GET() {
   });
 
   if (!run) {
-    return Response.json({ status: null, filesTotal: null, filesProcessed: 0, filesFailed: 0, error: null });
+    return Response.json({
+      status: null,
+      filesScanned: null,
+      filesTotal: null,
+      filesProcessed: 0,
+      filesFailed: 0,
+      error: null,
+    });
   }
 
   const staleError = staleJobMessage(run.status, run.startedAt ?? run.createdAt);
@@ -28,6 +35,7 @@ export async function GET() {
       .where(eq(obsidianSyncRuns.id, run.id));
     return Response.json({
       status: "failed",
+      filesScanned: run.filesScanned,
       filesTotal: run.filesTotal,
       filesProcessed: run.filesProcessed,
       filesFailed: run.filesFailed,
@@ -37,6 +45,7 @@ export async function GET() {
 
   return Response.json({
     status: run.status,
+    filesScanned: run.filesScanned,
     filesTotal: run.filesTotal,
     filesProcessed: run.filesProcessed,
     filesFailed: run.filesFailed,

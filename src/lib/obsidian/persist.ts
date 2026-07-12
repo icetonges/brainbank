@@ -149,10 +149,10 @@ export async function createSyncRun(): Promise<number> {
   return run.id;
 }
 
-export async function markSyncRunning(runId: number, filesTotal: number) {
+export async function markSyncRunning(runId: number, filesTotal: number, filesScanned?: number) {
   await db
     .update(obsidianSyncRuns)
-    .set({ status: "running", filesTotal, startedAt: new Date() })
+    .set({ status: "running", filesTotal, filesScanned: filesScanned ?? null, startedAt: new Date() })
     .where(eq(obsidianSyncRuns.id, runId));
 }
 

@@ -2,7 +2,8 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import { obsidianSyncRuns } from "@/lib/db/schema";
-import { desc } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
+import { staleJobMessage } from "@/lib/job-health";
 import { isObsidianSyncConfigured } from "@/lib/obsidian/github";
 import { triggerObsidianSyncAction } from "./actions";
 import { ObsidianSyncStatus } from "@/components/obsidian-sync-status";
@@ -16,9 +17,23 @@ export default async function ObsidianPage() {
 
   const configured = isObsidianSyncConfigured();
   const automaticSyncConfigured = isObsidianWebhookConfigured();
-  const latestRun = configured
+  let latestRun = configured
     ? await db.query.obsidianSyncRuns.findFirst({ orderBy: desc(obsidianSyncRuns.createdAt) })
     : undefined;
+
+  // Self-heal a run whose background worker died (dev-server restart,
+  // serverless timeout): without this the "Sync now" button stays disabled
+  // on "Syncing…" forever. Same rule the polling endpoint applies.
+  if (latestRun && (latestRun.status === "queued" || latestRun.status === "running")) {
+    const staleError = staleJobMessage(latestRun.status, latestRun.startedAt ?? latestRun.createdAt);
+    if (staleError) {
+      await db
+        .update(obsidianSyncRuns)
+        .set({ status: "failed", error: staleError, finishedAt: new Date() })
+        .where(eq(obsidianSyncRuns.id, latestRun.id));
+      latestRun = { ...latestRun, status: "failed", error: staleError };
+    }
+  }
 
   const syncing = latestRun?.status === "queued" || latestRun?.status === "running";
 
@@ -70,6 +85,7 @@ export default async function ObsidianPage() {
           </div>
           <ObsidianSyncStatus
             initialStatus={latestRun?.status ?? null}
+            initialFilesScanned={latestRun?.filesScanned ?? null}
             initialFilesTotal={latestRun?.filesTotal ?? null}
             initialFilesProcessed={latestRun?.filesProcessed ?? null}
             initialFilesFailed={latestRun?.filesFailed ?? null}
