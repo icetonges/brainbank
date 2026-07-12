@@ -1,5 +1,10 @@
 import type { Metadata } from "next";
 import "./globals.css";
+// Math (KaTeX) and code syntax-highlighting styles for the Markdown
+// renderer (src/components/markdown.tsx) — imported once here so every
+// route that renders article/note bodies gets them.
+import "katex/dist/katex.min.css";
+import "highlight.js/styles/github-dark.css";
 import { ThemeScript } from "@/components/theme-script";
 import { Header } from "@/components/header";
 import { AppSessionProvider } from "@/components/session-provider";

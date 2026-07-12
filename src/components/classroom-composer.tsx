@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
+import TurndownService from "turndown";
 import { signAndUploadFile } from "@/lib/upload-client";
 import { mediaKindFromMimeType } from "@/lib/storage/media-kind";
 import { attachMediaAction } from "@/app/notes/[slug]/actions";
@@ -10,6 +11,19 @@ import {
   publishClassroomArticle,
 } from "@/app/classroom/actions";
 import { t, type Lang } from "@/lib/i18n";
+
+// Converts pasted rich HTML (from a rendered webpage, Google Doc, Notion,
+// Word, another classroom article, etc.) into the markdown syntax this
+// app's body field and <Markdown> renderer expect — headings, bold/italic,
+// links, lists, blockquotes, and fenced code blocks with their language
+// tag preserved (turndown's built-in fencedCodeBlock rule reads the
+// `language-xxx` class turndown finds on the <code> element).
+const turndown = new TurndownService({
+  headingStyle: "atx",
+  codeBlockStyle: "fenced",
+  fence: "```",
+  bulletListMarker: "-",
+});
 
 interface TabOption {
   value: string;
@@ -131,6 +145,23 @@ export function ClassroomComposer({
           if (file) {
             e.preventDefault();
             handleImage(file);
+            return;
+          }
+
+          // Rich sources (a rendered webpage, Google Doc, Notion, Word,
+          // another classroom article) put an HTML payload on the
+          // clipboard alongside the plain-text one. A bare <textarea>
+          // only ever uses the plain-text version, which is why headings,
+          // bold, and code blocks were vanishing on paste — convert the
+          // HTML to markdown ourselves so the formatting survives.
+          const html = e.clipboardData?.getData("text/html");
+          if (html && html.trim()) {
+            e.preventDefault();
+            const markdown = turndown.turndown(html).trim();
+            const el = bodyRef.current;
+            const start = el?.selectionStart ?? el?.value.length ?? 0;
+            const end = el?.selectionEnd ?? start;
+            insertAt(markdown, start, end);
           }
         }}
         className="min-h-[60vh] flex-1 resize-y rounded-lg border border-border bg-bg-elevated p-4 font-mono text-sm leading-relaxed text-fg outline-none focus:border-accent"

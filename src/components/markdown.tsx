@@ -1,5 +1,8 @@
 import ReactMarkdown, { type ExtraProps } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import rehypeHighlight from "rehype-highlight";
 
 /** react-markdown passes a `node` prop (the AST node) to every component
  * override — it must not be spread onto a DOM element. */
@@ -18,12 +21,15 @@ export function Markdown({ children }: { children: string }) {
   return (
     <div className="flex flex-col gap-3 text-fg leading-relaxed">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[rehypeKatex, rehypeHighlight]}
         components={{
           h1: (p) => <h2 className="mt-2 text-xl font-semibold text-fg" {...dom(p)} />,
           h2: (p) => <h3 className="mt-2 text-lg font-semibold text-fg" {...dom(p)} />,
           h3: (p) => <h4 className="mt-1 text-base font-semibold text-fg" {...dom(p)} />,
           p: (p) => <p {...dom(p)} />,
+          strong: (p) => <strong className="font-semibold text-fg" {...dom(p)} />,
+          em: (p) => <em className="italic" {...dom(p)} />,
           a: (p) => (
             <a
               className="text-accent underline underline-offset-2 hover:opacity-80"
@@ -41,15 +47,33 @@ export function Markdown({ children }: { children: string }) {
               {...dom(p)}
             />
           ),
-          code: (p) => (
-            <code
-              className="rounded bg-bg px-1.5 py-0.5 font-mono text-[0.85em] text-accent"
-              {...dom(p)}
-            />
-          ),
+          // rehype-highlight tags fenced code blocks' <code> with a
+          // "hljs language-xxx" className (and colored token spans inside)
+          // — leave those alone so the syntax-highlight theme applies.
+          // Inline `code` spans get no className from rehype-highlight, so
+          // that's how we tell the two apart and give inline code its own
+          // pill styling instead.
+          code: (p) => {
+            const { className, children, ...rest } = dom(p);
+            if (className) {
+              return (
+                <code className={className} {...rest}>
+                  {children}
+                </code>
+              );
+            }
+            return (
+              <code
+                className="rounded bg-bg px-1.5 py-0.5 font-mono text-[0.85em] text-accent"
+                {...rest}
+              >
+                {children}
+              </code>
+            );
+          },
           pre: (p) => (
             <pre
-              className="overflow-x-auto rounded-md border border-border bg-bg p-3 text-sm [&_code]:bg-transparent [&_code]:p-0 [&_code]:text-fg"
+              className="overflow-x-auto rounded-md border border-border bg-bg p-3 text-sm"
               {...dom(p)}
             />
           ),
