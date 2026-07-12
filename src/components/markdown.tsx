@@ -1,0 +1,86 @@
+import ReactMarkdown, { type ExtraProps } from "react-markdown";
+import remarkGfm from "remark-gfm";
+
+/** react-markdown passes a `node` prop (the AST node) to every component
+ * override — it must not be spread onto a DOM element. */
+function dom<T>(props: T & ExtraProps): T {
+  const { node, ...rest } = props;
+  void node;
+  return rest as T;
+}
+
+/**
+ * Renders markdown (article bodies, learning maps, hands-on steps) with
+ * the app's theme tokens. Tailwind v4 without the typography plugin, so
+ * each element gets its styles here instead of a `prose` class.
+ */
+export function Markdown({ children }: { children: string }) {
+  return (
+    <div className="flex flex-col gap-3 text-fg leading-relaxed">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          h1: (p) => <h2 className="mt-2 text-xl font-semibold text-fg" {...dom(p)} />,
+          h2: (p) => <h3 className="mt-2 text-lg font-semibold text-fg" {...dom(p)} />,
+          h3: (p) => <h4 className="mt-1 text-base font-semibold text-fg" {...dom(p)} />,
+          p: (p) => <p {...dom(p)} />,
+          a: (p) => (
+            <a
+              className="text-accent underline underline-offset-2 hover:opacity-80"
+              target="_blank"
+              rel="noopener noreferrer"
+              {...dom(p)}
+            />
+          ),
+          ul: (p) => <ul className="ml-5 list-disc space-y-1" {...dom(p)} />,
+          ol: (p) => <ol className="ml-5 list-decimal space-y-1" {...dom(p)} />,
+          li: (p) => <li className="pl-1" {...dom(p)} />,
+          blockquote: (p) => (
+            <blockquote
+              className="border-l-2 border-accent/50 pl-4 text-fg-secondary italic"
+              {...dom(p)}
+            />
+          ),
+          code: (p) => (
+            <code
+              className="rounded bg-bg px-1.5 py-0.5 font-mono text-[0.85em] text-accent"
+              {...dom(p)}
+            />
+          ),
+          pre: (p) => (
+            <pre
+              className="overflow-x-auto rounded-md border border-border bg-bg p-3 text-sm [&_code]:bg-transparent [&_code]:p-0 [&_code]:text-fg"
+              {...dom(p)}
+            />
+          ),
+          img: (p) => {
+            const { src, alt } = dom(p);
+            return (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={typeof src === "string" ? src : undefined}
+                alt={alt ?? ""}
+                className="max-h-[480px] rounded-md border border-border"
+              />
+            );
+          },
+          table: (p) => (
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-sm" {...dom(p)} />
+            </div>
+          ),
+          th: (p) => (
+            <th
+              className="border border-border bg-bg px-3 py-1.5 text-left font-semibold"
+              {...dom(p)}
+            />
+          ),
+          td: (p) => <td className="border border-border px-3 py-1.5" {...dom(p)} />,
+          hr: () => <hr className="border-border" />,
+        }}
+      >
+        {children}
+      </ReactMarkdown>
+    </div>
+  );
+}

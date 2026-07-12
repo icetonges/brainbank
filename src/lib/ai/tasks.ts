@@ -2,6 +2,7 @@ import { generateObject, generateText, streamText, type ModelMessage } from "ai"
 import { z } from "zod";
 import { resolveModel } from "./providers";
 import { DEFAULT_MODEL_ID, type ModelId } from "./models";
+import { classroomCategoryEnum, type ClassroomCategory } from "@/lib/db/schema";
 
 // --- THE CHAIN ---
 //
@@ -20,7 +21,13 @@ import { DEFAULT_MODEL_ID, type ModelId } from "./models";
 // override, so the AI Assist panel's model picker can point any task at
 // any registered model.
 
-export type TaskName = "assist" | "summarize" | "tag-and-link" | "translate" | "draft";
+export type TaskName =
+  | "assist"
+  | "summarize"
+  | "tag-and-link"
+  | "translate"
+  | "draft"
+  | "publish-assist";
 
 export const TASK_MODELS: Record<TaskName, ModelId> = {
   assist: DEFAULT_MODEL_ID,
@@ -28,6 +35,7 @@ export const TASK_MODELS: Record<TaskName, ModelId> = {
   "tag-and-link": "gemini-3.1-flash-lite",
   translate: DEFAULT_MODEL_ID,
   draft: DEFAULT_MODEL_ID,
+  "publish-assist": DEFAULT_MODEL_ID,
 };
 
 function modelFor(task: TaskName, override?: ModelId) {
@@ -187,6 +195,100 @@ export interface DraftSourceInput {
  * everything upstream of it (fetching, parsing) is plain code per
  * PLAN.md §13.
  */
+// --- publish-assist (AI Classroom: content -> learning guide) ---
+
+const publishAssistSchema = z.object({
+  topic: z
+    .string()
+    .describe("A concise, specific topic/title for this article (max ~80 chars)"),
+  category: z
+    .enum(classroomCategoryEnum.enumValues)
+    .describe("Which AI Classroom subtab this article belongs under"),
+  tags: z
+    .array(z.string())
+    .describe("3-6 short lowercase tags reusable across articles"),
+  summary: z.string().describe("A single dense sentence summarizing the article"),
+  learningMap: z
+    .string()
+    .describe(
+      "A markdown learning map for this topic: an ordered roadmap from beginner to competent, grouped into stages, each stage with 2-4 concrete things to learn and why they matter",
+    ),
+  handsOn: z
+    .string()
+    .describe(
+      "Markdown step-by-step hands-on instructions to get practical experience with this topic: numbered steps, each concrete and actionable (commands, tools, or exercises), starting from zero setup",
+    ),
+  resources: z
+    .array(
+      z.object({
+        title: z.string().describe("Name of the resource"),
+        url: z
+          .string()
+          .describe(
+            "The resource's real, stable URL — official docs, GitHub repo, or well-known site. Never invent a URL.",
+          ),
+        description: z
+          .string()
+          .describe("One sentence: what it covers and why it's worth the time"),
+      }),
+    )
+    .min(3)
+    .max(3)
+    .describe("The top 3 learning resources for this topic"),
+});
+
+export type PublishAssistResult = z.infer<typeof publishAssistSchema>;
+export type { ClassroomCategory };
+
+export interface PublishAssistInput {
+  /** User-entered topic; empty string means "generate one from the content". */
+  topic: string;
+  /** User-chosen subtab; undefined means "classify it yourself". */
+  category?: ClassroomCategory;
+  /** The raw article content (markdown; may contain URLs/YouTube links/images). */
+  content: string;
+}
+
+/**
+ * The "AI publish assist" behind AI Classroom (/classroom/new): given the
+ * user's raw content it produces everything the article page needs — a
+ * topic (if none was given), the subtab it belongs under, tags, a summary,
+ * a learning map, step-by-step hands-on instructions, and the top three
+ * suggested resources with links. One generateObject call so the pieces
+ * stay consistent with each other.
+ */
+export async function publishAssist(
+  input: PublishAssistInput,
+  modelId?: ModelId,
+): Promise<PublishAssistResult> {
+  const { object } = await generateObject({
+    model: modelFor("publish-assist", modelId),
+    schema: publishAssistSchema,
+    system: [
+      "You are the AI publish assistant for the 'AI Classroom' section of a personal knowledge base about AI.",
+      "From the user's article content, produce: a topic, the best-fitting category, tags, a one-sentence summary, a learning map (staged roadmap in markdown), hands-on step-by-step instructions (numbered markdown steps a beginner can actually follow), and the top 3 learning resources.",
+      "Categories: knowledge (concepts/theory), skill (abilities to practice), mcp (Model Context Protocol), api (APIs/SDKs), best-practices, use-cases, step-by-step (tutorials/guides), ai-evaluation (evals/benchmarks), ai-models (specific models), ai (general/anything else).",
+      "Resources must be real and well-known (official documentation, GitHub repositories, established courses/channels). If unsure a URL is real, pick a better-known resource instead — never fabricate links.",
+      input.topic ? "Keep the user's topic unless it's clearly unusable; you may lightly clean it up." : "",
+      input.category ? `The user already chose the category "${input.category}" — keep it.` : "",
+    ]
+      .filter(Boolean)
+      .join("\n"),
+    prompt: [
+      input.topic ? `Topic: ${input.topic}` : null,
+      `Content:\n${input.content}`,
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
+  });
+
+  return {
+    ...object,
+    topic: input.topic || object.topic,
+    category: input.category ?? object.category,
+  };
+}
+
 export async function draftNoteFromSource(
   input: DraftSourceInput,
   modelId?: ModelId,

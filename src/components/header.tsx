@@ -39,6 +39,12 @@ export async function Header() {
           >
             Graph
           </Link>
+          <Link
+            href="/classroom"
+            className="rounded-md px-3 py-1.5 text-sm font-medium text-fg-secondary hover:text-accent transition-colors"
+          >
+            AI Classroom
+          </Link>
 
           {session ? (
             <>

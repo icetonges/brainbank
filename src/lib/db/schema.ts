@@ -8,6 +8,7 @@ import {
   bigint,
   pgEnum,
   primaryKey,
+  jsonb,
 } from "drizzle-orm/pg-core";
 
 // --- enums ---
@@ -46,6 +47,24 @@ export const jobStatusEnum = pgEnum("job_status", [
   "failed",
 ]);
 
+// AI Classroom subtabs — a note whose `category` is set shows up under that
+// subtab on /classroom. Kept as an enum so the tab list, the AI publish
+// assist's classification, and the DB stay in lockstep.
+export const classroomCategoryEnum = pgEnum("classroom_category", [
+  "knowledge",
+  "skill",
+  "mcp",
+  "api",
+  "best-practices",
+  "use-cases",
+  "step-by-step",
+  "ai-evaluation",
+  "ai-models",
+  "ai",
+]);
+
+export type ClassroomCategory = (typeof classroomCategoryEnum.enumValues)[number];
+
 export type NoteStatus = (typeof noteStatusEnum.enumValues)[number];
 export type SourceType = (typeof sourceTypeEnum.enumValues)[number];
 export type MediaKind = (typeof mediaKindEnum.enumValues)[number];
@@ -75,6 +94,8 @@ export const notes = pgTable("notes", {
   sourcePath: text("source_path"),
   sourceSha: varchar("source_sha", { length: 64 }),
   primaryLanguage: languageEnum("primary_language").default("en").notNull(),
+  // Non-null only for AI Classroom articles — which subtab they live under.
+  category: classroomCategoryEnum("category"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
@@ -145,6 +166,28 @@ export const ingestionJobs = pgTable("ingestion_jobs", {
   startedAt: timestamp("started_at", { withTimezone: true }),
   finishedAt: timestamp("finished_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// One row per AI Classroom article — the "AI publish assist" output that
+// accompanies the user's own content: a learning map, step-by-step hands-on
+// instructions, and the top suggested resources (title + URL + why).
+// Cascade-deletes with its note.
+export interface GuideResource {
+  title: string;
+  url: string;
+  description: string;
+}
+
+export const learningGuides = pgTable("learning_guides", {
+  id: serial("id").primaryKey(),
+  noteId: integer("note_id")
+    .notNull()
+    .references(() => notes.id, { onDelete: "cascade" }),
+  learningMap: text("learning_map").default("").notNull(),
+  handsOn: text("hands_on").default("").notNull(),
+  resources: jsonb("resources").$type<GuideResource[]>().default([]).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
 // Tracks one run of the Obsidian one-way sync (PLAN.md §8) — a single

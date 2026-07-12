@@ -1,0 +1,126 @@
+import Link from "next/link";
+import { db } from "@/lib/db";
+import { notes } from "@/lib/db/schema";
+import type { ClassroomCategory } from "@/lib/db/schema";
+import { auth } from "@/auth";
+import { CLASSROOM_TABS, isClassroomCategory } from "@/lib/classroom";
+import { eq, and, desc } from "drizzle-orm";
+
+export const dynamic = "force-dynamic";
+
+export default async function ClassroomPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tab?: string }>;
+}) {
+  const { tab } = await searchParams;
+  const activeTab: ClassroomCategory =
+    tab && isClassroomCategory(tab) ? tab : CLASSROOM_TABS[0].value;
+
+  const session = await auth();
+
+  let articles: {
+    slug: string;
+    title: string;
+    createdAt: Date;
+    status: string;
+  }[] = [];
+  let loadError = false;
+
+  try {
+    const rows = await db
+      .select({
+        slug: notes.slug,
+        title: notes.title,
+        createdAt: notes.createdAt,
+        status: notes.status,
+      })
+      .from(notes)
+      .where(and(eq(notes.category, activeTab)))
+      .orderBy(desc(notes.createdAt));
+
+    // Public-read/private-edit, same as regular notes: anonymous visitors
+    // only see published articles; the owner sees drafts/private too.
+    articles = session ? rows : rows.filter((r) => r.status === "published");
+  } catch (err) {
+    console.error("Failed to load classroom articles:", err);
+    loadError = true;
+  }
+
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold text-fg">AI Classroom</h1>
+          <p className="mt-1 text-fg-secondary">
+            Knowledge pages with an AI-built learning map, hands-on steps,
+            and suggested sources — organized by topic.
+          </p>
+        </div>
+        {session && (
+          <Link
+            href="/classroom/new"
+            className="rounded-md bg-accent px-4 py-2 text-sm font-semibold text-accent-fg hover:opacity-90 transition-opacity"
+          >
+            + New article
+          </Link>
+        )}
+      </div>
+
+      <nav className="flex flex-wrap gap-1 border-b border-border pb-px">
+        {CLASSROOM_TABS.map(({ value, label }) => {
+          const active = value === activeTab;
+          return (
+            <Link
+              key={value}
+              href={`/classroom?tab=${value}`}
+              className={`rounded-t-md border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
+                active
+                  ? "border-accent text-accent"
+                  : "border-transparent text-fg-secondary hover:text-accent"
+              }`}
+            >
+              {label}
+            </Link>
+          );
+        })}
+      </nav>
+
+      {loadError ? (
+        <div className="rounded-lg border border-danger/40 bg-bg-elevated p-5 text-fg-secondary">
+          <p className="font-medium text-fg">Couldn&apos;t load articles.</p>
+          <p className="mt-1 text-sm">The database didn&apos;t respond — reload to try again.</p>
+        </div>
+      ) : articles.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border p-8 text-center text-fg-secondary">
+          <p>Nothing under this subtab yet.</p>
+          {session && (
+            <p className="mt-1 text-sm">
+              <Link href="/classroom/new" className="text-accent hover:underline">
+                Create the first article
+              </Link>{" "}
+              — the AI will file it under the right subtab automatically.
+            </p>
+          )}
+        </div>
+      ) : (
+        <ul className="flex flex-col gap-3">
+          {articles.map((a) => (
+            <li key={a.slug}>
+              <Link
+                href={`/classroom/${a.slug}`}
+                className="flex flex-col gap-1 rounded-lg border border-border bg-bg-elevated p-4 hover:border-accent transition-colors"
+              >
+                <span className="font-semibold text-fg">{a.title}</span>
+                <span className="text-xs text-fg-secondary">
+                  {new Date(a.createdAt).toLocaleString()}
+                  {a.status !== "published" ? ` · ${a.status}` : ""}
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
