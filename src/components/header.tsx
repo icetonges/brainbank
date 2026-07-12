@@ -40,12 +40,6 @@ export async function Header() {
             {s.search}
           </Link>
           <Link
-            href="/graph"
-            className="rounded-md px-3 py-1.5 text-sm font-medium text-fg-secondary hover:text-accent transition-colors"
-          >
-            {s.graph}
-          </Link>
-          <Link
             href="/classroom"
             className="rounded-md px-3 py-1.5 text-sm font-medium text-fg-secondary hover:text-accent transition-colors"
           >
@@ -54,6 +48,12 @@ export async function Header() {
 
           {session ? (
             <>
+              <Link
+                href="/graph"
+                className="rounded-md px-3 py-1.5 text-sm font-medium text-fg-secondary hover:text-accent transition-colors"
+              >
+                {s.graph}
+              </Link>
               <Link
                 href="/obsidian"
                 className="rounded-md px-3 py-1.5 text-sm font-medium text-fg-secondary hover:text-accent transition-colors"
