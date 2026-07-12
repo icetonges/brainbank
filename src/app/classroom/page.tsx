@@ -1,12 +1,12 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
-import { notes, classroomSubcategories } from "@/lib/db/schema";
+import { notes, noteContent, classroomSubcategories } from "@/lib/db/schema";
 import type { ClassroomCategory } from "@/lib/db/schema";
 import { auth } from "@/auth";
 import { CLASSROOM_TABS, isClassroomCategory } from "@/lib/classroom";
 import { getLang } from "@/lib/i18n-server";
 import { t, CLASSROOM_TAB_LABELS_ZH } from "@/lib/i18n";
-import { eq, desc } from "drizzle-orm";
+import { eq, and, desc } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
 
@@ -34,22 +34,36 @@ export default async function ClassroomPage({
   let loadError = false;
 
   try {
+    // notes.title is always the *original* language's title — the site
+    // defaults to English, so a Chinese-original article needs its "en"
+    // note_content title instead (publishing now auto-translates Chinese
+    // articles to English; older articles without one just fall back to
+    // their original title).
     const rows = await db
       .select({
         slug: notes.slug,
         title: notes.title,
+        translatedTitle: noteContent.title,
+        primaryLanguage: notes.primaryLanguage,
         createdAt: notes.createdAt,
         status: notes.status,
         subcategory: classroomSubcategories.name,
       })
       .from(notes)
       .leftJoin(classroomSubcategories, eq(notes.subcategoryId, classroomSubcategories.id))
+      .leftJoin(noteContent, and(eq(noteContent.noteId, notes.id), eq(noteContent.language, lang)))
       .where(eq(notes.category, activeTab))
       .orderBy(desc(notes.createdAt));
 
     // Public-read/private-edit, same as regular notes: anonymous visitors
     // only see published articles; the owner sees drafts/private too.
-    articles = session ? rows : rows.filter((r) => r.status === "published");
+    articles = (session ? rows : rows.filter((r) => r.status === "published")).map((r) => ({
+      slug: r.slug,
+      title: lang === r.primaryLanguage ? r.title : r.translatedTitle || r.title,
+      createdAt: r.createdAt,
+      status: r.status,
+      subcategory: r.subcategory,
+    }));
   } catch (err) {
     console.error("Failed to load classroom articles:", err);
     loadError = true;

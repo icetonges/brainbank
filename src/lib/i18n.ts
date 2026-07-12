@@ -113,7 +113,7 @@ const en = {
     subcategoryAddNew: "+ Add new subcategory…",
     subcategoryNewPlaceholder: "New subcategory name",
     bodyPlaceholder:
-      "Drop everything here — text, markdown formatting, URLs, YouTube links…\nPaste or attach images and they'll upload and appear as markdown.\n\nClick Save and AI publish assist will build the knowledge page: a learning map, step-by-step hands-on instructions, the top 3 sources, and tags for the right AI Classroom subtab.",
+      "Drop everything here — text, markdown formatting, URLs, YouTube links…\nPaste or attach images and they'll upload and appear as markdown. Math ($x^2$) and code blocks render automatically; a ```mermaid fenced block renders as a real diagram.\n\nClick Save and AI publish assist will build the knowledge page: a learning map, step-by-step hands-on instructions, the top 3 sources, and tags for the right AI Classroom subtab.",
     save: "Save",
     publishing: "Publishing…",
     publishingHint: "AI publish assist is building the learning map, hands-on steps, and sources…",
@@ -246,7 +246,7 @@ const zh: typeof en = {
     subcategoryAddNew: "+ 添加新子分类……",
     subcategoryNewPlaceholder: "新子分类名称",
     bodyPlaceholder:
-      "把所有内容放进来——文字、Markdown 格式、网址、YouTube 链接……\n粘贴或添加图片会自动上传并以 Markdown 形式插入。\n\n点击保存后，AI 发布助手会生成知识页面：学习地图、分步动手指南、三大推荐资源，以及对应 AI 课堂子栏目的标签。",
+      "把所有内容放进来——文字、Markdown 格式、网址、YouTube 链接……\n粘贴或添加图片会自动上传并以 Markdown 形式插入。数学公式（$x^2$）和代码块会自动渲染；```mermaid 代码块会渲染成真正的流程图。\n\n点击保存后，AI 发布助手会生成知识页面：学习地图、分步动手指南、三大推荐资源，以及对应 AI 课堂子栏目的标签。",
     save: "保存",
     publishing: "发布中…",
     publishingHint: "AI 发布助手正在生成学习地图、动手步骤和推荐资源……",

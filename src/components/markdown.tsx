@@ -3,6 +3,7 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import rehypeHighlight from "rehype-highlight";
+import { MermaidDiagram } from "@/components/mermaid-diagram";
 
 /** react-markdown passes a `node` prop (the AST node) to every component
  * override — it must not be spread onto a DOM element. */
@@ -10,6 +11,27 @@ function dom<T>(props: T & ExtraProps): T {
   const { node, ...rest } = props;
   void node;
   return rest as T;
+}
+
+/** Minimal hast node shape — just enough to walk a code block's AST for
+ * its raw text and language class, without pulling in @types/hast. */
+interface HastNode {
+  type?: string;
+  tagName?: string;
+  value?: string;
+  properties?: { className?: string[] };
+  children?: HastNode[];
+}
+
+/** Recursively pulls plain text out of a hast subtree — used to grab a
+ * fenced code block's *original* source, bypassing whatever rehype-
+ * highlight did to the tree (wrapping tokens in <span>s) so a ```mermaid
+ * block always gets its untouched diagram source regardless of whether
+ * the syntax highlighter tried to tokenize it. */
+function hastText(node: HastNode | undefined): string {
+  if (!node) return "";
+  if (node.type === "text") return node.value ?? "";
+  return (node.children ?? []).map(hastText).join("");
 }
 
 /**
@@ -71,12 +93,24 @@ export function Markdown({ children }: { children: string }) {
               </code>
             );
           },
-          pre: (p) => (
-            <pre
-              className="overflow-x-auto rounded-md border border-border bg-bg p-3 text-sm"
-              {...dom(p)}
-            />
-          ),
+          pre: (p) => {
+            // Detect a ```mermaid fenced block straight off the AST (node
+            // reflects the original source regardless of what rehype-
+            // highlight did to the rendered children) and route it to the
+            // diagram renderer instead of a plain code box.
+            const node = (p as unknown as { node?: HastNode }).node;
+            const codeNode = node?.children?.find((c) => c.tagName === "code");
+            const isMermaid = codeNode?.properties?.className?.includes("language-mermaid");
+            if (isMermaid) {
+              return <MermaidDiagram code={hastText(codeNode).replace(/\n$/, "")} />;
+            }
+            return (
+              <pre
+                className="overflow-x-auto rounded-md border border-border bg-bg p-3 text-sm"
+                {...dom(p)}
+              />
+            );
+          },
           img: (p) => {
             const { src, alt } = dom(p);
             return (

@@ -1,11 +1,11 @@
 import Link from "next/link";
 import { auth } from "@/auth";
 import { db, isDatabaseConfigured } from "@/lib/db";
-import { notes, edges, tags, noteTags } from "@/lib/db/schema";
+import { notes, noteContent, edges, tags, noteTags } from "@/lib/db/schema";
 import type { ClassroomCategory } from "@/lib/db/schema";
 import { CLASSROOM_TABS } from "@/lib/classroom";
 import { getLang } from "@/lib/i18n-server";
-import { t, CLASSROOM_TAB_LABELS_ZH } from "@/lib/i18n";
+import { t, CLASSROOM_TAB_LABELS_ZH, type Lang } from "@/lib/i18n";
 import { desc, eq, and, isNotNull, isNull, count } from "drizzle-orm";
 import { HeroVisual, PillarIcon, CategoryGlyph } from "@/components/home-visuals";
 
@@ -19,7 +19,10 @@ interface HomeData {
   topTags: { name: string; uses: number }[];
 }
 
-async function loadHome(isOwner: boolean): Promise<{ data: HomeData | null; error: "not-configured" | "connection-failed" | null }> {
+async function loadHome(
+  isOwner: boolean,
+  lang: Lang,
+): Promise<{ data: HomeData | null; error: "not-configured" | "connection-failed" | null }> {
   if (!isDatabaseConfigured) return { data: null, error: "not-configured" };
   try {
     // Public-read/private-edit: anonymous visitors only see published pages.
@@ -43,12 +46,32 @@ async function loadHome(isOwner: boolean): Promise<{ data: HomeData | null; erro
       }
     }
 
-    const latestArticles = await db
-      .select({ slug: notes.slug, title: notes.title, category: notes.category, createdAt: notes.createdAt })
+    // notes.title is always the *original* language's title. The site
+    // defaults to English, so when an article's original is Chinese we
+    // need the "en" note_content row's title instead (publishing a
+    // Chinese article now auto-translates to English for exactly this —
+    // see publishClassroomArticle) — falling back to the original title
+    // for the rare pre-existing article that hasn't been translated yet.
+    const latestArticlesRaw = await db
+      .select({
+        slug: notes.slug,
+        title: notes.title,
+        translatedTitle: noteContent.title,
+        primaryLanguage: notes.primaryLanguage,
+        category: notes.category,
+        createdAt: notes.createdAt,
+      })
       .from(notes)
+      .leftJoin(noteContent, and(eq(noteContent.noteId, notes.id), eq(noteContent.language, lang)))
       .where(visible ? and(isNotNull(notes.category), visible) : isNotNull(notes.category))
       .orderBy(desc(notes.createdAt))
       .limit(5);
+    const latestArticles = latestArticlesRaw.map((a) => ({
+      slug: a.slug,
+      title: lang === a.primaryLanguage ? a.title : a.translatedTitle || a.title,
+      category: a.category,
+      createdAt: a.createdAt,
+    }));
 
     const recentNotes = await db
       .select({
@@ -94,10 +117,9 @@ export default async function Home({
   searchParams: Promise<{ lang?: string }>;
 }) {
   const session = await auth();
-  const { data, error } = await loadHome(Boolean(session));
-
   const { lang: langParam } = await searchParams;
   const lang = await getLang(langParam);
+  const { data, error } = await loadHome(Boolean(session), lang);
   const s = t(lang).home;
   const dateLocale = lang === "zh" ? "zh-CN" : undefined;
   const tabLabel = (value: ClassroomCategory, enLabel: string) =>

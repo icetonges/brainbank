@@ -245,6 +245,18 @@ export async function publishClassroomArticle(formData: FormData) {
   // [[Wikilinks]] in the body become graph edges, same as regular notes.
   await linkWikilinksFromText(noteId, body);
 
+  // Chinese articles get an English translation immediately rather than
+  // waiting for someone to click the Translate button — the homepage and
+  // /classroom listing default to English and need an English title/body
+  // on hand to show without a manual step first.
+  if (primaryLanguage === "zh") {
+    try {
+      await translateClassroomArticleAction(noteId, slug, "en");
+    } catch (err) {
+      console.error("Auto-translate to English failed:", err);
+    }
+  }
+
   revalidatePath("/classroom");
   redirect(`/classroom/${slug}`);
 }
