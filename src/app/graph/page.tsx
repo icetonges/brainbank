@@ -1,3 +1,5 @@
+import { redirect } from "next/navigation";
+import { auth } from "@/auth";
 import { db, isDatabaseConfigured } from "@/lib/db";
 import { notes, edges as edgesTable } from "@/lib/db/schema";
 import { GraphView } from "@/components/graph-view";
@@ -18,6 +20,9 @@ async function loadGraph() {
 }
 
 export default async function GraphPage() {
+  const session = await auth();
+  if (!session) redirect("/login");
+
   const { nodes, edges, error } = await loadGraph();
 
   if (error) {

@@ -35,7 +35,7 @@ export default function GlobalError({
           padding: "2rem",
         }}
       >
-        <p style={{ fontSize: "1.125rem", fontWeight: 500 }}>brainbank failed to load.</p>
+        <p style={{ fontSize: "1.125rem", fontWeight: 500 }}>BrainBank failed to load.</p>
         <p style={{ maxWidth: 480, fontSize: "0.875rem", color: "#d6d3c4" }}>
           {error.message || "An unexpected error occurred."}
           {error.digest && (

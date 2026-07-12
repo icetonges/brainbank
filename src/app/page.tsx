@@ -1,13 +1,13 @@
 import Link from "next/link";
 import { auth } from "@/auth";
 import { db, isDatabaseConfigured } from "@/lib/db";
-import { notes, noteContent, edges, tags, noteTags } from "@/lib/db/schema";
+import { notes, noteContent, edges, tags, noteTags, classroomSubcategories } from "@/lib/db/schema";
 import type { ClassroomCategory } from "@/lib/db/schema";
 import { CLASSROOM_TABS } from "@/lib/classroom";
 import { getLang } from "@/lib/i18n-server";
 import { t, CLASSROOM_TAB_LABELS_ZH, type Lang } from "@/lib/i18n";
 import { desc, eq, and, isNotNull, isNull, count } from "drizzle-orm";
-import { HeroVisual, PillarIcon, CategoryGlyph } from "@/components/home-visuals";
+import { HeroVisual, PillarIcon } from "@/components/home-visuals";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +17,7 @@ interface HomeData {
   latestArticles: { slug: string; title: string; category: ClassroomCategory | null; createdAt: Date }[];
   recentNotes: { id: number; slug: string; title: string; status: string; sourceType: string; updatedAt: Date }[];
   topTags: { name: string; uses: number }[];
+  subcategoryToc: { id: number; name: string; articles: { slug: string; title: string; createdAt: Date }[] }[];
 }
 
 async function loadHome(
@@ -95,6 +96,51 @@ async function loadHome(
       .orderBy(desc(count(noteTags.noteId)))
       .limit(16);
 
+    // Subcategory table of contents: every subcategory (alphabetical),
+    // each with its latest 10 articles. One query for all subcategory
+    // article rows (ordered newest-first), then grouped/capped in JS
+    // rather than N+1 queries per subcategory.
+    const subcatList = await db
+      .select({ id: classroomSubcategories.id, name: classroomSubcategories.name })
+      .from(classroomSubcategories)
+      .orderBy(classroomSubcategories.name);
+
+    const subcatArticlesRaw = await db
+      .select({
+        subcategoryId: notes.subcategoryId,
+        slug: notes.slug,
+        title: notes.title,
+        translatedTitle: noteContent.title,
+        primaryLanguage: notes.primaryLanguage,
+        createdAt: notes.createdAt,
+      })
+      .from(notes)
+      .leftJoin(noteContent, and(eq(noteContent.noteId, notes.id), eq(noteContent.language, lang)))
+      .where(
+        visible
+          ? and(isNotNull(notes.subcategoryId), visible)
+          : isNotNull(notes.subcategoryId),
+      )
+      .orderBy(desc(notes.createdAt));
+
+    const bySubcat = new Map<number, { slug: string; title: string; createdAt: Date }[]>();
+    for (const r of subcatArticlesRaw) {
+      if (!r.subcategoryId) continue;
+      const arr = bySubcat.get(r.subcategoryId) ?? [];
+      if (arr.length < 10) {
+        arr.push({
+          slug: r.slug,
+          title: lang === r.primaryLanguage ? r.title : r.translatedTitle || r.title,
+          createdAt: r.createdAt,
+        });
+      }
+      bySubcat.set(r.subcategoryId, arr);
+    }
+
+    const subcategoryToc = subcatList
+      .map((sc) => ({ id: sc.id, name: sc.name, articles: bySubcat.get(sc.id) ?? [] }))
+      .filter((sc) => sc.articles.length > 0);
+
     return {
       data: {
         stats: { pages: pageCount.n, articles, connections: edgeCount.n, topics: tagCount.n },
@@ -102,6 +148,7 @@ async function loadHome(
         latestArticles,
         recentNotes,
         topTags,
+        subcategoryToc,
       },
       error: null,
     };
@@ -217,7 +264,7 @@ export default async function Home({
         ))}
       </section>
 
-      {/* ---- Category index ---- */}
+      {/* ---- Category index: subcategory table of contents ---- */}
       <section className="flex flex-col gap-4">
         <div className="flex items-baseline justify-between gap-4">
           <h2 className="text-xl font-semibold text-fg">{s.browseByCategory}</h2>
@@ -225,28 +272,32 @@ export default async function Home({
             {s.allSubtabs}
           </Link>
         </div>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-          {CLASSROOM_TABS.map(({ value, label }) => {
-            const n = data?.categoryCounts.get(value) ?? 0;
-            return (
-              <Link
-                key={value}
-                href={`/classroom?tab=${value}`}
-                className="group flex flex-col gap-2 rounded-lg border border-border bg-bg-elevated p-4 hover:border-accent transition-colors"
+        {data && data.subcategoryToc.length > 0 ? (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {data.subcategoryToc.map((sc) => (
+              <div
+                key={sc.id}
+                className="flex flex-col gap-2 rounded-lg border border-border bg-bg-elevated p-4"
               >
-                <span className="text-accent">
-                  <CategoryGlyph category={value} />
-                </span>
-                <span className="font-medium text-fg group-hover:text-accent transition-colors">
-                  {tabLabel(value, label)}
-                </span>
-                <span className="text-xs text-fg-secondary">
-                  {lang === "zh" ? `${n} ${s.articleMany}` : `${n} ${n === 1 ? s.articleOne : s.articleMany}`}
-                </span>
-              </Link>
-            );
-          })}
-        </div>
+                <h3 className="font-semibold text-fg">{sc.name}</h3>
+                <ul className="flex flex-col gap-1.5">
+                  {sc.articles.map((a) => (
+                    <li key={a.slug}>
+                      <Link
+                        href={`/classroom/${a.slug}?lang=${lang}`}
+                        className="text-sm text-fg-secondary hover:text-accent transition-colors"
+                      >
+                        {a.title}
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyPanel>{s.noArticles}</EmptyPanel>
+        )}
       </section>
 
       {/* ---- Latest classroom articles + recent knowledge ---- */}

@@ -6,7 +6,7 @@ import { auth } from "@/auth";
 import { CLASSROOM_TABS, isClassroomCategory } from "@/lib/classroom";
 import { getLang } from "@/lib/i18n-server";
 import { t, CLASSROOM_TAB_LABELS_ZH } from "@/lib/i18n";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, isNotNull } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
 
@@ -16,8 +16,10 @@ export default async function ClassroomPage({
   searchParams: Promise<{ tab?: string; lang?: string }>;
 }) {
   const { tab, lang: langParam } = await searchParams;
-  const activeTab: ClassroomCategory =
-    tab && isClassroomCategory(tab) ? tab : CLASSROOM_TABS[0].value;
+  // "all" is the default landing state — a synthetic tab (not part of the
+  // ClassroomCategory enum) that shows articles across every subtab.
+  const activeTab: ClassroomCategory | "all" =
+    tab && isClassroomCategory(tab) ? tab : "all";
 
   const session = await auth();
   const lang = await getLang(langParam);
@@ -52,7 +54,7 @@ export default async function ClassroomPage({
       .from(notes)
       .leftJoin(classroomSubcategories, eq(notes.subcategoryId, classroomSubcategories.id))
       .leftJoin(noteContent, and(eq(noteContent.noteId, notes.id), eq(noteContent.language, lang)))
-      .where(eq(notes.category, activeTab))
+      .where(activeTab === "all" ? isNotNull(notes.category) : eq(notes.category, activeTab))
       .orderBy(desc(notes.createdAt));
 
     // Public-read/private-edit, same as regular notes: anonymous visitors
@@ -87,6 +89,16 @@ export default async function ClassroomPage({
       </div>
 
       <nav className="flex flex-wrap gap-1 border-b border-border pb-px">
+        <Link
+          href={`/classroom?tab=all&lang=${lang}`}
+          className={`rounded-t-md border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
+            activeTab === "all"
+              ? "border-accent text-accent"
+              : "border-transparent text-fg-secondary hover:text-accent"
+          }`}
+        >
+          {s.allTab}
+        </Link>
         {CLASSROOM_TABS.map(({ value, label }) => {
           const active = value === activeTab;
           return (

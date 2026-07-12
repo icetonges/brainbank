@@ -22,14 +22,14 @@ const en = {
     signIn: "Sign in",
   },
   footer: {
-    tagline: "brainbank — your daily knowledge base",
+    tagline: "BrainBank — your daily knowledge base",
   },
   home: {
     eyebrow: "The AI knowledge bank",
     heroTitle1: "Master AI.",
     heroTitle2: "Manage the change.",
     heroLede:
-      "brainbank turns everything you learn about AI — articles, videos, documents, experiments — into connected knowledge pages with learning maps, hands-on steps, and curated sources. Knowledge management for the age of AI, and a field guide for the change it brings.",
+      "BrainBank turns everything you learn about AI — articles, videos, documents, experiments — into connected knowledge pages with learning maps, hands-on steps, and curated sources. Knowledge management for the age of AI, and a field guide for the change it brings.",
     ctaClassroom: "Explore the AI Classroom",
     ctaCapture: "+ Capture knowledge",
     ctaSearch: "Search the bank",
@@ -76,6 +76,7 @@ const en = {
     title: "AI Classroom",
     description:
       "Knowledge pages with an AI-built learning map, hands-on steps, and suggested sources — organized by topic.",
+    allTab: "All",
     newArticle: "+ New article",
     emptyTab: "Nothing under this subtab yet.",
     createFirstArticle: "Create the first article",
@@ -159,14 +160,14 @@ const zh: typeof en = {
     signIn: "登录",
   },
   footer: {
-    tagline: "brainbank — 你的每日知识库",
+    tagline: "BrainBank — 你的每日知识库",
   },
   home: {
     eyebrow: "AI 知识银行",
     heroTitle1: "掌握 AI。",
     heroTitle2: "驾驭变革。",
     heroLede:
-      "brainbank 把你学到的一切 AI 知识——文章、视频、文档、实验——变成相互连接的知识页面，配有学习地图、动手步骤和精选资源。这是 AI 时代的知识管理，也是应对 AI 变革的实战指南。",
+      "BrainBank 把你学到的一切 AI 知识——文章、视频、文档、实验——变成相互连接的知识页面，配有学习地图、动手步骤和精选资源。这是 AI 时代的知识管理，也是应对 AI 变革的实战指南。",
     ctaClassroom: "探索 AI 课堂",
     ctaCapture: "+ 捕捉知识",
     ctaSearch: "搜索知识库",
@@ -212,6 +213,7 @@ const zh: typeof en = {
   classroom: {
     title: "AI 课堂",
     description: "带有 AI 生成的学习地图、动手步骤和推荐资源的知识页面——按主题分类整理。",
+    allTab: "全部",
     newArticle: "+ 新文章",
     emptyTab: "该子栏目下还没有内容。",
     createFirstArticle: "创建第一篇文章",

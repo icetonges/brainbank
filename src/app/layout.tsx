@@ -12,7 +12,7 @@ import { getLang } from "@/lib/i18n-server";
 import { t } from "@/lib/i18n";
 
 export const metadata: Metadata = {
-  title: "brainbank",
+  title: "BrainBank",
   description:
     "A daily knowledge base: capture text, links, videos and documents; connect them; understand what, how, and why.",
 };
