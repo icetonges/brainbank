@@ -106,6 +106,22 @@ export async function suggestTags(
 
 // --- translate ---
 
+// Some models occasionally answer with real line breaks escaped as the
+// literal two-character sequence "\" + "n" (and "\t" for tabs) instead of
+// actual whitespace — most visible on Chinese output, where it collapses
+// headings/lists/code fences into one unreadable line with "\n" printed
+// as text. This doesn't happen on the English originals (generated
+// directly, not through this translation call), so it's specific to how
+// the translation response comes back. Rewriting the escape sequences
+// back to real whitespace fixes the overwhelming majority of cases; the
+// only false-positive risk is a code sample that legitimately contains a
+// literal backslash-n (e.g. a regex pattern), which is rare enough to
+// accept as a trade-off for every other translated article rendering
+// correctly.
+function unescapeLiteralWhitespace(text: string): string {
+  return text.replace(/\\r\\n/g, "\n").replace(/\\n/g, "\n").replace(/\\t/g, "\t");
+}
+
 export async function translateText(
   text: string,
   target: "en" | "zh",
@@ -119,10 +135,12 @@ export async function translateText(
 
 If the text contains markdown, preserve its structure exactly — keep every heading marker (#, ##, ###), bullet (-, *) and numbered list marker, blank line between blocks, bold (**text**) and italic (*text*) marker, and table pipe/row layout in place; translate only the prose inside those elements. Leave code blocks (fenced with \`\`\`), inline code (\`text\`), URLs, and link targets ([text](url) — translate the link text, not the URL) untouched. A run of short list items must come back as the same number of separate list items, not collapsed into one paragraph.
 
+Output real line breaks between blocks, never the two characters backslash-n as text.
+
 Return only the translation, no commentary.`,
     prompt: text,
   });
-  return translated.trim();
+  return unescapeLiteralWhitespace(translated.trim());
 }
 
 export interface TranslatedNote {
