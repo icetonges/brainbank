@@ -1,15 +1,36 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
-import { notes, noteContent, classroomSubcategories } from "@/lib/db/schema";
+import { notes, noteContent, classroomSubcategories, classroomSections } from "@/lib/db/schema";
 import type { ClassroomCategory } from "@/lib/db/schema";
 import { auth } from "@/auth";
 import { CLASSROOM_TABS, isClassroomCategory } from "@/lib/classroom";
 import { getLang } from "@/lib/i18n-server";
 import { t, CLASSROOM_TAB_LABELS_ZH } from "@/lib/i18n";
-import { eq, and, desc, isNotNull } from "drizzle-orm";
+import { eq, and, asc, desc, isNotNull } from "drizzle-orm";
 import { formatDateTime } from "@/lib/date";
 
 export const dynamic = "force-dynamic";
+
+interface ArticleItem {
+  slug: string;
+  title: string;
+  createdAt: Date;
+  status: string;
+}
+
+interface SectionGroup {
+  id: number;
+  name: string;
+  articles: ArticleItem[];
+}
+
+interface SubcategoryGroup {
+  id: number;
+  name: string;
+  slug: string;
+  sections: SectionGroup[];
+  unsectioned: ArticleItem[];
+}
 
 export default async function ClassroomPage({
   searchParams,
@@ -27,13 +48,14 @@ export default async function ClassroomPage({
   const s = t(lang).classroom;
   const dateLocale = lang === "zh" ? "zh-CN" : undefined;
 
-  let articles: {
-    slug: string;
-    title: string;
-    createdAt: Date;
-    status: string;
-    subcategory: string | null;
-  }[] = [];
+  // Articles are organized the same way the AI Classroom files them:
+  // subcategory (e.g. "Claude Code Deep Dive") -> section within that
+  // subcategory (e.g. "Quick Start") -> article. Articles with no
+  // subcategory land in an "Uncategorized" bucket at the end; articles with
+  // a subcategory but no section land in that subcategory's "more articles"
+  // catch-all.
+  let subcategoryGroups: SubcategoryGroup[] = [];
+  let uncategorized: ArticleItem[] = [];
   let loadError = false;
 
   try {
@@ -50,27 +72,75 @@ export default async function ClassroomPage({
         primaryLanguage: notes.primaryLanguage,
         createdAt: notes.createdAt,
         status: notes.status,
-        subcategory: classroomSubcategories.name,
+        subcategoryId: notes.subcategoryId,
+        subcategoryName: classroomSubcategories.name,
+        subcategorySlug: classroomSubcategories.slug,
+        sectionId: notes.sectionId,
+        sectionName: classroomSections.name,
       })
       .from(notes)
       .leftJoin(classroomSubcategories, eq(notes.subcategoryId, classroomSubcategories.id))
+      .leftJoin(classroomSections, eq(notes.sectionId, classroomSections.id))
       .leftJoin(noteContent, and(eq(noteContent.noteId, notes.id), eq(noteContent.language, lang)))
       .where(activeTab === "all" ? isNotNull(notes.category) : eq(notes.category, activeTab))
-      .orderBy(desc(notes.createdAt));
+      .orderBy(
+        asc(classroomSubcategories.name),
+        asc(classroomSections.sortOrder),
+        asc(classroomSections.name),
+        asc(notes.sectionOrder),
+        desc(notes.createdAt),
+      );
 
     // Public-read/private-edit, same as regular notes: anonymous visitors
     // only see published articles; the owner sees drafts/private too.
-    articles = (session ? rows : rows.filter((r) => r.status === "published")).map((r) => ({
-      slug: r.slug,
-      title: lang === r.primaryLanguage ? r.title : r.translatedTitle || r.title,
-      createdAt: r.createdAt,
-      status: r.status,
-      subcategory: r.subcategory,
-    }));
+    const visibleRows = session ? rows : rows.filter((r) => r.status === "published");
+
+    const subcatMap = new Map<number, SubcategoryGroup>();
+
+    for (const r of visibleRows) {
+      const article: ArticleItem = {
+        slug: r.slug,
+        title: lang === r.primaryLanguage ? r.title : r.translatedTitle || r.title,
+        createdAt: r.createdAt,
+        status: r.status,
+      };
+
+      if (r.subcategoryId == null || r.subcategoryName == null || r.subcategorySlug == null) {
+        uncategorized.push(article);
+        continue;
+      }
+
+      let group = subcatMap.get(r.subcategoryId);
+      if (!group) {
+        group = {
+          id: r.subcategoryId,
+          name: r.subcategoryName,
+          slug: r.subcategorySlug,
+          sections: [],
+          unsectioned: [],
+        };
+        subcatMap.set(r.subcategoryId, group);
+      }
+
+      if (r.sectionId == null || r.sectionName == null) {
+        group.unsectioned.push(article);
+      } else {
+        let section = group.sections.find((sec) => sec.id === r.sectionId);
+        if (!section) {
+          section = { id: r.sectionId, name: r.sectionName, articles: [] };
+          group.sections.push(section);
+        }
+        section.articles.push(article);
+      }
+    }
+
+    subcategoryGroups = Array.from(subcatMap.values());
   } catch (err) {
     console.error("Failed to load classroom articles:", err);
     loadError = true;
   }
+
+  const isEmpty = subcategoryGroups.length === 0 && uncategorized.length === 0;
 
   return (
     <div className="flex flex-col gap-6">
@@ -123,7 +193,7 @@ export default async function ClassroomPage({
           <p className="font-medium text-fg">{s.loadFailed}</p>
           <p className="mt-1 text-sm">{s.reload}</p>
         </div>
-      ) : articles.length === 0 ? (
+      ) : isEmpty ? (
         <div className="rounded-lg border border-dashed border-border p-8 text-center text-fg-secondary">
           <p>{s.emptyTab}</p>
           {session && (
@@ -136,29 +206,97 @@ export default async function ClassroomPage({
           )}
         </div>
       ) : (
-        <ul className="flex flex-col gap-3">
-          {articles.map((a) => (
-            <li key={a.slug}>
-              <Link
-                href={`/classroom/${a.slug}?lang=${lang}`}
-                className="flex flex-col gap-1 rounded-lg border border-border bg-bg-elevated p-4 hover:border-accent transition-colors"
-              >
-                <span className="flex items-center gap-2">
-                  <span className="font-semibold text-fg">{a.title}</span>
-                  {a.subcategory && (
-                    <span className="rounded-full border border-border px-2 py-0.5 text-xs text-fg-secondary">
-                      {a.subcategory}
-                    </span>
-                  )}
-                </span>
-                <span className="text-xs text-fg-secondary">
-                  {formatDateTime(a.createdAt, dateLocale)}
-                  {a.status !== "published" ? ` · ${a.status}` : ""}
-                </span>
-              </Link>
-            </li>
-          ))}
-        </ul>
+        <div className="flex flex-col gap-8">
+          {subcategoryGroups.map((group) => {
+            const total =
+              group.sections.reduce((n, sec) => n + sec.articles.length, 0) + group.unsectioned.length;
+            return (
+              <div key={group.id} className="flex flex-col gap-3">
+                <div className="flex items-baseline justify-between gap-3">
+                  <Link
+                    href={`/${group.slug}?lang=${lang}`}
+                    className="text-lg font-semibold text-fg hover:text-accent transition-colors"
+                  >
+                    {group.name}
+                  </Link>
+                  <span className="shrink-0 rounded-full bg-accent/15 px-2.5 py-0.5 text-xs font-semibold text-accent">
+                    {total}
+                  </span>
+                </div>
+
+                {group.sections.map((sec) => (
+                  <div key={sec.id} className="flex flex-col gap-2 rounded-xl border border-border p-4">
+                    <h3 className="text-sm font-semibold text-fg-secondary">{sec.name}</h3>
+                    <ul className="flex flex-col divide-y divide-border">
+                      {sec.articles.map((a) => (
+                        <li key={a.slug}>
+                          <Link
+                            href={`/classroom/${a.slug}?lang=${lang}`}
+                            className="flex items-center justify-between gap-3 py-2 text-sm hover:text-accent transition-colors"
+                          >
+                            <span className="line-clamp-1 text-fg">{a.title}</span>
+                            <span className="shrink-0 text-xs text-fg-secondary">
+                              {formatDateTime(a.createdAt, dateLocale)}
+                              {a.status !== "published" ? ` · ${a.status}` : ""}
+                            </span>
+                          </Link>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+
+                {group.unsectioned.length > 0 && (
+                  <div className="flex flex-col gap-2 rounded-xl border border-border p-4">
+                    {group.sections.length > 0 && (
+                      <h3 className="text-sm font-semibold text-fg-secondary">{s.moreArticles}</h3>
+                    )}
+                    <ul className="flex flex-col divide-y divide-border">
+                      {group.unsectioned.map((a) => (
+                        <li key={a.slug}>
+                          <Link
+                            href={`/classroom/${a.slug}?lang=${lang}`}
+                            className="flex items-center justify-between gap-3 py-2 text-sm hover:text-accent transition-colors"
+                          >
+                            <span className="line-clamp-1 text-fg">{a.title}</span>
+                            <span className="shrink-0 text-xs text-fg-secondary">
+                              {formatDateTime(a.createdAt, dateLocale)}
+                              {a.status !== "published" ? ` · ${a.status}` : ""}
+                            </span>
+                          </Link>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          {uncategorized.length > 0 && (
+            <div className="flex flex-col gap-3">
+              {subcategoryGroups.length > 0 && (
+                <h2 className="text-lg font-semibold text-fg">{s.uncategorized}</h2>
+              )}
+              <ul className="flex flex-col gap-3">
+                {uncategorized.map((a) => (
+                  <li key={a.slug}>
+                    <Link
+                      href={`/classroom/${a.slug}?lang=${lang}`}
+                      className="flex flex-col gap-1 rounded-lg border border-border bg-bg-elevated p-4 hover:border-accent transition-colors"
+                    >
+                      <span className="font-semibold text-fg">{a.title}</span>
+                      <span className="text-xs text-fg-secondary">
+                        {formatDateTime(a.createdAt, dateLocale)}
+                        {a.status !== "published" ? ` · ${a.status}` : ""}
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
