@@ -154,7 +154,7 @@ export function ClassroomComposer({
           <option value="zh">{s.languageChinese}</option>
         </select>
         {/* Optional finer-grained label within the subtab above (e.g.
-            "Newsletters", "Claude Code Deep Dive from Leaked Code") —
+            "Newsletters", "Claude Code Deep Dive") —
             backed by the classroom_subcategories table, sorted A→Z by the
             server; "+ Add new subcategory…" reveals a name field. Section
             (the subcategory's own subdivisions, e.g. "Quick Start", "Core

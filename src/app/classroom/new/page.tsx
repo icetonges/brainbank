@@ -37,7 +37,7 @@ export default async function NewClassroomArticlePage({
         subcategoryId: classroomSections.subcategoryId,
       })
       .from(classroomSections)
-      .orderBy(asc(classroomSections.name));
+      .orderBy(asc(classroomSections.sortOrder), asc(classroomSections.name));
   } catch (err) {
     console.error("Failed to load subcategories/sections:", err);
   }

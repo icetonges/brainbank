@@ -98,7 +98,7 @@ export const notes = pgTable("notes", {
   // Non-null only for AI Classroom articles — which subtab they live under.
   category: classroomCategoryEnum("category"),
   // User-defined finer-grained label within a category (e.g.
-  // "Newsletters", "Claude Code Deep Dive from Leaked Code") — backed by
+  // "Newsletters", "Claude Code Deep Dive") — backed by
   // classroomSubcategories below (its own table, like tags/noteTags)
   // rather than a fixed enum like `category`, since the list is meant to
   // grow. Optional; null means uncategorized within its subtab. Deleting
@@ -107,7 +107,7 @@ export const notes = pgTable("notes", {
     onDelete: "set null",
   }),
   // Finer-grained still: a chapter/section *within* the subcategory above
-  // (e.g. subcategory "Claude Code Deep Dive from Leaked Code" breaks into
+  // (e.g. subcategory "Claude Code Deep Dive" breaks into
   // sections "Quick Start", "Core Mechanisms", "Tools"...) — see
   // classroomSections below. Optional; null means unsectioned within its
   // subcategory. Deleting a section clears it here rather than deleting
@@ -130,7 +130,7 @@ export const classroomSubcategories = pgTable("classroom_subcategories", {
 });
 
 // A subcategory's sections — one subcategory has many sections (e.g.
-// "Claude Code Deep Dive from Leaked Code" breaks down into "Quick Start",
+// "Claude Code Deep Dive" breaks down into "Quick Start",
 // "Core Mechanisms", "Tools", etc.), and every section belongs to exactly
 // one subcategory. Same real-table pattern as classroomSubcategories so the
 // composer's picker can list/sort/reuse existing values; unique per
@@ -144,6 +144,12 @@ export const classroomSections = pgTable(
     subcategoryId: integer("subcategory_id")
       .notNull()
       .references(() => classroomSubcategories.id, { onDelete: "cascade" }),
+    // Explicit display order within the subcategory (lower first) — the
+    // picker's dropdown and any listing follow this rather than alphabetical,
+    // since a course-like subcategory (e.g. "Claude Code Deep Dive") wants
+    // "Quick Start" before "In-Depth Study" regardless of spelling. New
+    // sections default to 0 (front of the list) until manually ordered.
+    sortOrder: integer("sort_order").default(0).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [unique().on(t.subcategoryId, t.name)],
