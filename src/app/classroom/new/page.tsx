@@ -1,7 +1,7 @@
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
-import { classroomSubcategories } from "@/lib/db/schema";
+import { classroomSubcategories, classroomSections } from "@/lib/db/schema";
 import { asc } from "drizzle-orm";
 import { CLASSROOM_TABS } from "@/lib/classroom";
 import { getLang } from "@/lib/i18n-server";
@@ -24,13 +24,22 @@ export default async function NewClassroomArticlePage({
   // so "General Knowledge" sits above "Newsletters" regardless of
   // insertion order.
   let subcategories: { id: number; name: string }[] = [];
+  let sections: { id: number; name: string; subcategoryId: number }[] = [];
   try {
     subcategories = await db
       .select({ id: classroomSubcategories.id, name: classroomSubcategories.name })
       .from(classroomSubcategories)
       .orderBy(asc(classroomSubcategories.name));
+    sections = await db
+      .select({
+        id: classroomSections.id,
+        name: classroomSections.name,
+        subcategoryId: classroomSections.subcategoryId,
+      })
+      .from(classroomSections)
+      .orderBy(asc(classroomSections.name));
   } catch (err) {
-    console.error("Failed to load subcategories:", err);
+    console.error("Failed to load subcategories/sections:", err);
   }
 
   return (
@@ -47,6 +56,7 @@ export default async function NewClassroomArticlePage({
           label: lang === "zh" ? CLASSROOM_TAB_LABELS_ZH[value] : label,
         }))}
         subcategories={subcategories}
+        sections={sections}
       />
     </div>
   );

@@ -41,10 +41,12 @@ interface TabOption {
 export function ClassroomComposer({
   categories,
   subcategories = [],
+  sections = [],
   lang = "en",
 }: {
   categories: TabOption[];
   subcategories?: { id: number; name: string }[];
+  sections?: { id: number; name: string; subcategoryId: number }[];
   lang?: Lang;
 }) {
   const s = t(lang).classroom;
@@ -121,7 +123,7 @@ export function ClassroomComposer({
         className="rounded-md border border-border bg-bg-elevated px-3 py-2 text-fg outline-none focus:border-accent"
       />
 
-      <div className="flex flex-col gap-3 sm:flex-row">
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
         <select
           name="category"
           defaultValue=""
@@ -154,14 +156,20 @@ export function ClassroomComposer({
         {/* Optional finer-grained label within the subtab above (e.g.
             "Newsletters", "Claude Code Deep Dive from Leaked Code") —
             backed by the classroom_subcategories table, sorted A→Z by the
-            server; "+ Add new subcategory…" reveals a name field. */}
+            server; "+ Add new subcategory…" reveals a name field. Section
+            (the subcategory's own subdivisions, e.g. "Quick Start", "Core
+            Mechanisms") is filtered to whichever subcategory is picked. */}
         <SubcategoryField
           options={subcategories}
+          sections={sections}
           className="rounded-md border border-border bg-bg-elevated px-3 py-2 text-sm text-fg outline-none focus:border-accent"
           labels={{
             none: s.subcategoryNone,
             addNew: s.subcategoryAddNew,
             newPlaceholder: s.subcategoryNewPlaceholder,
+            sectionNone: s.sectionNone,
+            sectionAddNew: s.sectionAddNew,
+            sectionNewPlaceholder: s.sectionNewPlaceholder,
           }}
         />
       </div>

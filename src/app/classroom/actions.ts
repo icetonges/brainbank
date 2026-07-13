@@ -9,6 +9,7 @@ import {
   tags,
   learningGuides,
   classroomSubcategories,
+  classroomSections,
 } from "@/lib/db/schema";
 import type { ClassroomCategory } from "@/lib/db/schema";
 import { isClassroomCategory } from "@/lib/classroom";
@@ -54,6 +55,41 @@ async function resolveSubcategoryId(
     });
     if (!row) {
       [row] = await db.insert(classroomSubcategories).values({ name: trimmedName }).returning();
+    }
+    return row.id;
+  }
+  const id = Number(selectedId);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+/**
+ * Resolves the composer/edit form's section fields to a sectionId, mirroring
+ * resolveSubcategoryId above. A section always belongs to a subcategory —
+ * one-to-many, subcategory to sections — so without a resolved
+ * subcategoryId any section selection is ignored (nothing to nest it
+ * under). Same "new name wins" rule, and uniqueness is scoped to the
+ * subcategory (see the (subcategoryId, name) unique index) so the same
+ * section name can exist under two different subcategories.
+ */
+async function resolveSectionId(
+  selectedId: string,
+  newName: string,
+  subcategoryId: number | null,
+): Promise<number | null> {
+  if (!subcategoryId) return null;
+  const trimmedName = newName.trim().slice(0, 120);
+  if (trimmedName) {
+    let row = await db.query.classroomSections.findFirst({
+      where: and(
+        eq(classroomSections.subcategoryId, subcategoryId),
+        eq(classroomSections.name, trimmedName),
+      ),
+    });
+    if (!row) {
+      [row] = await db
+        .insert(classroomSections)
+        .values({ name: trimmedName, subcategoryId })
+        .returning();
     }
     return row.id;
   }
@@ -152,6 +188,11 @@ export async function publishClassroomArticle(formData: FormData) {
     String(formData.get("subcategoryId") ?? ""),
     String(formData.get("newSubcategory") ?? ""),
   );
+  const sectionId = await resolveSectionId(
+    String(formData.get("sectionId") ?? ""),
+    String(formData.get("newSection") ?? ""),
+    subcategoryId,
+  );
 
   const category: ClassroomCategory | undefined = isClassroomCategory(rawCategory)
     ? rawCategory
@@ -189,6 +230,7 @@ export async function publishClassroomArticle(formData: FormData) {
         status: "published",
         category: finalCategory,
         subcategoryId,
+        sectionId,
         primaryLanguage,
         updatedAt: new Date(),
       })
@@ -224,6 +266,7 @@ export async function publishClassroomArticle(formData: FormData) {
         sourceType: "manual",
         category: finalCategory,
         subcategoryId,
+        sectionId,
         primaryLanguage,
       })
       .returning();
@@ -321,13 +364,24 @@ export async function updateClassroomArticle(
     String(formData.get("subcategoryId") ?? ""),
     String(formData.get("newSubcategory") ?? ""),
   );
+  const sectionId = await resolveSectionId(
+    String(formData.get("sectionId") ?? ""),
+    String(formData.get("newSection") ?? ""),
+    subcategoryId,
+  );
 
   const note = await db.query.notes.findFirst({ where: eq(notes.id, noteId) });
   if (!note) throw new Error("Article not found");
 
   await db
     .update(notes)
-    .set({ title: topic.slice(0, 500), category: rawCategory, subcategoryId, updatedAt: new Date() })
+    .set({
+      title: topic.slice(0, 500),
+      category: rawCategory,
+      subcategoryId,
+      sectionId,
+      updatedAt: new Date(),
+    })
     .where(eq(notes.id, noteId));
 
   // Edits land in the original (primary-language) row; a stale translation

@@ -9,6 +9,7 @@ import {
   pgEnum,
   primaryKey,
   jsonb,
+  unique,
 } from "drizzle-orm/pg-core";
 
 // --- enums ---
@@ -105,6 +106,15 @@ export const notes = pgTable("notes", {
   subcategoryId: integer("subcategory_id").references(() => classroomSubcategories.id, {
     onDelete: "set null",
   }),
+  // Finer-grained still: a chapter/section *within* the subcategory above
+  // (e.g. subcategory "Claude Code Deep Dive from Leaked Code" breaks into
+  // sections "Quick Start", "Core Mechanisms", "Tools"...) — see
+  // classroomSections below. Optional; null means unsectioned within its
+  // subcategory. Deleting a section clears it here rather than deleting
+  // the article.
+  sectionId: integer("section_id").references(() => classroomSections.id, {
+    onDelete: "set null",
+  }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
@@ -118,6 +128,26 @@ export const classroomSubcategories = pgTable("classroom_subcategories", {
   name: varchar("name", { length: 120 }).notNull().unique(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
+
+// A subcategory's sections — one subcategory has many sections (e.g.
+// "Claude Code Deep Dive from Leaked Code" breaks down into "Quick Start",
+// "Core Mechanisms", "Tools", etc.), and every section belongs to exactly
+// one subcategory. Same real-table pattern as classroomSubcategories so the
+// composer's picker can list/sort/reuse existing values; unique per
+// subcategory (not globally) since the same section name could reasonably
+// exist under two different subcategories.
+export const classroomSections = pgTable(
+  "classroom_sections",
+  {
+    id: serial("id").primaryKey(),
+    name: varchar("name", { length: 120 }).notNull(),
+    subcategoryId: integer("subcategory_id")
+      .notNull()
+      .references(() => classroomSubcategories.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [unique().on(t.subcategoryId, t.name)],
+);
 
 export const noteContent = pgTable("note_content", {
   id: serial("id").primaryKey(),
