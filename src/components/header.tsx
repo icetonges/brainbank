@@ -61,6 +61,12 @@ export async function Header() {
                 {s.obsidian}
               </Link>
               <Link
+                href="/classroom/new"
+                className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-fg-secondary hover:text-accent hover:border-accent transition-colors"
+              >
+                {s.newArticle}
+              </Link>
+              <Link
                 href="/new"
                 className="rounded-md bg-accent px-3 py-1.5 text-sm font-semibold text-accent-fg hover:opacity-90 transition-opacity"
               >
