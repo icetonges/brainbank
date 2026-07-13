@@ -20,6 +20,7 @@ interface HomeData {
   subcategoryToc: {
     id: number;
     name: string;
+    slug: string;
     total: number;
     articles: { slug: string; title: string; createdAt: Date }[];
   }[];
@@ -106,7 +107,11 @@ async function loadHome(
     // article rows (ordered newest-first), then grouped/capped in JS
     // rather than N+1 queries per subcategory.
     const subcatList = await db
-      .select({ id: classroomSubcategories.id, name: classroomSubcategories.name })
+      .select({
+        id: classroomSubcategories.id,
+        name: classroomSubcategories.name,
+        slug: classroomSubcategories.slug,
+      })
       .from(classroomSubcategories)
       .orderBy(classroomSubcategories.name);
 
@@ -148,6 +153,7 @@ async function loadHome(
       .map((sc) => ({
         id: sc.id,
         name: sc.name,
+        slug: sc.slug,
         total: subcatCounts.get(sc.id) ?? 0,
         articles: bySubcat.get(sc.id) ?? [],
       }))
@@ -288,14 +294,17 @@ export default async function Home({
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {data.subcategoryToc.map((sc) => (
               <div key={sc.id} className="overflow-hidden rounded-xl border border-border">
-                <div className="flex items-center justify-between gap-2 bg-bg px-4 py-3">
+                <Link
+                  href={`/${sc.slug}`}
+                  className="flex items-center justify-between gap-2 bg-bg px-4 py-3 hover:bg-bg/80 transition-colors"
+                >
                   <h3 className="font-semibold text-fg">{sc.name}</h3>
                   <span className="shrink-0 rounded-full bg-accent/15 px-2.5 py-0.5 text-xs font-semibold text-accent">
                     {lang === "zh"
                       ? `${sc.total} ${s.articleMany}`
                       : `${sc.total} ${sc.total === 1 ? s.articleOne : s.articleMany}`}
                   </span>
-                </div>
+                </Link>
                 <ul className="flex flex-col divide-y divide-border bg-bg-elevated">
                   {sc.articles.map((a) => (
                     <li key={a.slug}>

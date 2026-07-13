@@ -115,6 +115,10 @@ export const notes = pgTable("notes", {
   sectionId: integer("section_id").references(() => classroomSections.id, {
     onDelete: "set null",
   }),
+  // Manual display order of this article within its section (lower first)
+  // — set by the section page's drag-to-reorder UI (owner-only). New
+  // articles default to 0 (front of the list) until manually ordered.
+  sectionOrder: integer("section_order").default(0).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
@@ -126,6 +130,10 @@ export const notes = pgTable("notes", {
 export const classroomSubcategories = pgTable("classroom_subcategories", {
   id: serial("id").primaryKey(),
   name: varchar("name", { length: 120 }).notNull().unique(),
+  // Backs the subcategory's own landing page at the top-level route
+  // /[subcategorySlug] (e.g. "Claude Code Deep Dive" -> "claudecodedeepdive")
+  // — see src/lib/slug.ts's subcategorySlug() and src/app/[subcategorySlug].
+  slug: varchar("slug", { length: 160 }).notNull().unique(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 

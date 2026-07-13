@@ -13,7 +13,7 @@ import {
 } from "@/lib/db/schema";
 import type { ClassroomCategory } from "@/lib/db/schema";
 import { isClassroomCategory } from "@/lib/classroom";
-import { slugify } from "@/lib/slug";
+import { slugify, subcategorySlug, RESERVED_TOP_LEVEL_SLUGS } from "@/lib/slug";
 import { publishAssist, translateText, type PublishAssistResult } from "@/lib/ai/tasks";
 import { linkWikilinksFromText } from "@/lib/notes/link-wikilinks";
 import { linkRelatedByTags } from "@/lib/notes/link-related";
@@ -37,6 +37,25 @@ async function uniqueSlug(base: string, keepNoteId?: number): Promise<string> {
   }
 }
 
+/** A new subcategory's landing-page slug — collision-safe against both
+ * existing subcategories and the app's own top-level routes (a subcategory
+ * slug matching e.g. "search" or "classroom" would be shadowed by that
+ * static route and permanently unreachable). */
+async function uniqueSubcategorySlug(base: string): Promise<string> {
+  let slug = base;
+  let suffix = 1;
+  for (;;) {
+    if (!RESERVED_TOP_LEVEL_SLUGS.has(slug)) {
+      const existing = await db.query.classroomSubcategories.findFirst({
+        where: eq(classroomSubcategories.slug, slug),
+      });
+      if (!existing) return slug;
+    }
+    suffix += 1;
+    slug = `${base}-${suffix}`;
+  }
+}
+
 /**
  * Resolves the composer/edit form's subcategory fields to a subcategoryId.
  * `newName` (the "or add a new one" field) wins when both are present —
@@ -54,7 +73,11 @@ async function resolveSubcategoryId(
       where: eq(classroomSubcategories.name, trimmedName),
     });
     if (!row) {
-      [row] = await db.insert(classroomSubcategories).values({ name: trimmedName }).returning();
+      const slug = await uniqueSubcategorySlug(subcategorySlug(trimmedName));
+      [row] = await db
+        .insert(classroomSubcategories)
+        .values({ name: trimmedName, slug })
+        .returning();
     }
     return row.id;
   }
@@ -511,4 +534,33 @@ export async function deleteClassroomArticle(noteId: number) {
   await db.delete(notes).where(eq(notes.id, noteId));
   revalidatePath("/classroom");
   redirect("/classroom");
+}
+
+/**
+ * The subcategory landing page's drag-to-reorder — owner-only (the UI
+ * itself hides the drag handles from anonymous visitors, but the action
+ * re-checks since it's a real mutation). `orderedNoteIds` is the section's
+ * full article list in its new top-to-bottom order; each note's
+ * `sectionOrder` becomes its index, so future queries just `ORDER BY
+ * section_order` to get this exact order back. The `eq(notes.sectionId, ...)`
+ * guard keeps a stale client from writing an order onto notes that have
+ * since moved to a different section.
+ */
+export async function reorderSectionArticles(
+  sectionId: number,
+  subcategorySlugValue: string,
+  orderedNoteIds: number[],
+) {
+  await requireOwner();
+
+  await Promise.all(
+    orderedNoteIds.map((noteId, index) =>
+      db
+        .update(notes)
+        .set({ sectionOrder: index })
+        .where(and(eq(notes.id, noteId), eq(notes.sectionId, sectionId))),
+    ),
+  );
+
+  revalidatePath(`/${subcategorySlugValue}`);
 }
