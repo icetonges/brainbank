@@ -16,7 +16,7 @@ export async function Header() {
     <header className="border-b border-border bg-bg-elevated">
       <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-6 py-4">
         <Link href="/" className="shrink-0 text-lg font-semibold tracking-tight text-fg">
-          brain<span className="text-accent">bank</span>
+          Brain<span className="text-accent">Bank</span>
         </Link>
 
         <form

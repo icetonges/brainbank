@@ -17,7 +17,12 @@ interface HomeData {
   latestArticles: { slug: string; title: string; category: ClassroomCategory | null; createdAt: Date }[];
   recentNotes: { id: number; slug: string; title: string; status: string; sourceType: string; updatedAt: Date }[];
   topTags: { name: string; uses: number }[];
-  subcategoryToc: { id: number; name: string; articles: { slug: string; title: string; createdAt: Date }[] }[];
+  subcategoryToc: {
+    id: number;
+    name: string;
+    total: number;
+    articles: { slug: string; title: string; createdAt: Date }[];
+  }[];
 }
 
 async function loadHome(
@@ -124,8 +129,10 @@ async function loadHome(
       .orderBy(desc(notes.createdAt));
 
     const bySubcat = new Map<number, { slug: string; title: string; createdAt: Date }[]>();
+    const subcatCounts = new Map<number, number>();
     for (const r of subcatArticlesRaw) {
       if (!r.subcategoryId) continue;
+      subcatCounts.set(r.subcategoryId, (subcatCounts.get(r.subcategoryId) ?? 0) + 1);
       const arr = bySubcat.get(r.subcategoryId) ?? [];
       if (arr.length < 10) {
         arr.push({
@@ -138,7 +145,12 @@ async function loadHome(
     }
 
     const subcategoryToc = subcatList
-      .map((sc) => ({ id: sc.id, name: sc.name, articles: bySubcat.get(sc.id) ?? [] }))
+      .map((sc) => ({
+        id: sc.id,
+        name: sc.name,
+        total: subcatCounts.get(sc.id) ?? 0,
+        articles: bySubcat.get(sc.id) ?? [],
+      }))
       .filter((sc) => sc.articles.length > 0);
 
     return {
@@ -275,19 +287,28 @@ export default async function Home({
         {data && data.subcategoryToc.length > 0 ? (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {data.subcategoryToc.map((sc) => (
-              <div
-                key={sc.id}
-                className="flex flex-col gap-2 rounded-lg border border-border bg-bg-elevated p-4"
-              >
-                <h3 className="font-semibold text-fg">{sc.name}</h3>
-                <ul className="flex flex-col gap-1.5">
+              <div key={sc.id} className="overflow-hidden rounded-xl border border-border">
+                <div className="flex items-center justify-between gap-2 bg-bg px-4 py-3">
+                  <h3 className="font-semibold text-fg">{sc.name}</h3>
+                  <span className="shrink-0 rounded-full bg-accent/15 px-2.5 py-0.5 text-xs font-semibold text-accent">
+                    {lang === "zh"
+                      ? `${sc.total} ${s.articleMany}`
+                      : `${sc.total} ${sc.total === 1 ? s.articleOne : s.articleMany}`}
+                  </span>
+                </div>
+                <ul className="flex flex-col divide-y divide-border bg-bg-elevated">
                   {sc.articles.map((a) => (
                     <li key={a.slug}>
                       <Link
                         href={`/classroom/${a.slug}?lang=${lang}`}
-                        className="text-sm text-fg-secondary hover:text-accent transition-colors"
+                        className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm hover:bg-bg transition-colors"
                       >
-                        {a.title}
+                        <span className="line-clamp-1 text-fg-secondary hover:text-accent transition-colors">
+                          {a.title}
+                        </span>
+                        <span className="shrink-0 text-xs text-fg-secondary">
+                          {new Date(a.createdAt).toLocaleDateString(dateLocale)}
+                        </span>
                       </Link>
                     </li>
                   ))}

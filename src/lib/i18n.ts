@@ -54,7 +54,7 @@ const en = {
         cta: "Browse the playbooks",
       },
     },
-    browseByCategory: "Browse by category",
+    browseByCategory: "Browse by Category",
     allSubtabs: "All classroom subtabs →",
     articleOne: "article",
     articleMany: "articles",
