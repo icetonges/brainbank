@@ -8,6 +8,7 @@ import { getLang } from "@/lib/i18n-server";
 import { t, CLASSROOM_TAB_LABELS_ZH, type Lang } from "@/lib/i18n";
 import { desc, eq, and, isNotNull, isNull, count } from "drizzle-orm";
 import { HeroVisual, PillarIcon } from "@/components/home-visuals";
+import { formatDate, formatDateTime } from "@/lib/date";
 
 export const dynamic = "force-dynamic";
 
@@ -316,7 +317,7 @@ export default async function Home({
                           {a.title}
                         </span>
                         <span className="shrink-0 text-xs text-fg-secondary">
-                          {new Date(a.createdAt).toLocaleDateString(dateLocale)}
+                          {formatDate(a.createdAt, dateLocale)}
                         </span>
                       </Link>
                     </li>
@@ -358,7 +359,7 @@ export default async function Home({
                         )}
                       </span>
                     )}
-                    <span>{new Date(a.createdAt).toLocaleString(dateLocale)}</span>
+                    <span>{formatDateTime(a.createdAt, dateLocale)}</span>
                   </div>
                 </li>
               ))}
@@ -395,7 +396,7 @@ export default async function Home({
                     {n.title}
                   </Link>
                   <div className="mt-1 text-xs text-fg-secondary">
-                    {n.status} · {n.sourceType} · {new Date(n.updatedAt).toLocaleDateString(dateLocale)}
+                    {n.status} · {n.sourceType} · {formatDate(n.updatedAt, dateLocale)}
                   </div>
                 </li>
               ))}

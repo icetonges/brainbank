@@ -18,6 +18,7 @@ import { Markdown } from "@/components/markdown";
 import { DeleteArticleButton } from "@/components/delete-article-button";
 import { PendingFormButton } from "@/components/pending-form-button";
 import { regenerateGuideAction, translateClassroomArticleAction } from "../actions";
+import { formatDateTime } from "@/lib/date";
 
 export const dynamic = "force-dynamic";
 
@@ -127,9 +128,9 @@ export default async function ClassroomArticlePage({
 
         <h1 className="text-3xl font-semibold text-fg">{displayTitle}</h1>
         <p className="text-sm text-fg-secondary">
-          {new Date(note.createdAt).toLocaleString(dateLocale)}
+          {formatDateTime(note.createdAt, dateLocale)}
           {note.updatedAt.getTime() !== note.createdAt.getTime()
-            ? ` · ${s.updated} ${new Date(note.updatedAt).toLocaleString(dateLocale)}`
+            ? ` · ${s.updated} ${formatDateTime(note.updatedAt, dateLocale)}`
             : ""}
         </p>
 

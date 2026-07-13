@@ -7,6 +7,7 @@ import { CLASSROOM_TABS, isClassroomCategory } from "@/lib/classroom";
 import { getLang } from "@/lib/i18n-server";
 import { t, CLASSROOM_TAB_LABELS_ZH } from "@/lib/i18n";
 import { eq, and, desc, isNotNull } from "drizzle-orm";
+import { formatDateTime } from "@/lib/date";
 
 export const dynamic = "force-dynamic";
 
@@ -151,7 +152,7 @@ export default async function ClassroomPage({
                   )}
                 </span>
                 <span className="text-xs text-fg-secondary">
-                  {new Date(a.createdAt).toLocaleString(dateLocale)}
+                  {formatDateTime(a.createdAt, dateLocale)}
                   {a.status !== "published" ? ` · ${a.status}` : ""}
                 </span>
               </Link>

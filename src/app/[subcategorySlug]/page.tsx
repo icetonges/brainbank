@@ -7,6 +7,7 @@ import { eq, and, asc } from "drizzle-orm";
 import { getLang } from "@/lib/i18n-server";
 import { t } from "@/lib/i18n";
 import { SectionArticleList } from "@/components/section-article-list";
+import { formatDate } from "@/lib/date";
 
 export const dynamic = "force-dynamic";
 
@@ -182,7 +183,7 @@ export default async function SubcategoryLandingPage({
                           {a.title}
                         </span>
                         <span className="shrink-0 text-xs text-fg-secondary">
-                          {new Date(a.createdAt).toLocaleDateString(dateLocale)}
+                          {formatDate(a.createdAt, dateLocale)}
                         </span>
                       </Link>
                     </li>

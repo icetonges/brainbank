@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { reorderSectionArticles } from "@/app/classroom/actions";
+import { formatDate } from "@/lib/date";
 
 interface Article {
   id: number;
@@ -85,7 +86,7 @@ export function SectionArticleList({
             {a.title}
           </Link>
           <span className="shrink-0 text-xs text-fg-secondary">
-            {new Date(a.createdAt).toLocaleDateString(dateLocale)}
+            {formatDate(a.createdAt, dateLocale)}
           </span>
         </li>
       ))}

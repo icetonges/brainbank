@@ -4,6 +4,7 @@ import { and, or, ilike, eq, inArray, desc } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db, isDatabaseConfigured } from "@/lib/db";
 import { notes, noteContent, noteTags, tags } from "@/lib/db/schema";
+import { formatDate } from "@/lib/date";
 
 export const dynamic = "force-dynamic";
 
@@ -133,7 +134,7 @@ export default async function SearchPage({
               </Link>
               <div className="mt-1 text-sm text-fg-secondary">
                 {note.status} · {note.sourceType} ·{" "}
-                {new Date(note.updatedAt).toLocaleDateString()}
+                {formatDate(note.updatedAt)}
               </div>
             </li>
           ))}

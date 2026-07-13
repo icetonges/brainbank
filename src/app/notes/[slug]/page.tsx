@@ -10,6 +10,7 @@ import { UploadWidget } from "@/components/upload-widget";
 import { MediaGallery } from "@/components/media-gallery";
 import { IngestStatusBanner } from "@/components/ingest-status-banner";
 import { DeleteNoteButton } from "@/components/delete-note-button";
+import { formatDate } from "@/lib/date";
 import {
   translateNoteAction,
   summarizeNoteAction,
@@ -144,7 +145,7 @@ export default async function NotePage({
         </div>
         <p className="text-sm text-fg-secondary">
           {n.status} · {n.sourceType} ·{" "}
-          {new Date(n.createdAt).toLocaleDateString()}
+          {formatDate(n.createdAt)}
         </p>
         {noteTagRows.length > 0 && (
           <div className="flex flex-wrap gap-2">
