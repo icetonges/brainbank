@@ -1,24 +1,43 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
-import { and, or, ilike, eq, desc } from "drizzle-orm";
+import { and, or, ilike, eq, inArray, desc } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db, isDatabaseConfigured } from "@/lib/db";
-import { notes, noteContent } from "@/lib/db/schema";
+import { notes, noteContent, noteTags, tags } from "@/lib/db/schema";
 
 export const dynamic = "force-dynamic";
 
 async function search(q: string, isOwner: boolean) {
   const pattern = `%${q}%`;
 
+  // The homepage's Topic index links to /search?q=<tag> for each #tag pill
+  // — a tag name (e.g. "claude-code") rarely appears verbatim in a title or
+  // body, so tag membership needs its own match path rather than
+  // piggybacking on the content ilike below (that's why clicking a topic
+  // pill used to come back empty even when the front page showed a count).
+  const taggedRows = await db
+    .select({ noteId: noteTags.noteId })
+    .from(noteTags)
+    .innerJoin(tags, eq(noteTags.tagId, tags.id))
+    .where(ilike(tags.name, pattern));
+  const taggedIds = taggedRows.map((r) => r.noteId);
+
+  // AI Classroom articles keep their body in noteContent.bodyMarkdown
+  // (what/how/why/other are only used by regular hand-written notes), so
+  // that needed its own ilike too — otherwise classroom articles were only
+  // ever matchable via their title or AI-generated summary.
+  const contentMatch = or(
+    ilike(notes.title, pattern),
+    ilike(noteContent.bodyMarkdown, pattern),
+    ilike(noteContent.what, pattern),
+    ilike(noteContent.how, pattern),
+    ilike(noteContent.why, pattern),
+    ilike(noteContent.other, pattern),
+    ilike(noteContent.summary, pattern),
+  );
+
   const conditions = [
-    or(
-      ilike(notes.title, pattern),
-      ilike(noteContent.what, pattern),
-      ilike(noteContent.how, pattern),
-      ilike(noteContent.why, pattern),
-      ilike(noteContent.other, pattern),
-      ilike(noteContent.summary, pattern),
-    ),
+    taggedIds.length > 0 ? or(contentMatch, inArray(notes.id, taggedIds)) : contentMatch,
   ];
   if (!isOwner) conditions.push(eq(notes.status, "published"));
 
@@ -29,6 +48,7 @@ async function search(q: string, isOwner: boolean) {
       title: notes.title,
       status: notes.status,
       sourceType: notes.sourceType,
+      category: notes.category,
       updatedAt: notes.updatedAt,
     })
     .from(notes)
@@ -102,7 +122,11 @@ export default async function SearchPage({
           {results.map((note) => (
             <li key={note.id} className="p-5">
               <Link
-                href={`/notes/${note.slug}?lang=${lang}`}
+                href={
+                  note.category
+                    ? `/classroom/${note.slug}?lang=${lang}`
+                    : `/notes/${note.slug}?lang=${lang}`
+                }
                 className="text-lg font-medium text-fg hover:text-accent transition-colors"
               >
                 {note.title}
