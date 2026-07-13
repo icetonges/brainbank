@@ -49,6 +49,12 @@ export async function Header() {
           {session ? (
             <>
               <Link
+                href="/classroom/new"
+                className="rounded-md bg-accent px-3 py-1.5 text-sm font-semibold text-accent-fg hover:opacity-90 transition-opacity"
+              >
+                {s.newArticle}
+              </Link>
+              <Link
                 href="/graph"
                 className="rounded-md px-3 py-1.5 text-sm font-medium text-fg-secondary hover:text-accent transition-colors"
               >
@@ -59,12 +65,6 @@ export async function Header() {
                 className="rounded-md px-3 py-1.5 text-sm font-medium text-fg-secondary hover:text-accent transition-colors"
               >
                 {s.obsidian}
-              </Link>
-              <Link
-                href="/classroom/new"
-                className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-fg-secondary hover:text-accent hover:border-accent transition-colors"
-              >
-                {s.newArticle}
               </Link>
               <Link
                 href="/new"

@@ -17,7 +17,7 @@ const en = {
     graph: "Graph",
     classroom: "AI Classroom",
     obsidian: "Obsidian",
-    newArticle: "+ New article",
+    newArticle: "+ New Article",
     newKnowledge: "+ New knowledge",
     signOut: "Sign out",
     signIn: "Sign in",
