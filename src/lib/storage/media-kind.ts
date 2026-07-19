@@ -8,7 +8,9 @@ export function mediaKindFromMimeType(mimeType: string): MediaKind {
   if (
     mimeType === "application/msword" ||
     mimeType ===
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+    mimeType ===
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation"
   ) {
     return "doc";
   }

@@ -8,7 +8,13 @@ const ALLOWED_UPLOADS: Record<string, readonly string[]> = {
   ".xlsx": ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/octet-stream"],
   ".csv": ["text/csv", "application/vnd.ms-excel", "application/octet-stream"],
   ".md": ["text/markdown", "text/plain", "application/octet-stream"],
+  ".markdown": ["text/markdown", "text/plain", "application/octet-stream"],
   ".txt": ["text/plain", "application/octet-stream"],
+  ".json": ["application/json", "text/plain", "application/octet-stream"],
+  ".pptx": [
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/octet-stream",
+  ],
   ".png": ["image/png"],
   ".jpg": ["image/jpeg"],
   ".jpeg": ["image/jpeg"],

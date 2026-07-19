@@ -10,6 +10,10 @@ import {
   createClassroomDraft,
   publishClassroomArticle,
 } from "@/app/classroom/actions";
+import {
+  extractUrlsForComposer,
+  extractDocumentForComposer,
+} from "@/app/classroom/extract-actions";
 import { t, type Lang } from "@/lib/i18n";
 import { SubcategoryField } from "@/components/subcategory-field";
 
@@ -26,6 +30,24 @@ const turndown = new TurndownService({
   bulletListMarker: "-",
 });
 
+/** Document types the composer can extract text from (server-side, see
+ * extract-actions.ts). Images are handled separately by handleImage. */
+const DOC_EXTENSIONS = /\.(pdf|docx?|xlsx|xls|csv|pptx|txt|md|markdown|json)$/i;
+
+function isDocFile(file: File): boolean {
+  return DOC_EXTENSIONS.test(file.name);
+}
+
+/** If the pasted text is nothing but URLs (one or several, separated by
+ * whitespace/newlines), return them — that's the "paste a link and get
+ * the page's content" trigger. Any other prose means a normal paste. */
+function parseUrlOnlyPaste(text: string): string[] | null {
+  const tokens = text.trim().split(/\s+/).filter(Boolean);
+  if (tokens.length === 0 || tokens.length > 8) return null;
+  if (!tokens.every((token) => /^https?:\/\/\S+$/i.test(token))) return null;
+  return [...new Set(tokens)];
+}
+
 interface TabOption {
   value: string;
   label: string;
@@ -33,10 +55,12 @@ interface TabOption {
 
 /**
  * The full-page AI Classroom composer: one big box that takes text,
- * markdown formatting, image files (attached or pasted — they upload
- * immediately and drop in as markdown), URLs, and YouTube links. On Save,
- * publishClassroomArticle() creates the knowledge page and the AI publish
- * assist builds its learning map, hands-on steps, resources, and tags.
+ * markdown, images, documents (pdf, docx, xlsx, csv, pptx, txt, md,
+ * json — attached, pasted, or dropped), and URLs (pasted alone, their
+ * main content is fetched with the noise stripped). On Save,
+ * publishClassroomArticle() rewrites everything into a polished article
+ * and the AI publish assist builds its learning map, hands-on steps,
+ * resources, and tags.
  */
 export function ClassroomComposer({
   categories,
@@ -53,11 +77,12 @@ export function ClassroomComposer({
   const bodyRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // The draft note images get attached to before the article exists —
-  // created lazily on the first image so a plain text article never leaves
-  // an empty draft behind.
+  // The draft note images/documents get attached to before the article
+  // exists — created lazily on the first upload so a plain text article
+  // never leaves an empty draft behind.
   const [draft, setDraft] = useState<{ noteId: number; slug: string } | null>(null);
   const [uploadPct, setUploadPct] = useState<number | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Inserts at an explicit [start, end) range rather than re-reading
@@ -70,6 +95,38 @@ export function ClassroomComposer({
     const pos = start + snippet.length;
     el.setSelectionRange(pos, pos);
     el.focus();
+  }
+
+  /** Marks where async content (a fetched URL, an extracted document)
+   * will land: a visible placeholder goes in at the cursor immediately,
+   * and gets swapped for the real content when it arrives — so slow
+   * extractions never jump to wherever the cursor happens to be later. */
+  function insertPlaceholder(placeholder: string) {
+    const el = bodyRef.current;
+    const start = el?.selectionStart ?? el?.value.length ?? 0;
+    const end = el?.selectionEnd ?? start;
+    insertAt(`\n${placeholder}\n`, start, end);
+  }
+
+  function replacePlaceholder(placeholder: string, replacement: string) {
+    const el = bodyRef.current;
+    if (!el) return;
+    const idx = el.value.indexOf(placeholder);
+    if (idx === -1) {
+      // User deleted the placeholder while we were fetching — append
+      // instead of silently dropping the content.
+      if (replacement) el.value = `${el.value.trimEnd()}\n\n${replacement}\n`;
+      return;
+    }
+    el.value =
+      el.value.slice(0, idx) + replacement + el.value.slice(idx + placeholder.length);
+  }
+
+  async function ensureDraft() {
+    if (draft) return draft;
+    const created = await createClassroomDraft();
+    setDraft(created);
+    return created;
   }
 
   async function handleImage(file: File) {
@@ -87,12 +144,7 @@ export function ClassroomComposer({
     const insertEnd = el?.selectionEnd ?? insertStart;
 
     try {
-      let target = draft;
-      if (!target) {
-        target = await createClassroomDraft();
-        setDraft(target);
-      }
-
+      const target = await ensureDraft();
       const { provider, url } = await signAndUploadFile(target.noteId, file, setUploadPct);
 
       await attachMediaAction(target.noteId, target.slug, {
@@ -108,7 +160,80 @@ export function ClassroomComposer({
       setError(err instanceof Error ? err.message : "Image upload failed");
     } finally {
       setUploadPct(null);
-      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
+  /** Upload a document, keep it attached to the note as source material,
+   * extract its text server-side, and drop the content in at the cursor. */
+  async function handleDocument(file: File) {
+    setError(null);
+    const placeholder = `[⏳ ${s.extracting} ${file.name}…]`;
+    insertPlaceholder(placeholder);
+    setUploadPct(0);
+
+    try {
+      const target = await ensureDraft();
+      const { provider, url } = await signAndUploadFile(target.noteId, file, setUploadPct);
+
+      await attachMediaAction(target.noteId, target.slug, {
+        kind: mediaKindFromMimeType(file.type || "application/octet-stream"),
+        provider,
+        url,
+        sizeBytes: file.size,
+        mimeType: file.type || "application/octet-stream",
+      });
+
+      setUploadPct(null);
+      setBusy(`${s.extracting} ${file.name}…`);
+      const { markdown } = await extractDocumentForComposer({ url, filename: file.name });
+      replacePlaceholder(placeholder, markdown);
+    } catch (err) {
+      replacePlaceholder(placeholder, "");
+      setError(err instanceof Error ? err.message : `Failed to extract ${file.name}`);
+    } finally {
+      setUploadPct(null);
+      setBusy(null);
+    }
+  }
+
+  /** Route a batch of files (picker, paste, or drop) one at a time —
+   * parallel uploads would race on the lazy draft creation and fight
+   * over the single progress indicator. */
+  async function handleFiles(files: File[]) {
+    for (const file of files) {
+      if (file.type.startsWith("image/")) {
+        await handleImage(file);
+      } else if (isDocFile(file)) {
+        await handleDocument(file);
+      } else {
+        setError(`${s.unsupportedFile}: ${file.name}`);
+      }
+    }
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  /** Pasted bare URL(s): fetch each page server-side, strip the noise
+   * (ads, nav, cookie banners — Readability), and insert the main
+   * content; YouTube links insert title + thumbnail + transcript. */
+  async function handleUrls(urls: string[]) {
+    setError(null);
+    const placeholders = urls.map((url) => `[⏳ ${s.fetchingUrl} ${url}…]`);
+    insertPlaceholder(placeholders.join("\n"));
+    setBusy(s.fetchingUrl);
+
+    try {
+      const results = await extractUrlsForComposer(urls);
+      // Server preserves the deduped input order, so index-match against
+      // it; look up by URL as a fallback in case of normalization.
+      urls.forEach((url, i) => {
+        const result = results[i]?.url === url ? results[i] : results.find((r) => r.url === url);
+        replacePlaceholder(placeholders[i], result?.markdown ?? "");
+      });
+    } catch (err) {
+      placeholders.forEach((p) => replacePlaceholder(p, ""));
+      setError(err instanceof Error ? err.message : "Failed to fetch URL content");
+    } finally {
+      setBusy(null);
     }
   }
 
@@ -180,13 +305,32 @@ export function ClassroomComposer({
         required
         minLength={10}
         placeholder={s.bodyPlaceholder}
+        onDragOver={(e) => {
+          if (e.dataTransfer?.types.includes("Files")) e.preventDefault();
+        }}
+        onDrop={(e) => {
+          const files = Array.from(e.dataTransfer?.files ?? []);
+          if (files.length === 0) return;
+          e.preventDefault();
+          handleFiles(files);
+        }}
         onPaste={(e) => {
-          const file = Array.from(e.clipboardData?.files ?? []).find((f) =>
-            f.type.startsWith("image/"),
-          );
-          if (file) {
+          const files = Array.from(e.clipboardData?.files ?? []);
+          if (files.length > 0 && files.some((f) => f.type.startsWith("image/") || isDocFile(f))) {
             e.preventDefault();
-            handleImage(file);
+            handleFiles(files);
+            return;
+          }
+
+          // A paste that is nothing but URL(s) means "go get that page's
+          // content" — fetched server-side with ads/nav stripped. Checked
+          // before the HTML branch because copying a link out of a
+          // browser often puts an <a> tag on the clipboard too.
+          const plain = e.clipboardData?.getData("text/plain") ?? "";
+          const urls = parseUrlOnlyPaste(plain);
+          if (urls) {
+            e.preventDefault();
+            handleUrls(urls);
             return;
           }
 
@@ -213,20 +357,24 @@ export function ClassroomComposer({
         <SaveButton lang={lang} />
 
         <label className="cursor-pointer rounded-md border border-border px-3 py-2 text-sm font-medium text-fg hover:border-accent hover:text-accent transition-colors">
-          {uploadPct === null ? s.addImage : `${s.uploading} ${uploadPct}%`}
+          {uploadPct !== null ? `${s.uploading} ${uploadPct}%` : s.addFile}
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*"
+            accept="image/*,.pdf,.doc,.docx,.xlsx,.xls,.csv,.pptx,.txt,.md,.markdown,.json"
+            multiple
             className="hidden"
-            disabled={uploadPct !== null}
+            disabled={uploadPct !== null || busy !== null}
             onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) handleImage(file);
+              const files = Array.from(e.target.files ?? []);
+              if (files.length > 0) handleFiles(files);
             }}
           />
         </label>
 
+        {busy && uploadPct === null && (
+          <span className="text-sm text-fg-secondary">{busy}</span>
+        )}
         {error && <p className="text-sm text-danger">{error}</p>}
       </div>
     </form>
