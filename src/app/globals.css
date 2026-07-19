@@ -14,6 +14,12 @@
   --color-accent-fg: #0b0b0d;
   --color-border: #2c2c30;
   --color-danger: #e5484d;
+  /* Secondary hues for visual structure (section markers, guide-section
+     headers, tinted boxes). Each is tuned per theme for AA contrast on
+     its bg: light-ish on dark, deep on light. */
+  --color-info: #7cb8f5;
+  --color-success: #6cd9a5;
+  --color-warn: #f2a860;
 }
 
 .light {
@@ -25,6 +31,9 @@
   --color-accent-fg: #ffffff;
   --color-border: #e1ded2;
   --color-danger: #c0201f;
+  --color-info: #155fa8;
+  --color-success: #146a43;
+  --color-warn: #a05408;
 }
 
 @theme inline {
@@ -36,8 +45,18 @@
   --color-accent-fg: var(--color-accent-fg);
   --color-border: var(--color-border);
   --color-danger: var(--color-danger);
-  --font-sans: "Aptos", "Aptos Display", ui-sans-serif, -apple-system,
+  --color-info: var(--color-info);
+  --color-success: var(--color-success);
+  --color-warn: var(--color-warn);
+  /* Set by next/font in layout.tsx (Hanken Grotesk / Source Serif 4 —
+     the free counterparts of Claude's Styrene / Tiempos pairing).
+     "PingFang SC"/"Noto Sans SC" and "Songti SC"/"Noto Serif SC" keep
+     Chinese text on a matching style instead of browser defaults. */
+  --font-sans: var(--font-sans-app), "PingFang SC", "Hiragino Sans GB",
+    "Noto Sans SC", "Microsoft YaHei", ui-sans-serif, -apple-system,
     BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-serif: var(--font-serif-app), Georgia, "Songti SC", "Noto Serif SC",
+    "Times New Roman", serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 

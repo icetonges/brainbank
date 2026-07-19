@@ -11,6 +11,67 @@ import { formatDateTime } from "@/lib/date";
 
 export const dynamic = "force-dynamic";
 
+/* Rotating tones for the section blocks inside a subcategory card —
+ * structure you can see at a glance: each section gets its own hue
+ * (left bar, label, tinted header) so "My app" vs "GitHub" under
+ * "Resources" read as clearly separate shelves, not one long list.
+ * Tailwind needs literal class strings, hence the lookup table. */
+const SECTION_TONES = [
+  { bar: "border-l-info", text: "text-info", tint: "bg-info/10", dot: "bg-info" },
+  { bar: "border-l-success", text: "text-success", tint: "bg-success/10", dot: "bg-success" },
+  { bar: "border-l-warn", text: "text-warn", tint: "bg-warn/10", dot: "bg-warn" },
+  { bar: "border-l-accent", text: "text-accent", tint: "bg-accent/10", dot: "bg-accent" },
+] as const;
+
+function ArticleRow({
+  article,
+  lang,
+  dateLocale,
+}: {
+  article: ArticleItem;
+  lang: string;
+  dateLocale?: string;
+}) {
+  return (
+    <li>
+      <Link
+        href={`/classroom/${article.slug}?lang=${lang}`}
+        className="group flex items-center justify-between gap-3 px-4 py-2.5 text-sm transition-colors hover:bg-bg"
+      >
+        <span className="line-clamp-1 text-fg transition-colors group-hover:text-accent">
+          {article.title}
+        </span>
+        <span className="flex shrink-0 items-center gap-2 text-xs text-fg-secondary">
+          {article.status !== "published" && (
+            <span className="rounded-full bg-warn/15 px-2 py-0.5 text-[10px] font-semibold text-warn">
+              {article.status}
+            </span>
+          )}
+          {formatDateTime(article.createdAt, dateLocale)}
+          <Chevron />
+        </span>
+      </Link>
+    </li>
+  );
+}
+
+function Chevron() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      className="h-3.5 w-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M6 3l5 5-5 5" />
+    </svg>
+  );
+}
+
 interface ArticleItem {
   slug: string;
   title: string;
@@ -159,13 +220,15 @@ export default async function ClassroomPage({
         )}
       </div>
 
-      <nav className="flex flex-wrap gap-1 border-b border-border pb-px">
+      {/* Pill tabs — the active subtab is a solid accent chip instead of a
+          thin underline, so where you are is visible at a glance. */}
+      <nav className="flex flex-wrap gap-2">
         <Link
           href={`/classroom?tab=all&lang=${lang}`}
-          className={`rounded-t-md border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
+          className={`rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${
             activeTab === "all"
-              ? "border-accent text-accent"
-              : "border-transparent text-fg-secondary hover:text-accent"
+              ? "bg-accent text-accent-fg"
+              : "border border-border text-fg-secondary hover:border-accent hover:text-accent"
           }`}
         >
           {s.allTab}
@@ -176,10 +239,10 @@ export default async function ClassroomPage({
             <Link
               key={value}
               href={`/classroom?tab=${value}&lang=${lang}`}
-              className={`rounded-t-md border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
+              className={`rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${
                 active
-                  ? "border-accent text-accent"
-                  : "border-transparent text-fg-secondary hover:text-accent"
+                  ? "bg-accent text-accent-fg"
+                  : "border border-border text-fg-secondary hover:border-accent hover:text-accent"
               }`}
             >
               {lang === "zh" ? CLASSROOM_TAB_LABELS_ZH[value] : label}
@@ -206,70 +269,81 @@ export default async function ClassroomPage({
           )}
         </div>
       ) : (
-        <div className="flex flex-col gap-8">
+        <div className="flex flex-col gap-6">
           {subcategoryGroups.map((group) => {
             const total =
               group.sections.reduce((n, sec) => n + sec.articles.length, 0) + group.unsectioned.length;
             return (
-              <div key={group.id} className="flex flex-col gap-3">
-                <div className="flex items-baseline justify-between gap-3">
-                  <Link
-                    href={`/${group.slug}?lang=${lang}`}
-                    className="text-lg font-semibold text-fg hover:text-accent transition-colors"
-                  >
+              /* One card per subcategory: a tinted header band with a
+                 letter tile makes each group a visually distinct "shelf",
+                 and its sections render as colored blocks inside — the
+                 hierarchy (subcategory > section > article) is visible
+                 without reading a word. */
+              <section
+                key={group.id}
+                className="overflow-hidden rounded-2xl border border-border bg-bg-elevated shadow-sm"
+              >
+                <Link
+                  href={`/${group.slug}?lang=${lang}`}
+                  className="group flex items-center gap-3 border-b border-border bg-gradient-to-r from-accent/15 via-accent/5 to-transparent px-5 py-4 transition-colors hover:from-accent/25"
+                >
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent text-lg font-bold text-accent-fg">
+                    {group.name.charAt(0).toUpperCase()}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-lg font-semibold text-fg transition-colors group-hover:text-accent">
                     {group.name}
-                  </Link>
+                  </span>
                   <span className="shrink-0 rounded-full bg-accent/15 px-2.5 py-0.5 text-xs font-semibold text-accent">
                     {total}
                   </span>
+                </Link>
+
+                <div className="flex flex-col gap-4 p-4 sm:p-5">
+                  {group.sections.map((sec, i) => {
+                    const tone = SECTION_TONES[i % SECTION_TONES.length];
+                    return (
+                      <div
+                        key={sec.id}
+                        className={`overflow-hidden rounded-xl border border-border border-l-4 ${tone.bar}`}
+                      >
+                        <h3
+                          className={`flex items-center gap-2 ${tone.tint} px-4 py-2 text-sm font-semibold ${tone.text}`}
+                        >
+                          <span className={`h-1.5 w-1.5 rounded-full ${tone.dot}`} aria-hidden />
+                          {sec.name}
+                          <span className="ml-auto text-xs font-normal opacity-80">
+                            {sec.articles.length}
+                          </span>
+                        </h3>
+                        <ul className="flex flex-col divide-y divide-border">
+                          {sec.articles.map((a) => (
+                            <ArticleRow key={a.slug} article={a} lang={lang} dateLocale={dateLocale} />
+                          ))}
+                        </ul>
+                      </div>
+                    );
+                  })}
+
+                  {group.unsectioned.length > 0 && (
+                    <div className="overflow-hidden rounded-xl border border-border">
+                      {group.sections.length > 0 && (
+                        <h3 className="flex items-center gap-2 bg-bg px-4 py-2 text-sm font-semibold text-fg-secondary">
+                          <span className="h-1.5 w-1.5 rounded-full bg-fg-secondary/60" aria-hidden />
+                          {s.moreArticles}
+                          <span className="ml-auto text-xs font-normal opacity-80">
+                            {group.unsectioned.length}
+                          </span>
+                        </h3>
+                      )}
+                      <ul className="flex flex-col divide-y divide-border">
+                        {group.unsectioned.map((a) => (
+                          <ArticleRow key={a.slug} article={a} lang={lang} dateLocale={dateLocale} />
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                 </div>
-
-                {group.sections.map((sec) => (
-                  <div key={sec.id} className="flex flex-col gap-2 rounded-xl border border-border p-4">
-                    <h3 className="text-sm font-semibold text-fg-secondary">{sec.name}</h3>
-                    <ul className="flex flex-col divide-y divide-border">
-                      {sec.articles.map((a) => (
-                        <li key={a.slug}>
-                          <Link
-                            href={`/classroom/${a.slug}?lang=${lang}`}
-                            className="flex items-center justify-between gap-3 py-2 text-sm hover:text-accent transition-colors"
-                          >
-                            <span className="line-clamp-1 text-fg">{a.title}</span>
-                            <span className="shrink-0 text-xs text-fg-secondary">
-                              {formatDateTime(a.createdAt, dateLocale)}
-                              {a.status !== "published" ? ` · ${a.status}` : ""}
-                            </span>
-                          </Link>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ))}
-
-                {group.unsectioned.length > 0 && (
-                  <div className="flex flex-col gap-2 rounded-xl border border-border p-4">
-                    {group.sections.length > 0 && (
-                      <h3 className="text-sm font-semibold text-fg-secondary">{s.moreArticles}</h3>
-                    )}
-                    <ul className="flex flex-col divide-y divide-border">
-                      {group.unsectioned.map((a) => (
-                        <li key={a.slug}>
-                          <Link
-                            href={`/classroom/${a.slug}?lang=${lang}`}
-                            className="flex items-center justify-between gap-3 py-2 text-sm hover:text-accent transition-colors"
-                          >
-                            <span className="line-clamp-1 text-fg">{a.title}</span>
-                            <span className="shrink-0 text-xs text-fg-secondary">
-                              {formatDateTime(a.createdAt, dateLocale)}
-                              {a.status !== "published" ? ` · ${a.status}` : ""}
-                            </span>
-                          </Link>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </div>
+              </section>
             );
           })}
 
@@ -278,14 +352,16 @@ export default async function ClassroomPage({
               {subcategoryGroups.length > 0 && (
                 <h2 className="text-lg font-semibold text-fg">{s.uncategorized}</h2>
               )}
-              <ul className="flex flex-col gap-3">
+              <ul className="grid gap-3 sm:grid-cols-2">
                 {uncategorized.map((a) => (
                   <li key={a.slug}>
                     <Link
                       href={`/classroom/${a.slug}?lang=${lang}`}
-                      className="flex flex-col gap-1 rounded-lg border border-border bg-bg-elevated p-4 hover:border-accent transition-colors"
+                      className="group flex h-full flex-col gap-1 rounded-xl border border-border bg-bg-elevated p-4 transition-colors hover:border-accent"
                     >
-                      <span className="font-semibold text-fg">{a.title}</span>
+                      <span className="font-semibold text-fg transition-colors group-hover:text-accent">
+                        {a.title}
+                      </span>
                       <span className="text-xs text-fg-secondary">
                         {formatDateTime(a.createdAt, dateLocale)}
                         {a.status !== "published" ? ` · ${a.status}` : ""}

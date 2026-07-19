@@ -210,18 +210,18 @@ export default async function ClassroomArticlePage({
       {guide ? (
         <>
           {learningMap && (
-            <GuideSection title={s.learningMap}>
+            <GuideSection tone="info" icon={<MapIcon />} title={s.learningMap}>
               <Markdown>{learningMap}</Markdown>
             </GuideSection>
           )}
 
           {handsOn && (
-            <GuideSection title={s.handsOn}>
+            <GuideSection tone="success" icon={<StepsIcon />} title={s.handsOn}>
               <Markdown>{handsOn}</Markdown>
             </GuideSection>
           )}
 
-          <GuideSection title={s.topSources}>
+          <GuideSection tone="warn" icon={<BookIcon />} title={s.topSources}>
             <ol className="flex flex-col gap-3">
               {guide.resources.map((r, i) => (
                 <li key={r.url} className="flex gap-3">
@@ -257,19 +257,79 @@ export default async function ClassroomArticlePage({
   );
 }
 
+/* Each guide section gets its own hue + icon so the page's structure —
+ * article body, then learning map, then hands-on, then sources — is
+ * scannable as colored blocks rather than uniform boxes. Literal class
+ * strings per tone (Tailwind can't build classes from variables). */
+const GUIDE_TONES = {
+  info: { text: "text-info", tint: "bg-info/10", bar: "border-l-info" },
+  success: { text: "text-success", tint: "bg-success/10", bar: "border-l-success" },
+  warn: { text: "text-warn", tint: "bg-warn/10", bar: "border-l-warn" },
+} as const;
+
 function GuideSection({
+  tone,
+  icon,
   title,
   children,
 }: {
+  tone: keyof typeof GUIDE_TONES;
+  icon: React.ReactNode;
   title: string;
   children: React.ReactNode;
 }) {
+  const c = GUIDE_TONES[tone];
   return (
-    <section className="rounded-lg border border-border bg-bg-elevated p-5">
-      <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-accent">
+    <section
+      className={`overflow-hidden rounded-xl border border-border border-l-4 ${c.bar} bg-bg-elevated`}
+    >
+      <h2
+        className={`flex items-center gap-2.5 border-b border-border ${c.tint} px-5 py-3 text-sm font-semibold uppercase tracking-wide ${c.text}`}
+      >
+        {icon}
         {title}
       </h2>
-      {children}
+      <div className="p-5">{children}</div>
     </section>
+  );
+}
+
+function iconProps(className = "h-4 w-4 shrink-0") {
+  return {
+    viewBox: "0 0 24 24",
+    className,
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 2,
+    strokeLinecap: "round",
+    strokeLinejoin: "round",
+    "aria-hidden": true,
+  } as const;
+}
+
+function MapIcon() {
+  return (
+    <svg {...iconProps()}>
+      <path d="M9 4L3 6v14l6-2 6 2 6-2V4l-6 2-6-2z" />
+      <path d="M9 4v14M15 6v14" />
+    </svg>
+  );
+}
+
+function StepsIcon() {
+  return (
+    <svg {...iconProps()}>
+      <path d="M4 17l6-6-6-6" />
+      <path d="M12 19h8" />
+    </svg>
+  );
+}
+
+function BookIcon() {
+  return (
+    <svg {...iconProps()}>
+      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+    </svg>
   );
 }

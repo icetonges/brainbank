@@ -41,25 +41,28 @@ function hastText(node: HastNode | undefined): string {
  */
 export function Markdown({ children }: { children: string }) {
   return (
-    <div className="flex flex-col gap-3 text-fg leading-relaxed">
+    // Serif body (the Claude.ai long-form reading style — see the font
+    // pairing note in layout.tsx) with sans-serif headings for contrast;
+    // code and tables stay mono/sans via their own rules below.
+    <div className="flex flex-col gap-3 font-serif text-[1.0625rem] text-fg leading-relaxed">
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[rehypeKatex, rehypeHighlight]}
         components={{
           h1: (p) => (
             <h2
-              className="mt-6 border-b border-border pb-2 text-xl font-semibold tracking-tight text-fg first:mt-0"
+              className="mt-6 border-b border-border pb-2 font-sans text-xl font-semibold tracking-tight text-fg first:mt-0"
               {...dom(p)}
             />
           ),
           h2: (p) => (
             <h3
-              className="mt-6 border-b border-border pb-2 text-lg font-semibold tracking-tight text-fg first:mt-0"
+              className="mt-6 border-b border-border pb-2 font-sans text-lg font-semibold tracking-tight text-fg first:mt-0"
               {...dom(p)}
             />
           ),
           h3: (p) => (
-            <h4 className="mt-4 text-base font-semibold text-fg first:mt-0" {...dom(p)} />
+            <h4 className="mt-4 font-sans text-base font-semibold text-fg first:mt-0" {...dom(p)} />
           ),
           p: (p) => <p {...dom(p)} />,
           strong: (p) => <strong className="font-semibold text-fg" {...dom(p)} />,
@@ -144,14 +147,14 @@ export function Markdown({ children }: { children: string }) {
                   className="max-h-[520px] rounded-lg border border-border shadow-sm"
                 />
                 {caption && (
-                  <span className="text-center text-xs text-fg-secondary">{caption}</span>
+                  <span className="text-center font-sans text-xs text-fg-secondary">{caption}</span>
                 )}
               </span>
             );
           },
           table: (p) => (
             <div className="overflow-x-auto">
-              <table className="w-full border-collapse text-sm" {...dom(p)} />
+              <table className="w-full border-collapse font-sans text-sm" {...dom(p)} />
             </div>
           ),
           th: (p) => (
