@@ -46,9 +46,21 @@ export function Markdown({ children }: { children: string }) {
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[rehypeKatex, rehypeHighlight]}
         components={{
-          h1: (p) => <h2 className="mt-2 text-xl font-semibold text-fg" {...dom(p)} />,
-          h2: (p) => <h3 className="mt-2 text-lg font-semibold text-fg" {...dom(p)} />,
-          h3: (p) => <h4 className="mt-1 text-base font-semibold text-fg" {...dom(p)} />,
+          h1: (p) => (
+            <h2
+              className="mt-6 border-b border-border pb-2 text-xl font-semibold tracking-tight text-fg first:mt-0"
+              {...dom(p)}
+            />
+          ),
+          h2: (p) => (
+            <h3
+              className="mt-6 border-b border-border pb-2 text-lg font-semibold tracking-tight text-fg first:mt-0"
+              {...dom(p)}
+            />
+          ),
+          h3: (p) => (
+            <h4 className="mt-4 text-base font-semibold text-fg first:mt-0" {...dom(p)} />
+          ),
           p: (p) => <p {...dom(p)} />,
           strong: (p) => <strong className="font-semibold text-fg" {...dom(p)} />,
           em: (p) => <em className="italic" {...dom(p)} />,
@@ -65,7 +77,7 @@ export function Markdown({ children }: { children: string }) {
           li: (p) => <li className="pl-1" {...dom(p)} />,
           blockquote: (p) => (
             <blockquote
-              className="border-l-2 border-accent/50 pl-4 text-fg-secondary italic"
+              className="rounded-r-md border-l-2 border-accent/60 bg-bg-elevated/60 py-2 pl-4 pr-3 text-fg-secondary [&>p]:m-0"
               {...dom(p)}
             />
           ),
@@ -113,13 +125,28 @@ export function Markdown({ children }: { children: string }) {
           },
           img: (p) => {
             const { src, alt } = dom(p);
+            // A real alt (not a pasted filename) doubles as a caption —
+            // the formatter writes descriptive alt text, so images read
+            // like proper article figures.
+            const caption =
+              alt && !/\.(png|jpe?g|gif|webp|svg|avif)$/i.test(alt.trim()) ? alt : "";
+            // <span>s, not <figure>/<figcaption> — react-markdown wraps a
+            // lone image in a <p>, and only phrasing content is valid
+            // inside one (a <figure> there makes the browser close the
+            // <p> early → React hydration mismatch).
             return (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={typeof src === "string" ? src : undefined}
-                alt={alt ?? ""}
-                className="max-h-[480px] rounded-md border border-border"
-              />
+              <span className="my-2 flex flex-col items-center gap-1.5">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={typeof src === "string" ? src : undefined}
+                  alt={alt ?? ""}
+                  loading="lazy"
+                  className="max-h-[520px] rounded-lg border border-border shadow-sm"
+                />
+                {caption && (
+                  <span className="text-center text-xs text-fg-secondary">{caption}</span>
+                )}
+              </span>
             );
           },
           table: (p) => (

@@ -27,7 +27,8 @@ export type TaskName =
   | "tag-and-link"
   | "translate"
   | "draft"
-  | "publish-assist";
+  | "publish-assist"
+  | "format-article";
 
 export const TASK_MODELS: Record<TaskName, ModelId> = {
   assist: DEFAULT_MODEL_ID,
@@ -36,6 +37,7 @@ export const TASK_MODELS: Record<TaskName, ModelId> = {
   translate: DEFAULT_MODEL_ID,
   draft: DEFAULT_MODEL_ID,
   "publish-assist": DEFAULT_MODEL_ID,
+  "format-article": DEFAULT_MODEL_ID,
 };
 
 function modelFor(task: TaskName, override?: ModelId) {
@@ -226,6 +228,87 @@ export interface DraftSourceInput {
  * everything upstream of it (fetching, parsing) is plain code per
  * PLAN.md §13.
  */
+// --- format-article (AI Classroom: raw pasted content -> publication-ready markdown) ---
+
+/** Every markdown image reference in a body — used by the formatter's
+ * safety net to guarantee no uploaded image is lost in the rewrite. */
+function extractImageRefs(markdown: string): string[] {
+  return markdown.match(/!\[[^\]]*\]\([^)\s]+\)/g) ?? [];
+}
+
+export interface FormatArticleInput {
+  /** User-entered topic; empty string if none. */
+  topic: string;
+  /** The raw pasted/typed content, in whatever shape it arrived. */
+  content: string;
+}
+
+/**
+ * The composer's auto-formatting pass: takes whatever the user dropped in
+ * the box — a wall of plain text, a messy webpage paste, a transcript,
+ * scattered notes, a link dump — and rewrites it into a clean,
+ * publication-ready markdown article for the classroom page. It is a
+ * *restructuring* pass, not a summarizer: every fact, number, quote, code
+ * block, link, and uploaded image must survive.
+ *
+ * A safety net re-appends any image reference the model dropped, so an
+ * uploaded image can never be silently lost; any other failure falls back
+ * to the original body in the caller (publishClassroomArticle).
+ */
+export async function formatArticleContent(
+  input: FormatArticleInput,
+  modelId?: ModelId,
+): Promise<string> {
+  const { text } = await generateText({
+    model: modelFor("format-article", modelId),
+    system: [
+      "You are a professional technical editor. Rewrite the user's raw content into a clean, well-structured, publication-ready markdown article. The input may be messy — a plain-text wall, a pasted webpage, chat/transcript fragments, a list of links, rough notes — your job is structure and polish, NOT summarization.",
+      "",
+      "Hard rules:",
+      "- Preserve every fact, number, claim, quote, and example. Do not invent content, do not editorialize, do not drop information. Light copy-editing (grammar, flow, deduplication of exact repeats) is fine.",
+      "- Keep every image reference ![alt](url) EXACTLY as-is (same URL). You may move an image to the most relevant section and improve its alt text, but never delete one.",
+      "- Keep every link URL unchanged. Bare URLs become [descriptive text](url). YouTube links stay as plain links on their own line.",
+      "- Keep code blocks verbatim, fenced with the right language tag (```python, ```ts, …). Keep inline code in backticks. Keep math ($…$) and ```mermaid blocks untouched.",
+      "- Keep [[wikilinks]] exactly as written — they connect this article into a knowledge graph.",
+      "- Write in the same language as the input (English or Chinese). Do not translate.",
+      "",
+      "Structure (adapt to the content — skip what doesn't fit):",
+      "- Do NOT add an H1 title; the page renders the title separately. Start with a short 1-3 sentence lead paragraph giving the BLUF (bottom line up front).",
+      "- Organize the rest under descriptive ## section headings (### for subsections). Prefer 3-6 sections for a typical article.",
+      "- Use bullet or numbered lists for enumerations and steps, tables for comparisons or structured data, and > blockquotes for key takeaways, definitions, or notable quotes.",
+      "- Bold the handful of terms or conclusions a skimming reader must catch. Use --- sparingly to separate major parts.",
+      "- End with a short '## Key takeaways' section (3-5 bullets) when the content is substantial enough to warrant one.",
+      "",
+      "Output ONLY the markdown article body — no commentary, no wrapping code fence around the whole thing.",
+      "Use real line breaks between blocks, never the two characters backslash-n as literal text.",
+    ].join("\n"),
+    prompt: [
+      input.topic ? `Topic: ${input.topic}` : null,
+      `Raw content:\n${input.content}`,
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
+  });
+
+  let formatted = unescapeLiteralWhitespace(text.trim());
+  // Strip an accidental whole-body code fence.
+  const fenced = formatted.match(/^```(?:markdown|md)?\n([\s\S]*)\n```$/);
+  if (fenced) formatted = fenced[1].trim();
+
+  // Safety net: any uploaded image the model lost gets re-appended so it
+  // still renders (and stays attached to the note's media gallery).
+  const originalImages = extractImageRefs(input.content);
+  const missing = originalImages.filter((ref) => {
+    const url = ref.match(/\(([^)\s]+)\)/)?.[1];
+    return url ? !formatted.includes(url) : false;
+  });
+  if (missing.length > 0) {
+    formatted += `\n\n${missing.join("\n\n")}\n`;
+  }
+
+  return formatted;
+}
+
 // --- publish-assist (AI Classroom: content -> learning guide) ---
 
 const publishAssistSchema = z.object({

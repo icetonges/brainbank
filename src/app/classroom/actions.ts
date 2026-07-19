@@ -14,7 +14,12 @@ import {
 import type { ClassroomCategory } from "@/lib/db/schema";
 import { isClassroomCategory } from "@/lib/classroom";
 import { slugify, subcategorySlug, RESERVED_TOP_LEVEL_SLUGS } from "@/lib/slug";
-import { publishAssist, translateText, type PublishAssistResult } from "@/lib/ai/tasks";
+import {
+  publishAssist,
+  formatArticleContent,
+  translateText,
+  type PublishAssistResult,
+} from "@/lib/ai/tasks";
 import { linkWikilinksFromText } from "@/lib/notes/link-wikilinks";
 import { linkRelatedByTags } from "@/lib/notes/link-related";
 import { eq, and } from "drizzle-orm";
@@ -221,12 +226,38 @@ export async function publishClassroomArticle(formData: FormData) {
     ? rawCategory
     : undefined;
 
-  // AI publish assist — one call for everything the article page needs.
-  let assist: PublishAssistResult | null = null;
-  try {
-    assist = await publishAssist({ topic, category, content: body });
-  } catch (err) {
-    console.error("publishAssist failed, publishing without a guide:", err);
+  // Two AI passes over the raw content, in parallel:
+  //  - publishAssist: everything the article *page* needs (topic, subtab,
+  //    tags, summary, learning guide, resources)
+  //  - formatArticleContent: rewrites the raw paste itself into a clean,
+  //    publication-ready markdown article (structure, headings, callouts)
+  //    regardless of what shape it arrived in
+  // Either failing degrades gracefully — the article still publishes with
+  // whichever pieces succeeded (the original body if formatting failed,
+  // no guide if assist failed).
+  const [assistResult, formattedResult] = await Promise.allSettled([
+    publishAssist({ topic, category, content: body }),
+    formatArticleContent({ topic, content: body }),
+  ]);
+  const assist: PublishAssistResult | null =
+    assistResult.status === "fulfilled" ? assistResult.value : null;
+  if (assistResult.status === "rejected") {
+    console.error("publishAssist failed, publishing without a guide:", assistResult.reason);
+  }
+  // A formatter result that lost most of the content is worse than the raw
+  // paste — only adopt it if it kept a sane share of the original length.
+  let finalBody = body;
+  if (formattedResult.status === "fulfilled") {
+    const formatted = formattedResult.value;
+    if (formatted.length >= Math.min(body.length * 0.5, body.length - 200)) {
+      finalBody = formatted;
+    } else {
+      console.error(
+        `formatArticleContent output suspiciously short (${formatted.length} vs ${body.length} chars), keeping original body`,
+      );
+    }
+  } else {
+    console.error("formatArticleContent failed, keeping original body:", formattedResult.reason);
   }
 
   const finalTopic =
@@ -269,13 +300,13 @@ export async function publishClassroomArticle(formData: FormData) {
     if (content) {
       await db
         .update(noteContent)
-        .set({ bodyMarkdown: body, summary: assist?.summary ?? "" })
+        .set({ bodyMarkdown: finalBody, summary: assist?.summary ?? "" })
         .where(eq(noteContent.id, content.id));
     } else {
       await db.insert(noteContent).values({
         noteId,
         language: primaryLanguage,
-        bodyMarkdown: body,
+        bodyMarkdown: finalBody,
         summary: assist?.summary ?? "",
       });
     }
@@ -298,7 +329,7 @@ export async function publishClassroomArticle(formData: FormData) {
     await db.insert(noteContent).values({
       noteId,
       language: primaryLanguage,
-      bodyMarkdown: body,
+      bodyMarkdown: finalBody,
       summary: assist?.summary ?? "",
     });
   }
@@ -308,8 +339,10 @@ export async function publishClassroomArticle(formData: FormData) {
     await applyTags(noteId, [...assist.tags, finalCategory]);
   }
 
-  // [[Wikilinks]] in the body become graph edges, same as regular notes.
-  await linkWikilinksFromText(noteId, body);
+  // [[Wikilinks]] in the published body become graph edges, same as
+  // regular notes. Use the formatted body — it's what's actually stored,
+  // and the formatter preserves [[wikilinks]] like any other content.
+  await linkWikilinksFromText(noteId, finalBody);
 
   // Chinese articles get an English translation immediately rather than
   // waiting for someone to click the Translate button — the homepage and
