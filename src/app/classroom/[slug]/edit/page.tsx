@@ -63,13 +63,24 @@ export default async function EditClassroomArticlePage({
       <h1 className="text-2xl font-semibold text-fg">{s.editTitle}</h1>
 
       <form action={save} className="flex min-h-[70vh] flex-col gap-4">
-        <input
-          type="text"
-          name="topic"
-          required
-          defaultValue={note.title}
-          className="rounded-md border border-border bg-bg-elevated px-3 py-2 text-fg outline-none focus:border-accent"
-        />
+        {/* Topic + source URL at 2:1, mirroring the composer. */}
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <input
+            type="text"
+            name="topic"
+            required
+            defaultValue={note.title}
+            className="flex-[2] rounded-md border border-border bg-bg-elevated px-3 py-2 text-fg outline-none focus:border-accent"
+          />
+          <input
+            type="text"
+            inputMode="url"
+            name="sourceUrl"
+            defaultValue={note.sourceUrl ?? ""}
+            placeholder={s.sourceUrlPlaceholder}
+            className="flex-1 rounded-md border border-border bg-bg-elevated px-3 py-2 text-fg outline-none focus:border-accent"
+          />
+        </div>
 
         <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
           <select

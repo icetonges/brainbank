@@ -132,6 +132,19 @@ export default async function ClassroomArticlePage({
           {note.updatedAt.getTime() !== note.createdAt.getTime()
             ? ` · ${s.updated} ${formatDateTime(note.updatedAt, dateLocale)}`
             : ""}
+          {note.sourceUrl && (
+            <>
+              {" · "}
+              <a
+                href={note.sourceUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-accent underline underline-offset-2 hover:opacity-80"
+              >
+                {s.sourceLink}
+              </a>
+            </>
+          )}
         </p>
 
         {tagRows.length > 0 && (

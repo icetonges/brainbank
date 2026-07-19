@@ -107,6 +107,8 @@ const en = {
     newDescription:
       "One box for everything — write or paste content, links, YouTube videos, images, and documents (pdf, docx, xlsx, csv, pptx, txt, md, json), in any shape. URLs and files are ingested automatically — main content in, noise out. On Save, AI rewrites it into a clean, publication-ready article (structure, headings, callouts — your images and facts intact) and adds a learning map, hands-on steps, and the top 3 sources.",
     topicPlaceholder: "Topic (leave blank — AI will name it from the content)",
+    sourceUrlPlaceholder: "Source URL (optional)",
+    sourceLink: "Source",
     categoryAuto: "Subtab: auto (AI decides)",
     languagePrompt: "Article language…",
     languageEnglish: "English",
@@ -254,6 +256,8 @@ const zh: typeof en = {
     newDescription:
       "一个输入框搞定一切——撰写或粘贴任意格式的内容、链接、YouTube 视频、图片和文档（pdf、docx、xlsx、csv、pptx、txt、md、json）。网址和文件会自动摄取——只留正文、去除杂讯。保存后 AI 会把它重写成结构清晰、可直接发布的文章（标题、分节、要点——图片和事实原样保留），并生成学习地图、动手步骤和三大推荐资源。",
     topicPlaceholder: "主题（留空则由 AI 根据内容自动命名）",
+    sourceUrlPlaceholder: "来源网址（可选）",
+    sourceLink: "来源",
     categoryAuto: "子栏目：自动（由 AI 判断）",
     languagePrompt: "文章语言……",
     languageEnglish: "English（英文）",

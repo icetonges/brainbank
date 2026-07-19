@@ -241,12 +241,27 @@ export function ClassroomComposer({
     <form action={publishClassroomArticle} className="flex min-h-[80vh] flex-col gap-4">
       {draft && <input type="hidden" name="noteId" value={draft.noteId} />}
 
-      <input
-        type="text"
-        name="topic"
-        placeholder={s.topicPlaceholder}
-        className="rounded-md border border-border bg-bg-elevated px-3 py-2 text-fg outline-none focus:border-accent"
-      />
+      {/* Topic + source URL side by side at 2:1 — the URL is provenance
+          (where this content came from), saved to notes.sourceUrl and
+          shown as a "Source" link on the article page. */}
+      <div className="flex flex-col gap-3 sm:flex-row">
+        <input
+          type="text"
+          name="topic"
+          placeholder={s.topicPlaceholder}
+          className="flex-[2] rounded-md border border-border bg-bg-elevated px-3 py-2 text-fg outline-none focus:border-accent"
+        />
+        {/* type="text", not "url" — browsers reject scheme-less pastes
+            like "example.com/post" on submit; the server action
+            normalizes those to https:// instead. */}
+        <input
+          type="text"
+          inputMode="url"
+          name="sourceUrl"
+          placeholder={s.sourceUrlPlaceholder}
+          className="flex-1 rounded-md border border-border bg-bg-elevated px-3 py-2 text-fg outline-none focus:border-accent"
+        />
+      </div>
 
       <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
         <select

@@ -31,6 +31,24 @@ async function requireOwner() {
   if (!session) throw new Error("Not signed in");
 }
 
+/** The composer/edit form's source-URL field → notes.sourceUrl. Empty
+ * stays null; a scheme-less paste like "example.com/post" gets https://
+ * prepended (the input is type="text" so such pastes aren't rejected by
+ * the browser). Anything that still isn't a parseable http(s) URL is
+ * dropped rather than failing the whole publish. */
+function normalizeSourceUrl(raw: string): string | null {
+  const trimmed = raw.trim().slice(0, 2000);
+  if (!trimmed) return null;
+  const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  try {
+    const url = new URL(withScheme);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
 async function uniqueSlug(base: string, keepNoteId?: number): Promise<string> {
   let slug = base || "untitled";
   let suffix = 1;
@@ -205,6 +223,7 @@ export async function publishClassroomArticle(formData: FormData) {
   const rawCategory = String(formData.get("category") ?? "").trim();
   const rawLanguage = String(formData.get("language") ?? "").trim();
   const body = String(formData.get("body") ?? "").trim();
+  const sourceUrl = normalizeSourceUrl(String(formData.get("sourceUrl") ?? ""));
 
   if (body.length < 10) throw new Error("Write at least a few words first");
   if (body.length > 100_000) throw new Error("Content is limited to 100,000 characters");
@@ -286,6 +305,7 @@ export async function publishClassroomArticle(formData: FormData) {
         subcategoryId,
         sectionId,
         primaryLanguage,
+        sourceUrl,
         updatedAt: new Date(),
       })
       .where(eq(notes.id, draftNoteId));
@@ -322,6 +342,7 @@ export async function publishClassroomArticle(formData: FormData) {
         subcategoryId,
         sectionId,
         primaryLanguage,
+        sourceUrl,
       })
       .returning();
     noteId = note.id;
@@ -411,6 +432,7 @@ export async function updateClassroomArticle(
   const topic = String(formData.get("topic") ?? "").trim();
   const rawCategory = String(formData.get("category") ?? "").trim();
   const body = String(formData.get("body") ?? "").trim();
+  const sourceUrl = normalizeSourceUrl(String(formData.get("sourceUrl") ?? ""));
   const regenerate = formData.get("regenerate") === "on";
 
   if (!topic) throw new Error("Topic is required");
@@ -436,6 +458,7 @@ export async function updateClassroomArticle(
       category: rawCategory,
       subcategoryId,
       sectionId,
+      sourceUrl,
       updatedAt: new Date(),
     })
     .where(eq(notes.id, noteId));
