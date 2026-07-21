@@ -1,7 +1,13 @@
-import { generateObject, generateText, streamText, type ModelMessage } from "ai";
+import {
+  generateObject,
+  generateText,
+  streamText,
+  type LanguageModel,
+  type ModelMessage,
+} from "ai";
 import { z } from "zod";
 import { resolveModel } from "./providers";
-import { DEFAULT_MODEL_ID, type ModelId } from "./models";
+import { DEFAULT_MODEL_ID, FALLBACK_CHAIN, type ModelId } from "./models";
 import { classroomCategoryEnum, type ClassroomCategory } from "@/lib/db/schema";
 
 // --- THE CHAIN ---
@@ -20,6 +26,13 @@ import { classroomCategoryEnum, type ClassroomCategory } from "@/lib/db/schema";
 // anything that needs more care) but every function accepts an explicit
 // override, so the AI Assist panel's model picker can point any task at
 // any registered model.
+//
+// "Chain" isn't just naming — every task actually runs through
+// withFallback() below, which retries against FALLBACK_CHAIN (models.ts)
+// if the preferred model's call fails (rate limit, spend cap, outage).
+// Before this, a single provider error (e.g. Gemini hitting its monthly
+// spend cap) took the whole task down with it even though other
+// registered — and in some cases free — models were available.
 
 export type TaskName =
   | "assist"
@@ -40,8 +53,37 @@ export const TASK_MODELS: Record<TaskName, ModelId> = {
   "format-article": DEFAULT_MODEL_ID,
 };
 
-function modelFor(task: TaskName, override?: ModelId) {
-  return resolveModel(override ?? TASK_MODELS[task]);
+/** Preferred model first, then FALLBACK_CHAIN in order (deduped). */
+function chainFor(preferred: ModelId): ModelId[] {
+  return [preferred, ...FALLBACK_CHAIN.filter((id) => id !== preferred)];
+}
+
+/**
+ * Runs `attempt` against each model in chainFor(preferred) until one
+ * succeeds, logging and moving on when a model errors instead of failing
+ * the whole task. This is what makes the model registry an actual
+ * fallback chain rather than just a routing table: a provider outage,
+ * rate limit, or (as happened) a spend cap being hit no longer takes
+ * down every AI feature that defaults to that model.
+ */
+async function withFallback<T>(
+  label: TaskName,
+  preferred: ModelId,
+  attempt: (model: LanguageModel) => Promise<T>,
+): Promise<T> {
+  const chain = chainFor(preferred);
+  let lastError: unknown;
+  for (const modelId of chain) {
+    try {
+      return await attempt(resolveModel(modelId));
+    } catch (err) {
+      lastError = err;
+      console.error(`[ai:${label}] ${modelId} failed, falling back to next model in chain`, err);
+    }
+  }
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(`[ai:${label}] every model in the fallback chain failed`);
 }
 
 // Some models occasionally answer with real line breaks escaped as the
@@ -89,12 +131,17 @@ export async function summarizeNote(
   note: NoteForAi,
   modelId?: ModelId,
 ): Promise<string> {
-  const { text } = await generateText({
-    model: modelFor("summarize", modelId),
-    system:
-      "You write a single, dense sentence summarizing a personal knowledge-base note. No preamble, no quotes, just the sentence.",
-    prompt: noteToPrompt(note),
-  });
+  const { text } = await withFallback(
+    "summarize",
+    modelId ?? TASK_MODELS.summarize,
+    (model) =>
+      generateText({
+        model,
+        system:
+          "You write a single, dense sentence summarizing a personal knowledge-base note. No preamble, no quotes, just the sentence.",
+        prompt: noteToPrompt(note),
+      }),
+  );
   return text.trim();
 }
 
@@ -115,13 +162,18 @@ export async function suggestTags(
   note: NoteForAi,
   modelId?: ModelId,
 ): Promise<TagSuggestion> {
-  const { object } = await generateObject({
-    model: modelFor("tag-and-link", modelId),
-    schema: tagSuggestionSchema,
-    system:
-      "You tag notes in a personal knowledge base. Tags are short, lowercase, and reusable across notes (prefer existing-sounding general terms over one-off phrases).",
-    prompt: noteToPrompt(note),
-  });
+  const { object } = await withFallback(
+    "tag-and-link",
+    modelId ?? TASK_MODELS["tag-and-link"],
+    (model) =>
+      generateObject({
+        model,
+        schema: tagSuggestionSchema,
+        system:
+          "You tag notes in a personal knowledge base. Tags are short, lowercase, and reusable across notes (prefer existing-sounding general terms over one-off phrases).",
+        prompt: noteToPrompt(note),
+      }),
+  );
   return object;
 }
 
@@ -134,17 +186,22 @@ export async function translateText(
 ): Promise<string> {
   if (!text.trim()) return "";
   const targetLabel = target === "zh" ? "Simplified Chinese" : "English";
-  const { text: translated } = await generateText({
-    model: modelFor("translate", modelId),
-    system: `Translate the given text into ${targetLabel}. Preserve meaning and tone.
+  const { text: translated } = await withFallback(
+    "translate",
+    modelId ?? TASK_MODELS.translate,
+    (model) =>
+      generateText({
+        model,
+        system: `Translate the given text into ${targetLabel}. Preserve meaning and tone.
 
 If the text contains markdown, preserve its structure exactly — keep every heading marker (#, ##, ###), bullet (-, *) and numbered list marker, blank line between blocks, bold (**text**) and italic (*text*) marker, and table pipe/row layout in place; translate only the prose inside those elements. Leave code blocks (fenced with \`\`\`), inline code (\`text\`), URLs, and link targets ([text](url) — translate the link text, not the URL) untouched. A run of short list items must come back as the same number of separate list items, not collapsed into one paragraph.
 
 Output real line breaks between blocks, never the two characters backslash-n as text.
 
 Return only the translation, no commentary.`,
-    prompt: text,
-  });
+        prompt: text,
+      }),
+  );
   return unescapeLiteralWhitespace(translated.trim());
 }
 
@@ -161,21 +218,25 @@ export async function translateNote(
   target: "en" | "zh",
   modelId?: ModelId,
 ): Promise<TranslatedNote> {
-  const model = modelFor("translate", modelId);
   const targetLabel = target === "zh" ? "Simplified Chinese" : "English";
 
-  const { object } = await generateObject({
-    model,
-    schema: z.object({
-      title: z.string(),
-      what: z.string(),
-      how: z.string(),
-      why: z.string(),
-      other: z.string(),
-    }),
-    system: `Translate every field into ${targetLabel}. Keep empty fields empty. Preserve meaning and tone, return only the translated fields.`,
-    prompt: JSON.stringify(note),
-  });
+  const { object } = await withFallback(
+    "translate",
+    modelId ?? TASK_MODELS.translate,
+    (model) =>
+      generateObject({
+        model,
+        schema: z.object({
+          title: z.string(),
+          what: z.string(),
+          how: z.string(),
+          why: z.string(),
+          other: z.string(),
+        }),
+        system: `Translate every field into ${targetLabel}. Keep empty fields empty. Preserve meaning and tone, return only the translated fields.`,
+        prompt: JSON.stringify(note),
+      }),
+  );
   return {
     title: unescapeLiteralWhitespace(object.title),
     what: unescapeLiteralWhitespace(object.what),
@@ -187,13 +248,76 @@ export async function translateNote(
 
 // --- assist (streaming chat) ---
 
-export function streamAssist(messages: ModelMessage[], modelId?: ModelId) {
-  return streamText({
-    model: modelFor("assist", modelId),
-    system:
-      "You are the AI assist panel inside brainbank, a personal knowledge base. Help the user draft or refine a note's What (the concept/fact), How (mechanism or steps), and Why (context/reasoning). Be concise and concrete; prefer structured, scannable answers over long prose.",
-    messages,
-  });
+const ASSIST_SYSTEM_PROMPT =
+  "You are the AI assist panel inside brainbank, a personal knowledge base. Help the user draft or refine a note's What (the concept/fact), How (mechanism or steps), and Why (context/reasoning). Be concise and concrete; prefer structured, scannable answers over long prose.";
+
+/**
+ * Streaming chat behind the AI Assist panel. Unlike the other tasks this
+ * can't just retry-and-return, because the point is to pipe tokens to the
+ * client as they arrive — so the fallback chain is applied to the *start*
+ * of the stream: each model in chainFor() is tried in turn, and we peek
+ * the first chunk before committing to a response. A model that errors
+ * before producing a token (the common case — a provider rejects the
+ * request outright because it's rate-limited or over its spend cap, same
+ * failure mode that took down every AI feature before this fix) is
+ * skipped in favor of the next one, invisibly to the client. A model that
+ * fails *after* it has already streamed some text can't be recovered —
+ * that partial output already reached the client — so that case just ends
+ * the response rather than silently retrying into a second answer.
+ */
+export async function streamAssist(
+  messages: ModelMessage[],
+  modelId?: ModelId,
+): Promise<Response> {
+  const chain = chainFor(modelId ?? TASK_MODELS.assist);
+  let lastError: unknown;
+
+  for (const id of chain) {
+    let reader: ReadableStreamDefaultReader<string>;
+    let first: ReadableStreamReadResult<string>;
+    try {
+      const result = streamText({
+        model: resolveModel(id),
+        system: ASSIST_SYSTEM_PROMPT,
+        messages,
+      });
+      reader = result.textStream.getReader();
+      first = await reader.read();
+    } catch (err) {
+      lastError = err;
+      console.error(`[ai:assist] ${id} failed before first token, falling back`, err);
+      continue;
+    }
+
+    const encoder = new TextEncoder();
+    const body = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        if (first.done) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(encoder.encode(first.value));
+        try {
+          while (true) {
+            const chunk = await reader.read();
+            if (chunk.done) break;
+            controller.enqueue(encoder.encode(chunk.value));
+          }
+          controller.close();
+        } catch (err) {
+          console.error(`[ai:assist] ${id} failed mid-stream`, err);
+          controller.error(err);
+        }
+      },
+    });
+    return new Response(body, {
+      headers: { "Content-Type": "text/plain; charset=utf-8" },
+    });
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("[ai:assist] every model in the fallback chain failed");
 }
 
 // --- draft (ingestion pipeline: raw extracted text -> a structured note) ---
@@ -259,9 +383,13 @@ export async function formatArticleContent(
   input: FormatArticleInput,
   modelId?: ModelId,
 ): Promise<string> {
-  const { text } = await generateText({
-    model: modelFor("format-article", modelId),
-    system: [
+  const { text } = await withFallback(
+    "format-article",
+    modelId ?? TASK_MODELS["format-article"],
+    (model) =>
+      generateText({
+        model,
+        system: [
       "You are a professional technical editor. Rewrite the user's raw content into a clean, well-structured, publication-ready markdown article. The input may be messy — a plain-text wall, a pasted webpage, chat/transcript fragments, a list of links, rough notes — your job is structure and polish, NOT summarization.",
       "",
       "Hard rules:",
@@ -281,14 +409,15 @@ export async function formatArticleContent(
       "",
       "Output ONLY the markdown article body — no commentary, no wrapping code fence around the whole thing.",
       "Use real line breaks between blocks, never the two characters backslash-n as literal text.",
-    ].join("\n"),
-    prompt: [
-      input.topic ? `Topic: ${input.topic}` : null,
-      `Raw content:\n${input.content}`,
-    ]
-      .filter(Boolean)
-      .join("\n\n"),
-  });
+        ].join("\n"),
+        prompt: [
+          input.topic ? `Topic: ${input.topic}` : null,
+          `Raw content:\n${input.content}`,
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
+      }),
+  );
 
   let formatted = unescapeLiteralWhitespace(text.trim());
   // Strip an accidental whole-body code fence.
@@ -375,28 +504,33 @@ export async function publishAssist(
   input: PublishAssistInput,
   modelId?: ModelId,
 ): Promise<PublishAssistResult> {
-  const { object } = await generateObject({
-    model: modelFor("publish-assist", modelId),
-    schema: publishAssistSchema,
-    system: [
-      "You are the AI publish assistant for the 'AI Classroom' section of a personal knowledge base about AI.",
-      "From the user's article content, produce: a topic, the best-fitting category, tags, a one-sentence summary, a learning map (staged roadmap in markdown), hands-on step-by-step instructions (numbered markdown steps a beginner can actually follow), and the top 3 learning resources.",
-      "Categories: knowledge (concepts/theory), skill (abilities to practice), mcp (Model Context Protocol), api (APIs/SDKs), best-practices, use-cases, step-by-step (tutorials/guides), ai-evaluation (evals/benchmarks), ai-models (specific models), ai (general/anything else).",
-      "Resources must be real and well-known (official documentation, GitHub repositories, established courses/channels). If unsure a URL is real, pick a better-known resource instead — never fabricate links.",
-      "Write the topic, summary, learning map, and hands-on steps in the same language as the user's content (English or Chinese). Tags stay lowercase English.",
-      "Write learningMap and handsOn as real markdown with real line breaks between headings, list items, and paragraphs — never the two characters backslash-n as literal text in place of a line break.",
-      input.topic ? "Keep the user's topic unless it's clearly unusable; you may lightly clean it up." : "",
-      input.category ? `The user already chose the category "${input.category}" — keep it.` : "",
-    ]
-      .filter(Boolean)
-      .join("\n"),
-    prompt: [
-      input.topic ? `Topic: ${input.topic}` : null,
-      `Content:\n${input.content}`,
-    ]
-      .filter(Boolean)
-      .join("\n\n"),
-  });
+  const { object } = await withFallback(
+    "publish-assist",
+    modelId ?? TASK_MODELS["publish-assist"],
+    (model) =>
+      generateObject({
+        model,
+        schema: publishAssistSchema,
+        system: [
+          "You are the AI publish assistant for the 'AI Classroom' section of a personal knowledge base about AI.",
+          "From the user's article content, produce: a topic, the best-fitting category, tags, a one-sentence summary, a learning map (staged roadmap in markdown), hands-on step-by-step instructions (numbered markdown steps a beginner can actually follow), and the top 3 learning resources.",
+          "Categories: knowledge (concepts/theory), skill (abilities to practice), mcp (Model Context Protocol), api (APIs/SDKs), best-practices, use-cases, step-by-step (tutorials/guides), ai-evaluation (evals/benchmarks), ai-models (specific models), ai (general/anything else).",
+          "Resources must be real and well-known (official documentation, GitHub repositories, established courses/channels). If unsure a URL is real, pick a better-known resource instead — never fabricate links.",
+          "Write the topic, summary, learning map, and hands-on steps in the same language as the user's content (English or Chinese). Tags stay lowercase English.",
+          "Write learningMap and handsOn as real markdown with real line breaks between headings, list items, and paragraphs — never the two characters backslash-n as literal text in place of a line break.",
+          input.topic ? "Keep the user's topic unless it's clearly unusable; you may lightly clean it up." : "",
+          input.category ? `The user already chose the category "${input.category}" — keep it.` : "",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        prompt: [
+          input.topic ? `Topic: ${input.topic}` : null,
+          `Content:\n${input.content}`,
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
+      }),
+  );
 
   return {
     ...object,
@@ -412,19 +546,24 @@ export async function draftNoteFromSource(
   input: DraftSourceInput,
   modelId?: ModelId,
 ): Promise<DraftedNote> {
-  const { object } = await generateObject({
-    model: modelFor("draft", modelId),
-    schema: draftedNoteSchema,
-    system:
-      "You turn raw source material into a personal knowledge-base note using the what/how/why/other template: what is the core idea, how does it work or get applied, why does it matter, and anything else worth keeping. Be concrete and specific to the source, not generic. Leave a field as an empty string if the source genuinely has nothing for it — don't pad.",
-    prompt: [
-      `Source title: ${input.sourceTitle}`,
-      input.sourceUrl ? `Source URL: ${input.sourceUrl}` : null,
-      `Source text:\n${input.sourceText}`,
-    ]
-      .filter(Boolean)
-      .join("\n\n"),
-  });
+  const { object } = await withFallback(
+    "draft",
+    modelId ?? TASK_MODELS.draft,
+    (model) =>
+      generateObject({
+        model,
+        schema: draftedNoteSchema,
+        system:
+          "You turn raw source material into a personal knowledge-base note using the what/how/why/other template: what is the core idea, how does it work or get applied, why does it matter, and anything else worth keeping. Be concrete and specific to the source, not generic. Leave a field as an empty string if the source genuinely has nothing for it — don't pad.",
+        prompt: [
+          `Source title: ${input.sourceTitle}`,
+          input.sourceUrl ? `Source URL: ${input.sourceUrl}` : null,
+          `Source text:\n${input.sourceText}`,
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
+      }),
+  );
   return {
     ...object,
     what: unescapeLiteralWhitespace(object.what),

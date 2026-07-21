@@ -51,7 +51,6 @@ export const MODELS: ModelInfo[] = [
       "Flagship value model - ultimate balance of intelligence, speed, and deep thinking capabilities.",
     isFree: false,
     supportsVision: true,
-    isDefault: true,
     badge: "Recommended",
   },
   {
@@ -98,6 +97,7 @@ export const MODELS: ModelInfo[] = [
     contextWindow: "128K",
     isFree: true,
     supportsVision: false,
+    isDefault: true,
     badge: "Agentic",
   },
 
@@ -193,8 +193,30 @@ export const MODELS: ModelInfo[] = [
   },
 ];
 
+// --- FALLBACK CHAIN ---
+//
+// The order tasks.ts tries models in when a call fails (rate limit, spend
+// cap, outage, whatever) — not just a config table but an actual runtime
+// fallback (see withFallback() in tasks.ts). Free/cheap Groq models go
+// first since leaning on them hard costs nothing; paid providers are the
+// fallback of last resort. A task's preferred model (its TASK_MODELS entry,
+// or an explicit override from the UI) is always tried first — this list
+// is what it falls through to after that, in order.
+export const FALLBACK_CHAIN: ModelId[] = [
+  "groq/compound", // free, agentic, most capable free-tier option
+  "openai/gpt-oss-120b", // groq flagship open-weight reasoning
+  "qwen/qwen3.6-27b", // groq, adds vision support
+  "openai/gpt-oss-20b", // groq, fastest/cheapest
+  "gemini-2.5-flash",
+  "gemini-3.1-flash-lite",
+  "gemini-3.5-flash",
+  "claude-haiku-4-5-20251001",
+  "claude-sonnet-5",
+  "claude-opus-4-8",
+];
+
 export const DEFAULT_MODEL_ID: ModelId =
-  MODELS.find((m) => m.isDefault)?.id ?? "gemini-3.5-flash";
+  MODELS.find((m) => m.isDefault)?.id ?? FALLBACK_CHAIN[0];
 
 export function getModel(id: ModelId): ModelInfo {
   const model = MODELS.find((m) => m.id === id);

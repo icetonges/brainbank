@@ -28,8 +28,7 @@ export async function POST(req: Request) {
   }));
 
   try {
-    const result = streamAssist(messages, body.modelId);
-    return result.toTextStreamResponse();
+    return await streamAssist(messages, body.modelId);
   } catch (err) {
     const message = err instanceof Error ? err.message : "AI request failed";
     return new Response(message, { status: 500 });
