@@ -259,18 +259,24 @@ export default async function Home({
                 </Link>
                 <div className="flex flex-col gap-3 bg-bg-elevated p-3">
                   {sc.sections.map((sec, i) => (
-                    <SectionBox key={sec.id} name={sec.name} count={sec.articles.length} tone={sectionTone(i)}>
+                    <SectionBox key={sec.id} name={sec.name} count={sec.total} tone={sectionTone(i)}>
                       {sec.articles.map((a) => (
                         <ArticleRow key={a.slug} slug={a.slug} title={a.title} createdAt={a.createdAt} lang={lang} dateLocale={dateLocale} />
                       ))}
+                      {sec.total > sec.articles.length && (
+                        <MoreRow href={`/${sc.slug}?lang=${lang}`} label={moreLabel(lang, sec.total - sec.articles.length)} />
+                      )}
                     </SectionBox>
                   ))}
                   {sc.unsectioned.length > 0 && (
                     sc.sections.length > 0 ? (
-                      <SectionBox name={cs.moreArticles} count={sc.unsectioned.length} tone={NEUTRAL_TONE}>
+                      <SectionBox name={cs.moreArticles} count={sc.unsectionedTotal} tone={NEUTRAL_TONE}>
                         {sc.unsectioned.map((a) => (
                           <ArticleRow key={a.slug} slug={a.slug} title={a.title} createdAt={a.createdAt} lang={lang} dateLocale={dateLocale} />
                         ))}
+                        {sc.unsectionedTotal > sc.unsectioned.length && (
+                          <MoreRow href={`/${sc.slug}?lang=${lang}`} label={moreLabel(lang, sc.unsectionedTotal - sc.unsectioned.length)} />
+                        )}
                       </SectionBox>
                     ) : (
                       // No sections defined for this subcategory at all yet —
@@ -280,6 +286,9 @@ export default async function Home({
                         {sc.unsectioned.map((a) => (
                           <ArticleRow key={a.slug} slug={a.slug} title={a.title} createdAt={a.createdAt} lang={lang} dateLocale={dateLocale} />
                         ))}
+                        {sc.unsectionedTotal > sc.unsectioned.length && (
+                          <MoreRow href={`/${sc.slug}?lang=${lang}`} label={moreLabel(lang, sc.unsectionedTotal - sc.unsectioned.length)} />
+                        )}
                       </ul>
                     )
                   )}
@@ -468,6 +477,33 @@ function ArticleRow({
       >
         <span className="line-clamp-1 text-fg-secondary hover:text-accent transition-colors">{title}</span>
         <span className="shrink-0 text-xs text-fg-secondary">{formatDate(createdAt, dateLocale)}</span>
+      </Link>
+    </li>
+  );
+}
+
+/** "en route" plural-agnostic label for a truncated group's overflow row —
+ * kept inline (rather than in i18n.ts) since it's a small format string
+ * built from a number, matching the existing inline lang-ternary already
+ * used for the subcategory card's own article count badge above. */
+function moreLabel(lang: Lang, count: number): string {
+  return lang === "zh" ? `还有 ${count} 篇 →` : `+${count} more →`;
+}
+
+/** The row a truncated section (homepage preview caps articles per group —
+ * see HOME_TOC_MAX_PER_GROUP) links out to the full, uncapped list on the
+ * subcategory's own landing page, so the section's count badge (the true
+ * total, not the capped array length) always has somewhere for the
+ * "missing" articles to point to instead of just silently not being
+ * there. */
+function MoreRow({ href, label }: { href: string; label: string }) {
+  return (
+    <li>
+      <Link
+        href={href}
+        className="flex items-center justify-center px-3 py-2 text-xs font-medium text-accent hover:bg-bg hover:underline transition-colors"
+      >
+        {label}
       </Link>
     </li>
   );

@@ -13,6 +13,11 @@ export interface TocSection {
   id: number;
   name: string;
   articles: TocArticle[];
+  /** True count of articles in this section, independent of maxPerGroup —
+   * when the homepage preview caps `articles` to stay compact, this is
+   * what lets the count badge (and a "+N more" hint) stay accurate
+   * instead of silently matching the truncated array length. */
+  total: number;
 }
 
 export interface TocSubcategory {
@@ -22,6 +27,8 @@ export interface TocSubcategory {
   total: number;
   sections: TocSection[];
   unsectioned: TocArticle[];
+  /** True count backing `unsectioned`, same reasoning as TocSection.total. */
+  unsectionedTotal: number;
 }
 
 /**
@@ -82,11 +89,13 @@ export async function loadClassroomToc(
     .orderBy(asc(notes.sectionOrder), asc(notes.createdAt));
 
   const bySubcatGroup = new Map<string, TocArticle[]>(); // key: `${subcategoryId}:${sectionId ?? "none"}`
+  const groupCounts = new Map<string, number>(); // same key — true count, uncapped
   const subcatCounts = new Map<number, number>();
   for (const r of articleRows) {
     if (!r.subcategoryId) continue;
     subcatCounts.set(r.subcategoryId, (subcatCounts.get(r.subcategoryId) ?? 0) + 1);
     const key = `${r.subcategoryId}:${r.sectionId ?? "none"}`;
+    groupCounts.set(key, (groupCounts.get(key) ?? 0) + 1);
     const arr = bySubcatGroup.get(key) ?? [];
     if (maxPerGroup === undefined || arr.length < maxPerGroup) {
       arr.push({
@@ -112,6 +121,7 @@ export async function loadClassroomToc(
           id: sec.id,
           name: sec.name,
           articles: bySubcatGroup.get(`${sc.id}:${sec.id}`) ?? [],
+          total: groupCounts.get(`${sc.id}:${sec.id}`) ?? 0,
         }))
         .filter((sec) => sec.articles.length > 0);
       return {
@@ -121,6 +131,7 @@ export async function loadClassroomToc(
         total: subcatCounts.get(sc.id) ?? 0,
         sections,
         unsectioned: bySubcatGroup.get(`${sc.id}:none`) ?? [],
+        unsectionedTotal: groupCounts.get(`${sc.id}:none`) ?? 0,
       };
     })
     .filter((sc) => sc.sections.length > 0 || sc.unsectioned.length > 0);
