@@ -134,6 +134,16 @@ function unescapeLiteralWhitespace(text: string): string {
   return text.replace(/\\r\\n/g, "\n").replace(/\\n/g, "\n").replace(/\\t/g, "\t");
 }
 
+// Every task in this file produces markdown that can legitimately run
+// long (a full classroom article body, a learning map, hands-on steps) —
+// without an explicit ceiling, generateText/generateObject fall back to
+// whatever a given provider's own default is, which is not the same
+// across Groq/Gemini/Anthropic and in at least one case was small enough
+// to cut a translated article off partway through. Setting the same
+// generous, safe-for-every-model-in-the-chain ceiling everywhere makes
+// that failure mode explicit and consistent instead of provider-dependent.
+const MAX_OUTPUT_TOKENS = 8192;
+
 // --- summarize ---
 
 export interface NoteForAi {
@@ -208,30 +218,152 @@ export async function suggestTags(
 
 // --- translate ---
 
+// Long-form markdown (a classroom article's full body, a learning guide's
+// map/hands-on steps) can run well past what a single generateText call
+// reliably returns in one response, however high MAX_OUTPUT_TOKENS is set
+// — this is what caused the bug where a translated article came back
+// roughly half the length of the source. Two independent defenses fix it,
+// because either alone can still get caught out by one dense chunk:
+//   1. Split the input into markdown-aware chunks *before* sending it, so
+//      no single call is ever asked to produce more than a comfortable
+//      fraction of any model's output ceiling.
+//   2. Check finishReason on every response anyway — if a model still
+//      cuts a chunk off mid-way ("length"), split THAT chunk in half and
+//      retry each half recursively instead of accepting the truncated
+//      text. This is the hard guarantee: no output is ever silently
+//      accepted short of covering its whole input.
+// Together these guarantee the full input is translated regardless of
+// length, at the cost of more (parallelized) round trips for long articles.
+const TRANSLATE_CHUNK_MAX_CHARS = 3000;
+// Below this, a chunk that still gets truncated can't usefully be split
+// further — return whatever came back rather than recursing forever.
+const TRANSLATE_MIN_SPLITTABLE_CHARS = 200;
+
+/** Splits markdown into blank-line-delimited blocks, keeping fenced code
+ * blocks atomic (never splits inside a ``` fence) so a chunk boundary can
+ * never land in the middle of a code sample. Blocks include their
+ * trailing blank line, so `chunks.join("")` reconstructs the original
+ * text exactly. */
+function splitIntoBlocks(markdown: string): string[] {
+  const lines = markdown.split("\n");
+  const blocks: string[] = [];
+  let current: string[] = [];
+  let inFence = false;
+  for (const line of lines) {
+    if (/^\s*```/.test(line)) inFence = !inFence;
+    current.push(line);
+    if (!inFence && line.trim() === "") {
+      blocks.push(current.join("\n"));
+      current = [];
+    }
+  }
+  if (current.length > 0) blocks.push(current.join("\n"));
+  return blocks;
+}
+
+/** Greedily packs blocks into chunks up to `maxChars`, never splitting a
+ * block apart (so a chunk can only exceed maxChars if a single block —
+ * e.g. one big code fence — already does on its own). */
+function chunkMarkdown(markdown: string, maxChars: number): string[] {
+  const blocks = splitIntoBlocks(markdown);
+  const chunks: string[] = [];
+  let current = "";
+  for (const block of blocks) {
+    if (current && current.length + block.length > maxChars) {
+      chunks.push(current);
+      current = block;
+    } else {
+      current += block;
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks.length > 0 ? chunks : [markdown];
+}
+
+/** Roughly the midpoint of `text`, snapped forward to the nearest blank
+ * line (or failing that, line break) so a forced split doesn't land
+ * inside a sentence or a code fence. */
+function findSplitPoint(text: string): number {
+  const mid = Math.floor(text.length / 2);
+  const blankNear = text.indexOf("\n\n", mid);
+  if (blankNear !== -1) return blankNear + 2;
+  const lineNear = text.indexOf("\n", mid);
+  return lineNear !== -1 ? lineNear + 1 : mid;
+}
+
+function translateSystemPrompt(targetLabel: string): string {
+  return `Translate the given text into ${targetLabel}. Preserve meaning and tone.
+
+If the text contains markdown, preserve its structure exactly — keep every heading marker (#, ##, ###), bullet (-, *) and numbered list marker, blank line between blocks, bold (**text**) and italic (*text*) marker, and table pipe/row layout in place; translate only the prose inside those elements. Leave code blocks (fenced with \`\`\`), inline code (\`text\`), URLs, and link targets ([text](url) — translate the link text, not the URL) untouched. A run of short list items must come back as the same number of separate list items, not collapsed into one paragraph.
+
+This may be one fragment of a longer document that was split into pieces before translation. Translate ONLY the text given, in full, start to end — never summarize, shorten, condense, or skip any part of it, however long it is. Do not add an introduction, conclusion, or any commentary — your output is spliced directly between other translated fragments with no separator.
+
+Output real line breaks between blocks, never the two characters backslash-n as text.
+
+Return only the translation, no commentary.`;
+}
+
+async function translateChunk(
+  chunk: string,
+  target: "en" | "zh",
+  modelId: ModelId,
+): Promise<string> {
+  const targetLabel = target === "zh" ? "Simplified Chinese" : "English";
+  const result = await withFallback(
+    "translate",
+    modelId,
+    (model) =>
+      generateText({
+        model,
+        maxOutputTokens: MAX_OUTPUT_TOKENS,
+        system: translateSystemPrompt(targetLabel),
+        prompt: chunk,
+      }),
+  );
+  const translated = unescapeLiteralWhitespace(result.text.trim());
+
+  if (result.finishReason === "length" && chunk.length > TRANSLATE_MIN_SPLITTABLE_CHARS) {
+    // The model ran out of output room mid-chunk. Splitting this specific
+    // chunk in half and retrying each half is the only way to guarantee
+    // completeness — accepting the truncated text here would silently
+    // reproduce the exact "half the article is missing" bug this exists
+    // to prevent.
+    console.error(
+      `[ai:translate] chunk (${chunk.length} chars) hit the output-token ceiling, splitting and retrying`,
+    );
+    const splitAt = findSplitPoint(chunk);
+    const [a, b] = [chunk.slice(0, splitAt), chunk.slice(splitAt)];
+    const [ta, tb] = await Promise.all([
+      translateChunk(a, target, modelId),
+      translateChunk(b, target, modelId),
+    ]);
+    return `${ta}${tb}`;
+  }
+
+  return translated;
+}
+
 export async function translateText(
   text: string,
   target: "en" | "zh",
   modelId?: ModelId,
 ): Promise<string> {
   if (!text.trim()) return "";
-  const targetLabel = target === "zh" ? "Simplified Chinese" : "English";
-  const { text: translated } = await withFallback(
-    "translate",
-    modelId ?? TASK_MODELS.translate,
-    (model) =>
-      generateText({
-        model,
-        system: `Translate the given text into ${targetLabel}. Preserve meaning and tone.
+  const chosenModel = modelId ?? TASK_MODELS.translate;
+  const chunks = chunkMarkdown(text, TRANSLATE_CHUNK_MAX_CHARS);
 
-If the text contains markdown, preserve its structure exactly — keep every heading marker (#, ##, ###), bullet (-, *) and numbered list marker, blank line between blocks, bold (**text**) and italic (*text*) marker, and table pipe/row layout in place; translate only the prose inside those elements. Leave code blocks (fenced with \`\`\`), inline code (\`text\`), URLs, and link targets ([text](url) — translate the link text, not the URL) untouched. A run of short list items must come back as the same number of separate list items, not collapsed into one paragraph.
+  if (chunks.length <= 1) {
+    return translateChunk(text, target, chosenModel);
+  }
 
-Output real line breaks between blocks, never the two characters backslash-n as text.
-
-Return only the translation, no commentary.`,
-        prompt: text,
-      }),
+  // Chunks are independent, so translate them concurrently — Promise.all
+  // preserves result order even though calls may resolve out of order, so
+  // joining is still safe. Each chunk goes through the full model
+  // fallback chain and the recursive length-guard on its own.
+  const translatedChunks = await Promise.all(
+    chunks.map((chunk) => translateChunk(chunk, target, chosenModel)),
   );
-  return unescapeLiteralWhitespace(translated.trim());
+  return translatedChunks.join("");
 }
 
 export interface TranslatedNote {
@@ -255,6 +387,7 @@ export async function translateNote(
     (model) =>
       generateObject({
         model,
+        maxOutputTokens: MAX_OUTPUT_TOKENS,
         schema: z.object({
           title: z.string(),
           what: z.string(),
@@ -262,7 +395,7 @@ export async function translateNote(
           why: z.string(),
           other: z.string(),
         }),
-        system: `Translate every field into ${targetLabel}. Keep empty fields empty. Preserve meaning and tone, return only the translated fields.`,
+        system: `Translate every field into ${targetLabel}. Keep empty fields empty. Preserve meaning and tone. Translate the FULL text of every field, however long — never shorten, summarize, condense, or omit any part of a field. Return only the translated fields.`,
         prompt: JSON.stringify(note),
       }),
   );
@@ -307,6 +440,7 @@ export async function streamAssist(
     try {
       const result = streamText({
         model: resolveModel(id),
+        maxOutputTokens: MAX_OUTPUT_TOKENS,
         system: ASSIST_SYSTEM_PROMPT,
         messages,
       });
@@ -418,6 +552,7 @@ export async function formatArticleContent(
     (model) =>
       generateText({
         model,
+        maxOutputTokens: MAX_OUTPUT_TOKENS,
         system: [
       "You are a professional technical editor. Rewrite the user's raw content into a clean, well-structured, publication-ready markdown article. The input may be messy — a plain-text wall, a pasted webpage, chat/transcript fragments, a list of links, rough notes — your job is structure and polish, NOT summarization.",
       "",
@@ -539,6 +674,7 @@ export async function publishAssist(
     (model) =>
       generateObject({
         model,
+        maxOutputTokens: MAX_OUTPUT_TOKENS,
         schema: publishAssistSchema,
         system: [
           "You are the AI publish assistant for the 'AI Classroom' section of a personal knowledge base about AI.",
@@ -581,6 +717,7 @@ export async function draftNoteFromSource(
     (model) =>
       generateObject({
         model,
+        maxOutputTokens: MAX_OUTPUT_TOKENS,
         schema: draftedNoteSchema,
         system:
           "You turn raw source material into a personal knowledge-base note using the what/how/why/other template: what is the core idea, how does it work or get applied, why does it matter, and anything else worth keeping. Be concrete and specific to the source, not generic. Leave a field as an empty string if the source genuinely has nothing for it — don't pad.",
