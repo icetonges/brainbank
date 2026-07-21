@@ -218,6 +218,29 @@ export const FALLBACK_CHAIN: ModelId[] = [
 export const DEFAULT_MODEL_ID: ModelId =
   MODELS.find((m) => m.isDefault)?.id ?? FALLBACK_CHAIN[0];
 
+// --- AGENTIC MODELS ---
+//
+// Models with autonomous tool use (web search, code execution) baked into
+// the model itself by the provider, not something the caller opts into —
+// groq/compound's whole pitch is that it decides on its own, mid-request,
+// whether to search the web or run code. That's a reasonable feature for
+// the open-ended AI Assist chat, but wrong for every other task in this
+// app: translate/summarize/tag/draft/format/publish-assist all promise to
+// operate ONLY on the text they were given. Point one of them at an
+// agentic model and a note about topic X can silently mutate mid-task
+// into a summary of whatever the model found by searching for X instead —
+// which is exactly what happened when compound became the default/first
+// fallback for every task, not just assist (translate pulled in live page
+// content it noticed a URL for instead of translating the given text).
+export const AGENTIC_MODELS: ModelId[] = ["groq/compound"];
+
+/** FALLBACK_CHAIN with agentic models removed — what every task except
+ * the AI Assist chat actually falls through (see withFallback in
+ * tasks.ts). */
+export const GROUNDED_FALLBACK_CHAIN: ModelId[] = FALLBACK_CHAIN.filter(
+  (id) => !AGENTIC_MODELS.includes(id),
+);
+
 export function getModel(id: ModelId): ModelInfo {
   const model = MODELS.find((m) => m.id === id);
   if (!model) throw new Error(`Unknown model id: ${id}`);

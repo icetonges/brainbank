@@ -7,7 +7,13 @@ import {
 } from "ai";
 import { z } from "zod";
 import { resolveModel } from "./providers";
-import { DEFAULT_MODEL_ID, FALLBACK_CHAIN, type ModelId } from "./models";
+import {
+  AGENTIC_MODELS,
+  DEFAULT_MODEL_ID,
+  FALLBACK_CHAIN,
+  GROUNDED_FALLBACK_CHAIN,
+  type ModelId,
+} from "./models";
 import { classroomCategoryEnum, type ClassroomCategory } from "@/lib/db/schema";
 
 // --- THE CHAIN ---
@@ -44,34 +50,57 @@ export type TaskName =
   | "format-article";
 
 export const TASK_MODELS: Record<TaskName, ModelId> = {
+  // assist is the one task allowed an agentic, web-searching model — it's
+  // an open-ended chat helper, not a transform over fixed input.
   assist: DEFAULT_MODEL_ID,
   summarize: "gemini-3.1-flash-lite",
   "tag-and-link": "gemini-3.1-flash-lite",
-  translate: DEFAULT_MODEL_ID,
-  draft: DEFAULT_MODEL_ID,
-  "publish-assist": DEFAULT_MODEL_ID,
-  "format-article": DEFAULT_MODEL_ID,
+  // Every other task is a *grounded* transform — it must operate only on
+  // the text it's given, never on whatever a model's built-in web search
+  // decides to fetch. DEFAULT_MODEL_ID is deliberately NOT used here (see
+  // AGENTIC_MODELS in models.ts): it currently resolves to groq/compound,
+  // whose autonomous web search corrupted translations that mentioned a
+  // URL.
+  translate: "openai/gpt-oss-120b",
+  draft: "openai/gpt-oss-120b",
+  "publish-assist": "openai/gpt-oss-120b",
+  "format-article": "openai/gpt-oss-120b",
 };
 
-/** Preferred model first, then FALLBACK_CHAIN in order (deduped). */
-function chainFor(preferred: ModelId): ModelId[] {
-  return [preferred, ...FALLBACK_CHAIN.filter((id) => id !== preferred)];
+/**
+ * Preferred model first, then the rest of the chain in order (deduped).
+ * Grounded tasks (everything except assist) use GROUNDED_FALLBACK_CHAIN
+ * and never even start from an agentic model: if an explicit override
+ * asks for one anyway (e.g. someone picks Compound in a task's model
+ * picker without knowing it can autonomously browse), it's swapped for
+ * the first grounded model instead of honored — letting a "translate
+ * this" call quietly fetch and blend in live web content is a
+ * correctness bug, not a preference to respect.
+ */
+function chainFor(preferred: ModelId, grounded: boolean): ModelId[] {
+  const chain = grounded ? GROUNDED_FALLBACK_CHAIN : FALLBACK_CHAIN;
+  const safePreferred =
+    grounded && AGENTIC_MODELS.includes(preferred) ? chain[0] : preferred;
+  return [safePreferred, ...chain.filter((id) => id !== safePreferred)];
 }
 
 /**
- * Runs `attempt` against each model in chainFor(preferred) until one
- * succeeds, logging and moving on when a model errors instead of failing
- * the whole task. This is what makes the model registry an actual
+ * Runs `attempt` against each model in chainFor(preferred, grounded) until
+ * one succeeds, logging and moving on when a model errors instead of
+ * failing the whole task. This is what makes the model registry an actual
  * fallback chain rather than just a routing table: a provider outage,
- * rate limit, or (as happened) a spend cap being hit no longer takes
- * down every AI feature that defaults to that model.
+ * rate limit, or spend cap no longer takes down every AI feature that
+ * defaults to that model. `grounded` defaults to true — pass `false` only
+ * for tasks (currently just assist) where an agentic, web-searching model
+ * is acceptable.
  */
 async function withFallback<T>(
   label: TaskName,
   preferred: ModelId,
   attempt: (model: LanguageModel) => Promise<T>,
+  options: { grounded?: boolean } = {},
 ): Promise<T> {
-  const chain = chainFor(preferred);
+  const chain = chainFor(preferred, options.grounded ?? true);
   let lastError: unknown;
   for (const modelId of chain) {
     try {
@@ -269,7 +298,7 @@ export async function streamAssist(
   messages: ModelMessage[],
   modelId?: ModelId,
 ): Promise<Response> {
-  const chain = chainFor(modelId ?? TASK_MODELS.assist);
+  const chain = chainFor(modelId ?? TASK_MODELS.assist, false);
   let lastError: unknown;
 
   for (const id of chain) {
