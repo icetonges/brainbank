@@ -50,22 +50,40 @@ export type TaskName =
   | "format-article";
 
 export const TASK_MODELS: Record<TaskName, ModelId> = {
-  // assist is the one task allowed an agentic, web-searching model — it's
-  // an open-ended chat helper, not a transform over fixed input.
+  // assist is the one task that was always allowed an agentic,
+  // web-searching model — it's an open-ended chat helper, not a transform
+  // over fixed input.
   assist: DEFAULT_MODEL_ID,
   summarize: "gemini-3.1-flash-lite",
   "tag-and-link": "gemini-3.1-flash-lite",
   // Every other task is a *grounded* transform — it must operate only on
   // the text it's given, never on whatever a model's built-in web search
-  // decides to fetch. DEFAULT_MODEL_ID is deliberately NOT used here (see
-  // AGENTIC_MODELS in models.ts): it currently resolves to groq/compound,
-  // whose autonomous web search corrupted translations that mentioned a
-  // URL.
-  translate: "openai/gpt-oss-120b",
-  draft: "openai/gpt-oss-120b",
-  "publish-assist": "openai/gpt-oss-120b",
-  "format-article": "openai/gpt-oss-120b",
+  // decides to fetch. groq/compound's autonomous browsing corrupted a
+  // translation that mentioned a URL once already (see AGENTIC_MODELS /
+  // GROUNDED_FALLBACK_CHAIN in models.ts, still there and ready to bring
+  // back if this recurs). As a deliberate, explicitly-requested experiment
+  // these four now try compound FIRST anyway — it's free, and every
+  // grounded task's system prompt below now carries an explicit
+  // NO_BROWSING_INSTRUCTION plus (for draft) no longer even puts a raw URL
+  // in the prompt for it to act on. If compound still misbehaves despite
+  // that, the fix is reverting these four back to "openai/gpt-oss-120b"
+  // and passing { grounded: true } again at their withFallback call sites.
+  translate: "groq/compound",
+  draft: "groq/compound",
+  "publish-assist": "groq/compound",
+  "format-article": "groq/compound",
 };
+
+// Bolted onto every grounded task's system prompt now that groq/compound
+// is back as their preferred model. This is a prompt-level rule, not an
+// enforced one — Groq's API supports hard-disabling compound's tools
+// server-side via `compound_custom.tools.enabled_tools: []`, but the
+// installed @ai-sdk/groq version doesn't expose that parameter (its
+// provider-options schema strips unknown fields), so a strong instruction
+// is the only lever available today. If compound ignores this and
+// fetches/browses anyway, that's the signal this experiment failed.
+const NO_BROWSING_INSTRUCTION =
+  "Do not browse the web, search the internet, visit any URL, or run code — even if the text mentions a website, a link, or a domain name. Work only from the exact text given to you; never fetch, verify, or supplement it with outside information.";
 
 /**
  * Preferred model first, then the rest of the chain in order (deduped).
@@ -302,6 +320,8 @@ This may be one fragment of a longer document that was split into pieces before 
 
 Output real line breaks between blocks, never the two characters backslash-n as text.
 
+${NO_BROWSING_INSTRUCTION} This includes any URL that appears inside the text being translated — translate the link text if there is one, leave the URL itself untouched, and do not visit it.
+
 Return only the translation, no commentary.`;
 }
 
@@ -322,7 +342,7 @@ async function translateChunk(
         system: translateSystemPrompt(targetLabel),
         prompt: chunk,
       }),
-    { onModelUsed },
+    { onModelUsed, grounded: false },
   );
   const translated = unescapeLiteralWhitespace(result.text.trim());
 
@@ -424,9 +444,10 @@ export async function translateNote(
           why: z.string(),
           other: z.string(),
         }),
-        system: `Translate every field into ${targetLabel}. Keep empty fields empty. Preserve meaning and tone. Translate the FULL text of every field, however long — never shorten, summarize, condense, or omit any part of a field. Return only the translated fields.`,
+        system: `Translate every field into ${targetLabel}. Keep empty fields empty. Preserve meaning and tone. Translate the FULL text of every field, however long — never shorten, summarize, condense, or omit any part of a field. Return only the translated fields. ${NO_BROWSING_INSTRUCTION}`,
         prompt: JSON.stringify(note),
       }),
+    { grounded: false },
   );
   return {
     title: unescapeLiteralWhitespace(object.title),
@@ -592,6 +613,7 @@ export async function formatArticleContent(
       "- Keep code blocks verbatim, fenced with the right language tag (```python, ```ts, …). Keep inline code in backticks. Keep math ($…$) and ```mermaid blocks untouched.",
       "- Keep [[wikilinks]] exactly as written — they connect this article into a knowledge graph.",
       "- Write in the same language as the input (English or Chinese). Do not translate.",
+      `- ${NO_BROWSING_INSTRUCTION} Format a bare URL as [descriptive text](url) using only what the URL/surrounding text already tells you — never visit it to find out what it is.`,
       "",
       "Structure (adapt to the content — skip what doesn't fit):",
       "- Do NOT add an H1 title; the page renders the title separately. Start with a short 1-3 sentence lead paragraph giving the BLUF (bottom line up front).",
@@ -610,6 +632,7 @@ export async function formatArticleContent(
           .filter(Boolean)
           .join("\n\n"),
       }),
+    { grounded: false },
   );
 
   let formatted = unescapeLiteralWhitespace(text.trim());
@@ -714,6 +737,7 @@ export async function publishAssist(
           "Write learningMap and handsOn as real markdown with real line breaks between headings, list items, and paragraphs — never the two characters backslash-n as literal text in place of a line break.",
           input.topic ? "Keep the user's topic unless it's clearly unusable; you may lightly clean it up." : "",
           input.category ? `The user already chose the category "${input.category}" — keep it.` : "",
+          `${NO_BROWSING_INSTRUCTION} Suggest resources from what you already know of real, well-known documentation/repos/courses — do not browse to verify or discover one.`,
         ]
           .filter(Boolean)
           .join("\n"),
@@ -724,6 +748,7 @@ export async function publishAssist(
           .filter(Boolean)
           .join("\n\n"),
       }),
+    { grounded: false },
   );
 
   return {
@@ -748,16 +773,24 @@ export async function draftNoteFromSource(
         model,
         maxOutputTokens: MAX_OUTPUT_TOKENS,
         schema: draftedNoteSchema,
-        system:
-          "You turn raw source material into a personal knowledge-base note using the what/how/why/other template: what is the core idea, how does it work or get applied, why does it matter, and anything else worth keeping. Be concrete and specific to the source, not generic. Leave a field as an empty string if the source genuinely has nothing for it — don't pad.",
+        system: `You turn raw source material into a personal knowledge-base note using the what/how/why/other template: what is the core idea, how does it work or get applied, why does it matter, and anything else worth keeping. Be concrete and specific to the source, not generic. Leave a field as an empty string if the source genuinely has nothing for it — don't pad. ${NO_BROWSING_INSTRUCTION}`,
+        // Deliberately excludes input.sourceUrl — the note is drafted from
+        // sourceText alone (already fetched/extracted upstream by plain
+        // code, see lib/ingest/extract.ts), so the model never needs the
+        // URL to do this job. The URL still reaches the page: it's stored
+        // straight from input on the note itself (see ingest-actions.ts /
+        // ingest-source.ts) and rendered as the "Source" link independent
+        // of anything the model sees or returns. Not putting a real,
+        // fetchable-looking URL in front of an agentic model in the first
+        // place is a stronger guarantee than asking it not to act on one.
         prompt: [
           `Source title: ${input.sourceTitle}`,
-          input.sourceUrl ? `Source URL: ${input.sourceUrl}` : null,
           `Source text:\n${input.sourceText}`,
         ]
           .filter(Boolean)
           .join("\n\n"),
       }),
+    { grounded: false },
   );
   return {
     ...object,
