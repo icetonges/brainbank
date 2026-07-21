@@ -367,6 +367,43 @@ async function translateChunk(
   return translated;
 }
 
+// Matches any http(s) URL. Used to mask every URL — in the body, the
+// summary, AND the title/topic field, all three go through translateText
+// — before the text ever reaches a model, and restore them afterward.
+// This is a hard guarantee rather than a prompt-level ask: NO_BROWSING_
+// INSTRUCTION tells a model not to act on a URL it sees, but this removes
+// the URL from what it sees in the first place, the same way dropping
+// sourceUrl from draftNoteFromSource's prompt does. A short title/topic
+// string that's just "https://example.com" (or has one embedded) is
+// exactly the shape that made compound decide to browse before — masking
+// it here closes that gap regardless of what field it showed up in.
+const URL_PATTERN = /https?:\/\/[^\s)\]"'<>]+/g;
+
+/** Rare delimiter unlikely to appear in real content and unlikely to be
+ * touched by a translation model (nothing to translate about it), so the
+ * restore step can find placeholders back out reliably. */
+function urlPlaceholder(index: number): string {
+  return `§URL${index}§`;
+}
+
+function protectUrls(text: string): { masked: string; urls: string[] } {
+  const urls: string[] = [];
+  const masked = text.replace(URL_PATTERN, (url) => {
+    const token = urlPlaceholder(urls.length);
+    urls.push(url);
+    return token;
+  });
+  return { masked, urls };
+}
+
+function restoreUrls(text: string, urls: string[]): string {
+  if (urls.length === 0) return text;
+  return text.replace(/§URL(\d+)§/g, (whole, indexStr: string) => {
+    const url = urls[Number(indexStr)];
+    return url ?? whole;
+  });
+}
+
 async function translateWithMeta(
   text: string,
   target: "en" | "zh",
@@ -375,10 +412,12 @@ async function translateWithMeta(
 ): Promise<string> {
   if (!text.trim()) return "";
   const chosenModel = modelId ?? TASK_MODELS.translate;
-  const chunks = chunkMarkdown(text, TRANSLATE_CHUNK_MAX_CHARS);
+  const { masked, urls } = protectUrls(text);
+  const chunks = chunkMarkdown(masked, TRANSLATE_CHUNK_MAX_CHARS);
 
   if (chunks.length <= 1) {
-    return translateChunk(text, target, chosenModel, onModelUsed);
+    const result = await translateChunk(masked, target, chosenModel, onModelUsed);
+    return restoreUrls(result, urls);
   }
 
   // Chunks are independent, so translate them concurrently — Promise.all
@@ -388,7 +427,7 @@ async function translateWithMeta(
   const translatedChunks = await Promise.all(
     chunks.map((chunk) => translateChunk(chunk, target, chosenModel, onModelUsed)),
   );
-  return translatedChunks.join("");
+  return restoreUrls(translatedChunks.join(""), urls);
 }
 
 export async function translateText(
