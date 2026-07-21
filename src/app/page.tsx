@@ -10,6 +10,7 @@ import { t, CLASSROOM_TAB_LABELS_ZH, type Lang } from "@/lib/i18n";
 import { desc, eq, and, isNotNull, isNull, count } from "drizzle-orm";
 import { HeroVisual, PillarIcon } from "@/components/home-visuals";
 import { formatDate, formatDateTime } from "@/lib/date";
+import { sectionTone, NEUTRAL_TONE, type SectionTone } from "@/lib/classroom/section-tones";
 
 export const dynamic = "force-dynamic";
 
@@ -257,8 +258,8 @@ export default async function Home({
                   </span>
                 </Link>
                 <div className="flex flex-col gap-3 bg-bg-elevated p-3">
-                  {sc.sections.map((sec) => (
-                    <SectionBox key={sec.id} name={sec.name} count={sec.articles.length}>
+                  {sc.sections.map((sec, i) => (
+                    <SectionBox key={sec.id} name={sec.name} count={sec.articles.length} tone={sectionTone(i)}>
                       {sec.articles.map((a) => (
                         <ArticleRow key={a.slug} slug={a.slug} title={a.title} createdAt={a.createdAt} lang={lang} dateLocale={dateLocale} />
                       ))}
@@ -266,7 +267,7 @@ export default async function Home({
                   ))}
                   {sc.unsectioned.length > 0 && (
                     sc.sections.length > 0 ? (
-                      <SectionBox name={cs.moreArticles} count={sc.unsectioned.length}>
+                      <SectionBox name={cs.moreArticles} count={sc.unsectioned.length} tone={NEUTRAL_TONE}>
                         {sc.unsectioned.map((a) => (
                           <ArticleRow key={a.slug} slug={a.slug} title={a.title} createdAt={a.createdAt} lang={lang} dateLocale={dateLocale} />
                         ))}
@@ -422,17 +423,22 @@ function EmptyPanel({ children }: { children: React.ReactNode }) {
 function SectionBox({
   name,
   count,
+  tone,
   children,
 }: {
   name: string;
   count: number;
+  tone: SectionTone;
   children: React.ReactNode;
 }) {
   return (
-    <div className="overflow-hidden rounded-lg border border-border">
-      <div className="flex items-center justify-between gap-2 bg-bg px-3 py-2">
-        <h4 className="truncate text-xs font-semibold uppercase tracking-wide text-fg">{name}</h4>
-        <span className="shrink-0 rounded-full bg-accent/15 px-2 py-0.5 text-[11px] font-semibold text-accent">
+    <div className={`overflow-hidden rounded-lg border border-l-4 border-border ${tone.bar}`}>
+      <div className={`flex items-center justify-between gap-2 px-3 py-2 ${tone.tint}`}>
+        <h4 className={`flex min-w-0 items-center gap-1.5 truncate text-xs font-semibold uppercase tracking-wide ${tone.text}`}>
+          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tone.dot}`} aria-hidden="true" />
+          <span className="truncate">{name}</span>
+        </h4>
+        <span className={`shrink-0 rounded-full bg-bg-elevated px-2 py-0.5 text-[11px] font-semibold ${tone.text}`}>
           {count}
         </span>
       </div>

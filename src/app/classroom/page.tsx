@@ -8,20 +8,9 @@ import { getLang } from "@/lib/i18n-server";
 import { t, CLASSROOM_TAB_LABELS_ZH } from "@/lib/i18n";
 import { eq, and, asc, desc, isNotNull } from "drizzle-orm";
 import { formatDateTime } from "@/lib/date";
+import { sectionTone } from "@/lib/classroom/section-tones";
 
 export const dynamic = "force-dynamic";
-
-/* Rotating tones for the section blocks inside a subcategory card —
- * structure you can see at a glance: each section gets its own hue
- * (left bar, label, tinted header) so "My app" vs "GitHub" under
- * "Resources" read as clearly separate shelves, not one long list.
- * Tailwind needs literal class strings, hence the lookup table. */
-const SECTION_TONES = [
-  { bar: "border-l-info", text: "text-info", tint: "bg-info/10", dot: "bg-info" },
-  { bar: "border-l-success", text: "text-success", tint: "bg-success/10", dot: "bg-success" },
-  { bar: "border-l-warn", text: "text-warn", tint: "bg-warn/10", dot: "bg-warn" },
-  { bar: "border-l-accent", text: "text-accent", tint: "bg-accent/10", dot: "bg-accent" },
-] as const;
 
 function ArticleRow({
   article,
@@ -270,6 +259,12 @@ export default async function ClassroomPage({
         </div>
       ) : (
         <div className="flex flex-col gap-6">
+          {/* Grid rather than one full-width column per subcategory — with
+              several subcategories on screen at once, a single column
+              meant a lot of scrolling to see more than one or two of them.
+              Only the subcategory cards are grid items; "uncategorized"
+              below stays a full-width block of its own. */}
+          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {subcategoryGroups.map((group) => {
             const total =
               group.sections.reduce((n, sec) => n + sec.articles.length, 0) + group.unsectioned.length;
@@ -281,7 +276,7 @@ export default async function ClassroomPage({
                  without reading a word. */
               <section
                 key={group.id}
-                className="overflow-hidden rounded-2xl border border-border bg-bg-elevated shadow-sm"
+                className="flex flex-col overflow-hidden rounded-2xl border border-border bg-bg-elevated shadow-sm"
               >
                 <Link
                   href={`/${group.slug}?lang=${lang}`}
@@ -298,9 +293,9 @@ export default async function ClassroomPage({
                   </span>
                 </Link>
 
-                <div className="flex flex-col gap-4 p-4 sm:p-5">
+                <div className="flex flex-1 flex-col gap-4 p-4 sm:p-5">
                   {group.sections.map((sec, i) => {
-                    const tone = SECTION_TONES[i % SECTION_TONES.length];
+                    const tone = sectionTone(i);
                     return (
                       <div
                         key={sec.id}
@@ -346,6 +341,7 @@ export default async function ClassroomPage({
               </section>
             );
           })}
+          </div>
 
           {uncategorized.length > 0 && (
             <div className="flex flex-col gap-3">

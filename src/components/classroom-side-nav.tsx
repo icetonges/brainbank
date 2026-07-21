@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { TocSubcategory } from "@/lib/classroom/toc";
 import type { Lang } from "@/lib/i18n";
+import { sectionTone, NEUTRAL_TONE } from "@/lib/classroom/section-tones";
 
 /**
  * Persistent "jump to any article" nav for classroom article pages — every
@@ -39,21 +40,26 @@ export function ClassroomSideNav({
             <span className="truncate">{sc.name}</span>
           </summary>
           <div className="ml-2 flex flex-col gap-2 border-l border-border py-1 pb-3 pl-3">
-            {sc.sections.map((sec) => (
-              <div key={sec.id} className="flex flex-col gap-0.5">
-                <p className="truncate px-2 text-xs font-medium uppercase tracking-wide text-fg-secondary">
-                  {sec.name}
-                </p>
-                {sec.articles.map((a) => (
-                  <ArticleLink key={a.slug} slug={a.slug} title={a.title} currentSlug={currentSlug} lang={lang} />
-                ))}
-              </div>
-            ))}
+            {sc.sections.map((sec, i) => {
+              const tone = sectionTone(i);
+              return (
+                <div key={sec.id} className="flex flex-col gap-0.5">
+                  <p className={`flex items-center gap-1.5 truncate px-2 text-xs font-medium uppercase tracking-wide ${tone.text}`}>
+                    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tone.dot}`} aria-hidden="true" />
+                    <span className="truncate">{sec.name}</span>
+                  </p>
+                  {sec.articles.map((a) => (
+                    <ArticleLink key={a.slug} slug={a.slug} title={a.title} currentSlug={currentSlug} lang={lang} />
+                  ))}
+                </div>
+              );
+            })}
             {sc.unsectioned.length > 0 && (
               <div className="flex flex-col gap-0.5">
                 {sc.sections.length > 0 && (
-                  <p className="truncate px-2 text-xs font-medium uppercase tracking-wide text-fg-secondary">
-                    {moreLabel}
+                  <p className={`flex items-center gap-1.5 truncate px-2 text-xs font-medium uppercase tracking-wide ${NEUTRAL_TONE.text}`}>
+                    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${NEUTRAL_TONE.dot}`} aria-hidden="true" />
+                    <span className="truncate">{moreLabel}</span>
                   </p>
                 )}
                 {sc.unsectioned.map((a) => (
