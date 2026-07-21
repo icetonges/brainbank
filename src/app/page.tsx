@@ -1,12 +1,12 @@
 import Link from "next/link";
 import { auth } from "@/auth";
 import { db, isDatabaseConfigured } from "@/lib/db";
-import { notes, noteContent, edges, tags, noteTags, classroomSubcategories } from "@/lib/db/schema";
+import { notes, noteContent, edges, tags, noteTags, classroomSubcategories, classroomSections } from "@/lib/db/schema";
 import type { ClassroomCategory } from "@/lib/db/schema";
 import { CLASSROOM_TABS } from "@/lib/classroom";
 import { getLang } from "@/lib/i18n-server";
 import { t, CLASSROOM_TAB_LABELS_ZH, type Lang } from "@/lib/i18n";
-import { desc, eq, and, isNotNull, isNull, count } from "drizzle-orm";
+import { desc, asc, eq, and, isNotNull, isNull, count } from "drizzle-orm";
 import { HeroVisual, PillarIcon } from "@/components/home-visuals";
 import { formatDate, formatDateTime } from "@/lib/date";
 
@@ -23,7 +23,8 @@ interface HomeData {
     name: string;
     slug: string;
     total: number;
-    articles: { slug: string; title: string; createdAt: Date }[];
+    sections: { id: number; name: string; articles: { slug: string; title: string; createdAt: Date }[] }[];
+    unsectioned: { slug: string; title: string; createdAt: Date }[];
   }[];
 }
 
@@ -104,9 +105,14 @@ async function loadHome(
       .limit(16);
 
     // Subcategory table of contents: every subcategory (alphabetical),
-    // each with its latest 10 articles. One query for all subcategory
-    // article rows (ordered newest-first), then grouped/capped in JS
-    // rather than N+1 queries per subcategory.
+    // broken down into its sections (classroom_sections) in their
+    // configured order — the same grouping the subcategory's own landing
+    // page (/[subcategorySlug]) already uses — with a trailing catch-all
+    // for articles not filed under any section. Oldest-first within each
+    // group (matching the landing page's fallback order) so a course-like
+    // subcategory (e.g. "Claude Code Deep Dive") reads start-to-finish
+    // here instead of showing its newest entry first. One query each for
+    // subcategories/sections/articles rather than N+1 per subcategory.
     const subcatList = await db
       .select({
         id: classroomSubcategories.id,
@@ -116,9 +122,19 @@ async function loadHome(
       .from(classroomSubcategories)
       .orderBy(classroomSubcategories.name);
 
+    const sectionList = await db
+      .select({
+        id: classroomSections.id,
+        name: classroomSections.name,
+        subcategoryId: classroomSections.subcategoryId,
+      })
+      .from(classroomSections)
+      .orderBy(asc(classroomSections.sortOrder), asc(classroomSections.name));
+
     const subcatArticlesRaw = await db
       .select({
         subcategoryId: notes.subcategoryId,
+        sectionId: notes.sectionId,
         slug: notes.slug,
         title: notes.title,
         translatedTitle: noteContent.title,
@@ -132,33 +148,57 @@ async function loadHome(
           ? and(isNotNull(notes.subcategoryId), visible)
           : isNotNull(notes.subcategoryId),
       )
-      .orderBy(desc(notes.createdAt));
+      .orderBy(asc(notes.sectionOrder), asc(notes.createdAt));
 
-    const bySubcat = new Map<number, { slug: string; title: string; createdAt: Date }[]>();
+    // Cap per group (section, or the unsectioned catch-all), not per
+    // subcategory as a whole — so one heavily-populated section can't crowd
+    // every other section out of the preview. The full, uncapped list is
+    // always one click away at the subcategory's own landing page.
+    const MAX_PER_GROUP = 8;
+    type TocArticle = { slug: string; title: string; createdAt: Date };
+    const bySubcatGroup = new Map<string, TocArticle[]>(); // key: `${subcategoryId}:${sectionId ?? "none"}`
     const subcatCounts = new Map<number, number>();
     for (const r of subcatArticlesRaw) {
       if (!r.subcategoryId) continue;
       subcatCounts.set(r.subcategoryId, (subcatCounts.get(r.subcategoryId) ?? 0) + 1);
-      const arr = bySubcat.get(r.subcategoryId) ?? [];
-      if (arr.length < 10) {
+      const key = `${r.subcategoryId}:${r.sectionId ?? "none"}`;
+      const arr = bySubcatGroup.get(key) ?? [];
+      if (arr.length < MAX_PER_GROUP) {
         arr.push({
           slug: r.slug,
           title: lang === r.primaryLanguage ? r.title : r.translatedTitle || r.title,
           createdAt: r.createdAt,
         });
       }
-      bySubcat.set(r.subcategoryId, arr);
+      bySubcatGroup.set(key, arr);
+    }
+
+    const sectionsBySubcat = new Map<number, { id: number; name: string }[]>();
+    for (const sec of sectionList) {
+      const arr = sectionsBySubcat.get(sec.subcategoryId) ?? [];
+      arr.push({ id: sec.id, name: sec.name });
+      sectionsBySubcat.set(sec.subcategoryId, arr);
     }
 
     const subcategoryToc = subcatList
-      .map((sc) => ({
-        id: sc.id,
-        name: sc.name,
-        slug: sc.slug,
-        total: subcatCounts.get(sc.id) ?? 0,
-        articles: bySubcat.get(sc.id) ?? [],
-      }))
-      .filter((sc) => sc.articles.length > 0);
+      .map((sc) => {
+        const sections = (sectionsBySubcat.get(sc.id) ?? [])
+          .map((sec) => ({
+            id: sec.id,
+            name: sec.name,
+            articles: bySubcatGroup.get(`${sc.id}:${sec.id}`) ?? [],
+          }))
+          .filter((sec) => sec.articles.length > 0);
+        return {
+          id: sc.id,
+          name: sc.name,
+          slug: sc.slug,
+          total: subcatCounts.get(sc.id) ?? 0,
+          sections,
+          unsectioned: bySubcatGroup.get(`${sc.id}:none`) ?? [],
+        };
+      })
+      .filter((sc) => sc.sections.length > 0 || sc.unsectioned.length > 0);
 
     return {
       data: {
@@ -187,6 +227,7 @@ export default async function Home({
   const lang = await getLang(langParam);
   const { data, error } = await loadHome(Boolean(session), lang);
   const s = t(lang).home;
+  const cs = t(lang).classroom;
   const dateLocale = lang === "zh" ? "zh-CN" : undefined;
   const tabLabel = (value: ClassroomCategory, enLabel: string) =>
     lang === "zh" ? CLASSROOM_TAB_LABELS_ZH[value] : enLabel;
@@ -306,23 +347,58 @@ export default async function Home({
                       : `${sc.total} ${sc.total === 1 ? s.articleOne : s.articleMany}`}
                   </span>
                 </Link>
-                <ul className="flex flex-col divide-y divide-border bg-bg-elevated">
-                  {sc.articles.map((a) => (
-                    <li key={a.slug}>
-                      <Link
-                        href={`/classroom/${a.slug}?lang=${lang}`}
-                        className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm hover:bg-bg transition-colors"
-                      >
-                        <span className="line-clamp-1 text-fg-secondary hover:text-accent transition-colors">
-                          {a.title}
-                        </span>
-                        <span className="shrink-0 text-xs text-fg-secondary">
-                          {formatDate(a.createdAt, dateLocale)}
-                        </span>
-                      </Link>
-                    </li>
+                <div className="flex flex-col divide-y divide-border bg-bg-elevated">
+                  {sc.sections.map((sec) => (
+                    <div key={sec.id}>
+                      <p className="px-4 pt-2.5 text-xs font-semibold uppercase tracking-wide text-fg-secondary">
+                        {sec.name}
+                      </p>
+                      <ul className="flex flex-col divide-y divide-border">
+                        {sec.articles.map((a) => (
+                          <li key={a.slug}>
+                            <Link
+                              href={`/classroom/${a.slug}?lang=${lang}`}
+                              className="flex items-center justify-between gap-3 px-4 py-2 text-sm hover:bg-bg transition-colors"
+                            >
+                              <span className="line-clamp-1 text-fg-secondary hover:text-accent transition-colors">
+                                {a.title}
+                              </span>
+                              <span className="shrink-0 text-xs text-fg-secondary">
+                                {formatDate(a.createdAt, dateLocale)}
+                              </span>
+                            </Link>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
                   ))}
-                </ul>
+                  {sc.unsectioned.length > 0 && (
+                    <div>
+                      {sc.sections.length > 0 && (
+                        <p className="px-4 pt-2.5 text-xs font-semibold uppercase tracking-wide text-fg-secondary">
+                          {cs.moreArticles}
+                        </p>
+                      )}
+                      <ul className="flex flex-col divide-y divide-border">
+                        {sc.unsectioned.map((a) => (
+                          <li key={a.slug}>
+                            <Link
+                              href={`/classroom/${a.slug}?lang=${lang}`}
+                              className="flex items-center justify-between gap-3 px-4 py-2 text-sm hover:bg-bg transition-colors"
+                            >
+                              <span className="line-clamp-1 text-fg-secondary hover:text-accent transition-colors">
+                                {a.title}
+                              </span>
+                              <span className="shrink-0 text-xs text-fg-secondary">
+                                {formatDate(a.createdAt, dateLocale)}
+                              </span>
+                            </Link>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
               </div>
             ))}
           </div>
