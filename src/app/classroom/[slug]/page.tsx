@@ -12,11 +12,13 @@ import {
 import { eq } from "drizzle-orm";
 import { auth } from "@/auth";
 import { CLASSROOM_TAB_LABELS } from "@/lib/classroom";
+import { loadClassroomToc } from "@/lib/classroom/toc";
 import { getLang } from "@/lib/i18n-server";
 import { t, CLASSROOM_TAB_LABELS_ZH } from "@/lib/i18n";
 import { Markdown } from "@/components/markdown";
 import { DeleteArticleButton } from "@/components/delete-article-button";
 import { PendingFormButton } from "@/components/pending-form-button";
+import { ClassroomSideNav } from "@/components/classroom-side-nav";
 import { regenerateGuideAction, translateClassroomArticleAction } from "../actions";
 import { formatDateTime } from "@/lib/date";
 
@@ -76,6 +78,11 @@ export default async function ClassroomArticlePage({
   if (!note || !note.category) notFound();
   if (note.status !== "published" && !session) notFound();
 
+  // Every classroom article, grouped by subcategory/section, for the side
+  // nav — uncapped (unlike the homepage's preview) since the point is to
+  // actually be able to jump to anything from here.
+  const toc = await loadClassroomToc(Boolean(session), lang);
+
   // Content in the requested language, falling back to whatever exists
   // (with a "not translated yet" hint + translate button for the owner).
   const wanted = contents.find((c) => c.language === lang && c.bodyMarkdown);
@@ -106,7 +113,25 @@ export default async function ClassroomArticlePage({
     lang === "zh" ? CLASSROOM_TAB_LABELS_ZH[note.category] : CLASSROOM_TAB_LABELS[note.category];
 
   return (
-    <article className="flex flex-col gap-8">
+    <div className="flex flex-1 items-start gap-8">
+      {/* Persistent "jump to any article" nav — hidden below lg so the
+          article content (unchanged width, max-w-5xl below) doesn't get
+          squeezed on narrower viewports; the layout's shared max-width is
+          widened by exactly this sidebar's width so the header still lines
+          up with content + nav combined (see layout.tsx). */}
+      <aside className="sticky top-6 hidden w-64 shrink-0 self-start lg:block">
+        <div className="max-h-[calc(100vh-3rem)] overflow-y-auto rounded-lg border border-border bg-bg-elevated p-3">
+          <ClassroomSideNav
+            toc={toc}
+            currentSlug={slug}
+            currentSubcategoryId={note.subcategoryId}
+            lang={lang}
+            moreLabel={s.moreArticles}
+          />
+        </div>
+      </aside>
+
+      <article className="flex min-w-0 max-w-5xl flex-1 flex-col gap-8">
       <header className="flex flex-col gap-3">
         <div className="flex items-center gap-2 text-sm">
           <Link href={`/classroom?lang=${lang}`} className="text-fg-secondary hover:text-accent">
@@ -253,7 +278,8 @@ export default async function ClassroomArticlePage({
           </div>
         )
       )}
-    </article>
+      </article>
+    </div>
   );
 }
 

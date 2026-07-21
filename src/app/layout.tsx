@@ -53,7 +53,13 @@ export default async function RootLayout({
       <body className="min-h-full flex flex-col bg-bg text-fg antialiased">
         <AppSessionProvider>
           <Header />
-          <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-6 py-10">
+          {/* max-w-[82rem] = the classroom article page's sidebar (16rem) +
+              gap-8 (2rem) + its content column (max-w-5xl = 64rem), so that
+              page's header lines up exactly with content + nav combined
+              instead of the nav poking out past a narrower header. Every
+              other page just gets a bit more breathing room at this width;
+              none of them assume the old max-w-5xl as a hard constraint. */}
+          <main className="mx-auto flex w-full max-w-[82rem] flex-1 flex-col px-6 py-10">
             {children}
           </main>
           <footer className="border-t border-border py-6 text-center text-sm text-fg-secondary">

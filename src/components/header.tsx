@@ -14,7 +14,9 @@ export async function Header() {
 
   return (
     <header className="border-b border-border bg-bg-elevated">
-      <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-6 py-4">
+      {/* Matches <main>'s max-w-[82rem] in layout.tsx — see the comment
+          there for why it's wider than the old max-w-5xl. */}
+      <div className="mx-auto flex max-w-[82rem] items-center justify-between gap-4 px-6 py-4">
         <Link href="/" className="shrink-0 text-lg font-semibold tracking-tight text-fg">
           Brain<span className="text-accent">Bank</span>
         </Link>

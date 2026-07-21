@@ -1,16 +1,21 @@
 import Link from "next/link";
 import { auth } from "@/auth";
 import { db, isDatabaseConfigured } from "@/lib/db";
-import { notes, noteContent, edges, tags, noteTags, classroomSubcategories, classroomSections } from "@/lib/db/schema";
+import { notes, noteContent, edges, tags, noteTags } from "@/lib/db/schema";
 import type { ClassroomCategory } from "@/lib/db/schema";
 import { CLASSROOM_TABS } from "@/lib/classroom";
+import { loadClassroomToc, type TocSubcategory } from "@/lib/classroom/toc";
 import { getLang } from "@/lib/i18n-server";
 import { t, CLASSROOM_TAB_LABELS_ZH, type Lang } from "@/lib/i18n";
-import { desc, asc, eq, and, isNotNull, isNull, count } from "drizzle-orm";
+import { desc, eq, and, isNotNull, isNull, count } from "drizzle-orm";
 import { HeroVisual, PillarIcon } from "@/components/home-visuals";
 import { formatDate, formatDateTime } from "@/lib/date";
 
 export const dynamic = "force-dynamic";
+
+// Homepage preview stays compact — the full, uncapped list per subcategory
+// lives at its own landing page (/[subcategorySlug]).
+const HOME_TOC_MAX_PER_GROUP = 8;
 
 interface HomeData {
   stats: { pages: number; articles: number; connections: number; topics: number };
@@ -18,14 +23,7 @@ interface HomeData {
   latestArticles: { slug: string; title: string; category: ClassroomCategory | null; createdAt: Date }[];
   recentNotes: { id: number; slug: string; title: string; status: string; sourceType: string; updatedAt: Date }[];
   topTags: { name: string; uses: number }[];
-  subcategoryToc: {
-    id: number;
-    name: string;
-    slug: string;
-    total: number;
-    sections: { id: number; name: string; articles: { slug: string; title: string; createdAt: Date }[] }[];
-    unsectioned: { slug: string; title: string; createdAt: Date }[];
-  }[];
+  subcategoryToc: TocSubcategory[];
 }
 
 async function loadHome(
@@ -105,100 +103,11 @@ async function loadHome(
       .limit(16);
 
     // Subcategory table of contents: every subcategory (alphabetical),
-    // broken down into its sections (classroom_sections) in their
-    // configured order — the same grouping the subcategory's own landing
-    // page (/[subcategorySlug]) already uses — with a trailing catch-all
-    // for articles not filed under any section. Oldest-first within each
-    // group (matching the landing page's fallback order) so a course-like
-    // subcategory (e.g. "Claude Code Deep Dive") reads start-to-finish
-    // here instead of showing its newest entry first. One query each for
-    // subcategories/sections/articles rather than N+1 per subcategory.
-    const subcatList = await db
-      .select({
-        id: classroomSubcategories.id,
-        name: classroomSubcategories.name,
-        slug: classroomSubcategories.slug,
-      })
-      .from(classroomSubcategories)
-      .orderBy(classroomSubcategories.name);
-
-    const sectionList = await db
-      .select({
-        id: classroomSections.id,
-        name: classroomSections.name,
-        subcategoryId: classroomSections.subcategoryId,
-      })
-      .from(classroomSections)
-      .orderBy(asc(classroomSections.sortOrder), asc(classroomSections.name));
-
-    const subcatArticlesRaw = await db
-      .select({
-        subcategoryId: notes.subcategoryId,
-        sectionId: notes.sectionId,
-        slug: notes.slug,
-        title: notes.title,
-        translatedTitle: noteContent.title,
-        primaryLanguage: notes.primaryLanguage,
-        createdAt: notes.createdAt,
-      })
-      .from(notes)
-      .leftJoin(noteContent, and(eq(noteContent.noteId, notes.id), eq(noteContent.language, lang)))
-      .where(
-        visible
-          ? and(isNotNull(notes.subcategoryId), visible)
-          : isNotNull(notes.subcategoryId),
-      )
-      .orderBy(asc(notes.sectionOrder), asc(notes.createdAt));
-
-    // Cap per group (section, or the unsectioned catch-all), not per
-    // subcategory as a whole — so one heavily-populated section can't crowd
-    // every other section out of the preview. The full, uncapped list is
-    // always one click away at the subcategory's own landing page.
-    const MAX_PER_GROUP = 8;
-    type TocArticle = { slug: string; title: string; createdAt: Date };
-    const bySubcatGroup = new Map<string, TocArticle[]>(); // key: `${subcategoryId}:${sectionId ?? "none"}`
-    const subcatCounts = new Map<number, number>();
-    for (const r of subcatArticlesRaw) {
-      if (!r.subcategoryId) continue;
-      subcatCounts.set(r.subcategoryId, (subcatCounts.get(r.subcategoryId) ?? 0) + 1);
-      const key = `${r.subcategoryId}:${r.sectionId ?? "none"}`;
-      const arr = bySubcatGroup.get(key) ?? [];
-      if (arr.length < MAX_PER_GROUP) {
-        arr.push({
-          slug: r.slug,
-          title: lang === r.primaryLanguage ? r.title : r.translatedTitle || r.title,
-          createdAt: r.createdAt,
-        });
-      }
-      bySubcatGroup.set(key, arr);
-    }
-
-    const sectionsBySubcat = new Map<number, { id: number; name: string }[]>();
-    for (const sec of sectionList) {
-      const arr = sectionsBySubcat.get(sec.subcategoryId) ?? [];
-      arr.push({ id: sec.id, name: sec.name });
-      sectionsBySubcat.set(sec.subcategoryId, arr);
-    }
-
-    const subcategoryToc = subcatList
-      .map((sc) => {
-        const sections = (sectionsBySubcat.get(sc.id) ?? [])
-          .map((sec) => ({
-            id: sec.id,
-            name: sec.name,
-            articles: bySubcatGroup.get(`${sc.id}:${sec.id}`) ?? [],
-          }))
-          .filter((sec) => sec.articles.length > 0);
-        return {
-          id: sc.id,
-          name: sc.name,
-          slug: sc.slug,
-          total: subcatCounts.get(sc.id) ?? 0,
-          sections,
-          unsectioned: bySubcatGroup.get(`${sc.id}:none`) ?? [],
-        };
-      })
-      .filter((sc) => sc.sections.length > 0 || sc.unsectioned.length > 0);
+    // broken down into its sections in their configured order — same
+    // shared grouping (src/lib/classroom/toc.ts) the subcategory's own
+    // landing page (/[subcategorySlug]) and the classroom article side nav
+    // use, kept compact here via HOME_TOC_MAX_PER_GROUP.
+    const subcategoryToc = await loadClassroomToc(isOwner, lang, HOME_TOC_MAX_PER_GROUP);
 
     return {
       data: {
@@ -347,56 +256,31 @@ export default async function Home({
                       : `${sc.total} ${sc.total === 1 ? s.articleOne : s.articleMany}`}
                   </span>
                 </Link>
-                <div className="flex flex-col divide-y divide-border bg-bg-elevated">
+                <div className="flex flex-col gap-3 bg-bg-elevated p-3">
                   {sc.sections.map((sec) => (
-                    <div key={sec.id}>
-                      <p className="px-4 pt-2.5 text-xs font-semibold uppercase tracking-wide text-fg-secondary">
-                        {sec.name}
-                      </p>
-                      <ul className="flex flex-col divide-y divide-border">
-                        {sec.articles.map((a) => (
-                          <li key={a.slug}>
-                            <Link
-                              href={`/classroom/${a.slug}?lang=${lang}`}
-                              className="flex items-center justify-between gap-3 px-4 py-2 text-sm hover:bg-bg transition-colors"
-                            >
-                              <span className="line-clamp-1 text-fg-secondary hover:text-accent transition-colors">
-                                {a.title}
-                              </span>
-                              <span className="shrink-0 text-xs text-fg-secondary">
-                                {formatDate(a.createdAt, dateLocale)}
-                              </span>
-                            </Link>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
+                    <SectionBox key={sec.id} name={sec.name} count={sec.articles.length}>
+                      {sec.articles.map((a) => (
+                        <ArticleRow key={a.slug} slug={a.slug} title={a.title} createdAt={a.createdAt} lang={lang} dateLocale={dateLocale} />
+                      ))}
+                    </SectionBox>
                   ))}
                   {sc.unsectioned.length > 0 && (
-                    <div>
-                      {sc.sections.length > 0 && (
-                        <p className="px-4 pt-2.5 text-xs font-semibold uppercase tracking-wide text-fg-secondary">
-                          {cs.moreArticles}
-                        </p>
-                      )}
-                      <ul className="flex flex-col divide-y divide-border">
+                    sc.sections.length > 0 ? (
+                      <SectionBox name={cs.moreArticles} count={sc.unsectioned.length}>
                         {sc.unsectioned.map((a) => (
-                          <li key={a.slug}>
-                            <Link
-                              href={`/classroom/${a.slug}?lang=${lang}`}
-                              className="flex items-center justify-between gap-3 px-4 py-2 text-sm hover:bg-bg transition-colors"
-                            >
-                              <span className="line-clamp-1 text-fg-secondary hover:text-accent transition-colors">
-                                {a.title}
-                              </span>
-                              <span className="shrink-0 text-xs text-fg-secondary">
-                                {formatDate(a.createdAt, dateLocale)}
-                              </span>
-                            </Link>
-                          </li>
+                          <ArticleRow key={a.slug} slug={a.slug} title={a.title} createdAt={a.createdAt} lang={lang} dateLocale={dateLocale} />
+                        ))}
+                      </SectionBox>
+                    ) : (
+                      // No sections defined for this subcategory at all yet —
+                      // a plain list reads fine on its own without a
+                      // redundant "more articles" binder around everything.
+                      <ul className="flex flex-col divide-y divide-border overflow-hidden rounded-lg border border-border">
+                        {sc.unsectioned.map((a) => (
+                          <ArticleRow key={a.slug} slug={a.slug} title={a.title} createdAt={a.createdAt} lang={lang} dateLocale={dateLocale} />
                         ))}
                       </ul>
-                    </div>
+                    )
                   )}
                 </div>
               </div>
@@ -526,5 +410,59 @@ function EmptyPanel({ children }: { children: React.ReactNode }) {
     <div className="rounded-lg border border-dashed border-border p-6 text-sm text-fg-secondary">
       {children}
     </div>
+  );
+}
+
+/** A section's articles, boxed with its own header bar — the "binder" look
+ * that makes it obvious at a glance where one section ends and the next
+ * begins, instead of a plain uppercase label that reads as just another
+ * line of text sitting flush above the article list. Mirrors the header
+ * bar style the subcategory card itself (and the subcategory's own landing
+ * page, /[subcategorySlug]) already use, just smaller/nested. */
+function SectionBox({
+  name,
+  count,
+  children,
+}: {
+  name: string;
+  count: number;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="overflow-hidden rounded-lg border border-border">
+      <div className="flex items-center justify-between gap-2 bg-bg px-3 py-2">
+        <h4 className="truncate text-xs font-semibold uppercase tracking-wide text-fg">{name}</h4>
+        <span className="shrink-0 rounded-full bg-accent/15 px-2 py-0.5 text-[11px] font-semibold text-accent">
+          {count}
+        </span>
+      </div>
+      <ul className="flex flex-col divide-y divide-border">{children}</ul>
+    </div>
+  );
+}
+
+function ArticleRow({
+  slug,
+  title,
+  createdAt,
+  lang,
+  dateLocale,
+}: {
+  slug: string;
+  title: string;
+  createdAt: Date;
+  lang: Lang;
+  dateLocale?: string;
+}) {
+  return (
+    <li>
+      <Link
+        href={`/classroom/${slug}?lang=${lang}`}
+        className="flex items-center justify-between gap-3 px-3 py-2 text-sm hover:bg-bg transition-colors"
+      >
+        <span className="line-clamp-1 text-fg-secondary hover:text-accent transition-colors">{title}</span>
+        <span className="shrink-0 text-xs text-fg-secondary">{formatDate(createdAt, dateLocale)}</span>
+      </Link>
+    </li>
   );
 }
