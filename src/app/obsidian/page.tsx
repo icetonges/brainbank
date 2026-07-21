@@ -11,6 +11,29 @@ import { isObsidianWebhookConfigured } from "@/lib/obsidian/webhook";
 
 export const dynamic = "force-dynamic";
 
+// drizzle-orm wraps every driver error in a generic "Failed query: <sql>
+// params: ..." message — the actual reason (missing table, auth failure,
+// whatever) is the driver's own error, nested one level down in `.cause`,
+// not in `.message`. Walking the cause chain is the only way to surface
+// it; without this the owner-facing error message is just the SQL text
+// back at them, which is useless for diagnosis.
+function describeError(err: unknown): string {
+  const parts: string[] = [];
+  let current: unknown = err;
+  const seen = new Set<unknown>();
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    if (current instanceof Error) {
+      parts.push(current.message);
+      current = (current as { cause?: unknown }).cause;
+    } else {
+      parts.push(String(current));
+      break;
+    }
+  }
+  return parts.join("\nCaused by: ");
+}
+
 // Mirrors the DB error handling in graph/page.tsx. Without this, a DB
 // error here throws uncaught out of the Server Component and takes down
 // the whole page with Next's generic "Something went wrong" screen. This
@@ -28,7 +51,7 @@ async function loadLatestRun(): Promise<
     return { run, error: null };
   } catch (err) {
     console.error("Failed to load Obsidian sync status:", err);
-    const raw = err instanceof Error ? err.message : String(err);
+    const raw = describeError(err);
     const hint = /relation .* does not exist/i.test(raw)
       ? " (the obsidian_sync_runs table doesn't exist in this database yet — run `npm run db:migrate` or `npm run db:push` against it)"
       : "";
@@ -102,7 +125,7 @@ export default async function ObsidianPage() {
       ) : loadError ? (
         <div className="rounded-lg border border-danger/50 bg-bg-elevated p-5 text-fg-secondary">
           <p className="font-medium text-fg">Couldn&apos;t load sync status.</p>
-          <p className="mt-1 text-sm">{loadError}</p>
+          <p className="mt-1 whitespace-pre-line font-mono text-sm">{loadError}</p>
         </div>
       ) : (
         <div className="rounded-lg border border-border bg-bg-elevated p-5">
