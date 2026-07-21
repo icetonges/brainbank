@@ -20,6 +20,7 @@ const HEIGHT = 560;
 export function GraphView({ nodes, edges }: { nodes: GraphNode[]; edges: GraphEdge[] }) {
   const router = useRouter();
   const [hoveredId, setHoveredId] = useState<number | null>(null);
+  const [query, setQuery] = useState("");
 
   // nodes/edges are refetched server-side per navigation, so array/object
   // identity changes on every load — key the memo off a content fingerprint
@@ -32,86 +33,136 @@ export function GraphView({ nodes, edges }: { nodes: GraphNode[]; edges: GraphEd
     [nodesKey, edgesKey],
   );
 
-  const connected = useMemo(() => {
-    if (hoveredId === null) return null;
-    const ids = new Set<number>([hoveredId]);
+  // Connection count per node — sizes the circle so a well-connected hub
+  // note reads as more important than an isolated one at a glance, instead
+  // of every node looking the same regardless of how it fits in.
+  const degree = useMemo(() => {
+    const d = new Map<number, number>();
+    for (const n of nodes) d.set(n.id, 0);
     for (const e of edges) {
-      if (e.from === hoveredId) ids.add(e.to);
-      if (e.to === hoveredId) ids.add(e.from);
+      d.set(e.from, (d.get(e.from) ?? 0) + 1);
+      d.set(e.to, (d.get(e.to) ?? 0) + 1);
     }
-    return ids;
-  }, [hoveredId, edges]);
+    return d;
+  }, [nodes, edges]);
+  const maxDegree = Math.max(1, ...degree.values());
+
+  const trimmedQuery = query.trim().toLowerCase();
+  const matchIds = useMemo(() => {
+    if (!trimmedQuery) return null;
+    return new Set(
+      nodes.filter((n) => n.title.toLowerCase().includes(trimmedQuery)).map((n) => n.id),
+    );
+  }, [nodes, trimmedQuery]);
+
+  // The "focused" set drives both which labels show and which edges
+  // render at full strength. Hovering a node focuses it + its direct
+  // neighbors; with nothing hovered, a search instead focuses every
+  // title match. With no hover and no search, nothing is focused —
+  // every other force-graph tool (Obsidian included) hides labels by
+  // default past a handful of nodes, because labeling all of them at
+  // once is unreadable (which is exactly what this graph looked like
+  // before: 52 nodes' worth of overlapping text over a 500-edge tangle).
+  const focusIds = useMemo(() => {
+    if (hoveredId !== null) {
+      const ids = new Set<number>([hoveredId]);
+      for (const e of edges) {
+        if (e.from === hoveredId) ids.add(e.to);
+        if (e.to === hoveredId) ids.add(e.from);
+      }
+      return ids;
+    }
+    return matchIds;
+  }, [hoveredId, edges, matchIds]);
 
   return (
-    <svg
-      viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-      className="h-full w-full rounded-lg border border-border bg-bg-elevated"
-      role="img"
-      aria-label="Note connection graph"
-    >
-      <title>Note connection graph</title>
-      <g>
-        {edges.map((e, i) => {
-          const from = positions.get(e.from);
-          const to = positions.get(e.to);
-          if (!from || !to) return null;
-          const dimmed = connected ? !(connected.has(e.from) && connected.has(e.to)) : false;
-          return (
-            <line
-              key={i}
-              x1={from.x}
-              y1={from.y}
-              x2={to.x}
-              y2={to.y}
-              stroke="var(--color-border)"
-              strokeWidth={dimmed ? 1 : 1.5}
-              opacity={dimmed ? 0.25 : 0.8}
-            />
-          );
-        })}
-      </g>
-      <g>
-        {nodes.map((node) => {
-          const p = positions.get(node.id);
-          if (!p) return null;
-          const isHovered = hoveredId === node.id;
-          const dimmed = connected ? !connected.has(node.id) : false;
-          // Labels drawn to the right get clipped by the SVG viewBox for
-          // any node in the right third of the canvas (and force-layout
-          // only keeps the node's own point in bounds, not its label's
-          // text extent) — flip the label to the left of the node there
-          // instead of letting it run off the edge.
-          const flipLeft = p.x > WIDTH * 0.7;
-          return (
-            <g
-              key={node.id}
-              transform={`translate(${p.x}, ${p.y})`}
-              onMouseEnter={() => setHoveredId(node.id)}
-              onMouseLeave={() => setHoveredId(null)}
-              onClick={() => router.push(`/notes/${node.slug}`)}
-              className="cursor-pointer"
-              opacity={dimmed ? 0.35 : 1}
-            >
-              <circle
-                r={isHovered ? 9 : 6}
-                fill={isHovered ? "var(--color-accent)" : "var(--color-fg)"}
-                stroke="var(--color-bg-elevated)"
-                strokeWidth={2}
+    <div className="flex h-full flex-col gap-2">
+      <input
+        type="search"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder="Find a note by title…"
+        className="w-full max-w-sm rounded-md border border-border bg-bg-elevated px-3 py-1.5 text-sm text-fg outline-none focus:border-accent"
+      />
+      <svg
+        viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
+        className="h-full w-full flex-1 rounded-lg border border-border bg-bg-elevated"
+        role="img"
+        aria-label="Note connection graph"
+      >
+        <title>Note connection graph</title>
+        <g>
+          {edges.map((e, i) => {
+            const from = positions.get(e.from);
+            const to = positions.get(e.to);
+            if (!from || !to) return null;
+            const touchesFocus = focusIds ? focusIds.has(e.from) || focusIds.has(e.to) : false;
+            // With something focused, only edges touching it render at
+            // all — otherwise every edge stays in at a faint opacity, just
+            // enough to suggest overall density without drowning out the
+            // nodes themselves.
+            if (focusIds && !touchesFocus) return null;
+            return (
+              <line
+                key={i}
+                x1={from.x}
+                y1={from.y}
+                x2={to.x}
+                y2={to.y}
+                stroke="var(--color-border)"
+                strokeWidth={focusIds ? 1.5 : 1}
+                opacity={focusIds ? 0.85 : 0.2}
               />
-              <text
-                x={flipLeft ? -12 : 12}
-                y={4}
-                textAnchor={flipLeft ? "end" : "start"}
-                fontSize={12}
-                fill={isHovered ? "var(--color-accent)" : "var(--color-fg-secondary)"}
-                className="select-none"
+            );
+          })}
+        </g>
+        <g>
+          {nodes.map((node) => {
+            const p = positions.get(node.id);
+            if (!p) return null;
+            const isHovered = hoveredId === node.id;
+            const isMatch = matchIds?.has(node.id) ?? false;
+            const inFocus = focusIds ? focusIds.has(node.id) : true;
+            const showLabel = focusIds ? focusIds.has(node.id) : false;
+            const baseSize = 4 + ((degree.get(node.id) ?? 0) / maxDegree) * 6;
+            // Labels drawn to the right get clipped by the SVG viewBox for
+            // any node in the right third of the canvas — flip the label
+            // to the left of the node there instead of letting it run off
+            // the edge.
+            const flipLeft = p.x > WIDTH * 0.7;
+            return (
+              <g
+                key={node.id}
+                transform={`translate(${p.x}, ${p.y})`}
+                onMouseEnter={() => setHoveredId(node.id)}
+                onMouseLeave={() => setHoveredId(null)}
+                onClick={() => router.push(`/notes/${node.slug}`)}
+                className="cursor-pointer"
+                opacity={inFocus ? 1 : 0.15}
               >
-                {node.title.length > 28 ? `${node.title.slice(0, 28)}…` : node.title}
-              </text>
-            </g>
-          );
-        })}
-      </g>
-    </svg>
+                <circle
+                  r={isHovered ? baseSize + 3 : baseSize}
+                  fill={isHovered || isMatch ? "var(--color-accent)" : "var(--color-fg)"}
+                  stroke="var(--color-bg-elevated)"
+                  strokeWidth={2}
+                />
+                {showLabel && (
+                  <text
+                    x={flipLeft ? -12 : 12}
+                    y={4}
+                    textAnchor={flipLeft ? "end" : "start"}
+                    fontSize={12}
+                    fill={isHovered || isMatch ? "var(--color-accent)" : "var(--color-fg-secondary)"}
+                    className="select-none"
+                  >
+                    {node.title.length > 28 ? `${node.title.slice(0, 28)}…` : node.title}
+                  </text>
+                )}
+              </g>
+            );
+          })}
+        </g>
+      </svg>
+    </div>
   );
 }

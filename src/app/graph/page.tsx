@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { db, isDatabaseConfigured } from "@/lib/db";
 import { notes, edges as edgesTable } from "@/lib/db/schema";
 import { GraphView } from "@/components/graph-view";
+import { rebuildRelatedEdgesAction } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -51,12 +52,24 @@ export default async function GraphPage() {
 
   return (
     <div className="flex flex-1 flex-col gap-4">
-      <div>
-        <h1 className="text-2xl font-semibold text-fg">Your knowledge graph</h1>
-        <p className="mt-1 text-sm text-fg-secondary">
-          {nodes.length} note{nodes.length === 1 ? "" : "s"} · {edges.length} link
-          {edges.length === 1 ? "" : "s"}. Hover to trace connections, click to open.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold text-fg">Your knowledge graph</h1>
+          <p className="mt-1 text-sm text-fg-secondary">
+            {nodes.length} note{nodes.length === 1 ? "" : "s"} · {edges.length} link
+            {edges.length === 1 ? "" : "s"}. Hover a note (or search) to trace its connections,
+            click to open.
+          </p>
+        </div>
+        <form action={rebuildRelatedEdgesAction}>
+          <button
+            type="submit"
+            title="Recomputes auto-generated tag-based links using the current rule, which skips tags too common to mean anything (e.g. shared by most of your notes). Hand-made [[wikilinks]] are untouched."
+            className="shrink-0 rounded-md border border-border px-3 py-1.5 text-sm font-medium text-fg-secondary hover:border-accent hover:text-accent transition-colors"
+          >
+            Rebuild related links
+          </button>
+        </form>
       </div>
       <div className="min-h-0 flex-1">
         <GraphView nodes={nodes} edges={edges} />
