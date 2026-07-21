@@ -12,11 +12,13 @@ import { isObsidianWebhookConfigured } from "@/lib/obsidian/webhook";
 export const dynamic = "force-dynamic";
 
 // Mirrors the DB error handling in graph/page.tsx. Without this, a DB
-// error here (most likely: the obsidian_sync_runs migration hasn't been
-// pushed to this environment's database yet — see drizzle/0001_*.sql)
-// throws uncaught out of the Server Component and takes down the whole
-// page with Next's generic "Something went wrong" screen instead of a
-// message that says what's actually missing.
+// error here throws uncaught out of the Server Component and takes down
+// the whole page with Next's generic "Something went wrong" screen. This
+// page is owner-only (see the redirect below), so there's no reason to
+// hide the raw driver error behind a vague category guess the way a
+// public-facing page might — show it as-is, that's the fastest path to
+// actually diagnosing whatever's wrong (missing migration, bad
+// DATABASE_URL, Neon project paused/unreachable, etc.).
 async function loadLatestRun(): Promise<
   | { run: typeof obsidianSyncRuns.$inferSelect | undefined; error: null }
   | { run: undefined; error: string }
@@ -26,13 +28,11 @@ async function loadLatestRun(): Promise<
     return { run, error: null };
   } catch (err) {
     console.error("Failed to load Obsidian sync status:", err);
-    return {
-      run: undefined,
-      error:
-        err instanceof Error && /relation .* does not exist/i.test(err.message)
-          ? "The obsidian_sync_runs table doesn't exist in this database yet — run `npm run db:migrate` (or `npm run db:push`) against it."
-          : "Couldn't reach the database to load sync status.",
-    };
+    const raw = err instanceof Error ? err.message : String(err);
+    const hint = /relation .* does not exist/i.test(raw)
+      ? " (the obsidian_sync_runs table doesn't exist in this database yet — run `npm run db:migrate` or `npm run db:push` against it)"
+      : "";
+    return { run: undefined, error: `${raw}${hint}` };
   }
 }
 
