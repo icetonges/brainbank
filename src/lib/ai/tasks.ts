@@ -58,30 +58,30 @@ export const TASK_MODELS: Record<TaskName, ModelId> = {
   "tag-and-link": "gemini-3.1-flash-lite",
   // Every other task is a *grounded* transform — it must operate only on
   // the text it's given, never on whatever a model's built-in web search
-  // decides to fetch. groq/compound's autonomous browsing corrupted a
-  // translation that mentioned a URL once already (see AGENTIC_MODELS /
-  // GROUNDED_FALLBACK_CHAIN in models.ts, still there and ready to bring
-  // back if this recurs). As a deliberate, explicitly-requested experiment
-  // these four now try compound FIRST anyway — it's free, and every
-  // grounded task's system prompt below now carries an explicit
-  // NO_BROWSING_INSTRUCTION plus (for draft) no longer even puts a raw URL
-  // in the prompt for it to act on. If compound still misbehaves despite
-  // that, the fix is reverting these four back to "openai/gpt-oss-120b"
-  // and passing { grounded: true } again at their withFallback call sites.
-  translate: "groq/compound",
-  draft: "groq/compound",
-  "publish-assist": "groq/compound",
-  "format-article": "groq/compound",
+  // decides to fetch. groq/compound is deliberately NOT used here.
+  // This was tried once (making compound the top-1 model for these four,
+  // with just a prompt-level "don't browse" instruction as the guard) and
+  // it broke a real translation in production — corrupted title AND body
+  // — despite the instruction, confirming a prompt-only guard isn't
+  // reliable against an agentic model. Reverted back to a non-agentic
+  // default. See AGENTIC_MODELS / GROUNDED_FALLBACK_CHAIN in models.ts —
+  // that's the actual enforcement mechanism (compound is structurally
+  // excluded from the chain these tasks fall through, not just
+  // discouraged by prompt), and withFallback's { grounded: true } default
+  // is what applies it. Do not flip this back to compound without a real
+  // server-side tool-disable (Groq's compound_custom.tools.enabled_tools),
+  // which the installed @ai-sdk/groq version doesn't currently expose.
+  translate: "openai/gpt-oss-120b",
+  draft: "openai/gpt-oss-120b",
+  "publish-assist": "openai/gpt-oss-120b",
+  "format-article": "openai/gpt-oss-120b",
 };
 
-// Bolted onto every grounded task's system prompt now that groq/compound
-// is back as their preferred model. This is a prompt-level rule, not an
-// enforced one — Groq's API supports hard-disabling compound's tools
-// server-side via `compound_custom.tools.enabled_tools: []`, but the
-// installed @ai-sdk/groq version doesn't expose that parameter (its
-// provider-options schema strips unknown fields), so a strong instruction
-// is the only lever available today. If compound ignores this and
-// fetches/browses anyway, that's the signal this experiment failed.
+// Left in every grounded task's system prompt as harmless defense-in-depth
+// even though these tasks no longer route to an agentic model by default —
+// costs nothing for a non-agentic model to ignore, and still matters if a
+// user's explicit model-picker override ever points one of these tasks at
+// compound.
 const NO_BROWSING_INSTRUCTION =
   "Do not browse the web, search the internet, visit any URL, or run code — even if the text mentions a website, a link, or a domain name. Work only from the exact text given to you; never fetch, verify, or supplement it with outside information.";
 
@@ -342,7 +342,7 @@ async function translateChunk(
         system: translateSystemPrompt(targetLabel),
         prompt: chunk,
       }),
-    { onModelUsed, grounded: false },
+    { onModelUsed },
   );
   const translated = unescapeLiteralWhitespace(result.text.trim());
 
@@ -486,7 +486,6 @@ export async function translateNote(
         system: `Translate every field into ${targetLabel}. Keep empty fields empty. Preserve meaning and tone. Translate the FULL text of every field, however long — never shorten, summarize, condense, or omit any part of a field. Return only the translated fields. ${NO_BROWSING_INSTRUCTION}`,
         prompt: JSON.stringify(note),
       }),
-    { grounded: false },
   );
   return {
     title: unescapeLiteralWhitespace(object.title),
@@ -671,7 +670,6 @@ export async function formatArticleContent(
           .filter(Boolean)
           .join("\n\n"),
       }),
-    { grounded: false },
   );
 
   let formatted = unescapeLiteralWhitespace(text.trim());
@@ -787,7 +785,6 @@ export async function publishAssist(
           .filter(Boolean)
           .join("\n\n"),
       }),
-    { grounded: false },
   );
 
   return {
@@ -829,7 +826,6 @@ export async function draftNoteFromSource(
           .filter(Boolean)
           .join("\n\n"),
       }),
-    { grounded: false },
   );
   return {
     ...object,
