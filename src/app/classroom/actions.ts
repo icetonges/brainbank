@@ -18,6 +18,7 @@ import {
   publishAssist,
   formatArticleContent,
   translateText,
+  translateTextWithMeta,
   type PublishAssistResult,
 } from "@/lib/ai/tasks";
 import { linkWikilinksFromText } from "@/lib/notes/link-wikilinks";
@@ -528,11 +529,17 @@ export async function translateClassroomArticleAction(
   // note.title is always the *original* language's title (see
   // publishClassroomArticle) — translate it alongside the body so the
   // heading isn't left in the wrong language when viewing a translation.
-  const [body, summary, title] = await Promise.all([
-    translateText(sourceContent.bodyMarkdown, target),
+  // The body uses translateTextWithMeta so the article page can show which
+  // model(s) actually did the work (usually one; more than one means the
+  // fallback chain kicked in partway through).
+  const [bodyResult, summary, title] = await Promise.all([
+    translateTextWithMeta(sourceContent.bodyMarkdown, target),
     translateText(sourceContent.summary ?? "", target),
     note.primaryLanguage === target ? Promise.resolve("") : translateText(note.title, target),
   ]);
+  const body = bodyResult.text;
+  const translatedModel = bodyResult.models.join(",") || null;
+  const translatedAt = new Date();
 
   const existing = await db.query.noteContent.findFirst({
     where: and(eq(noteContent.noteId, noteId), eq(noteContent.language, target)),
@@ -540,10 +547,18 @@ export async function translateClassroomArticleAction(
   if (existing) {
     await db
       .update(noteContent)
-      .set({ bodyMarkdown: body, summary, title })
+      .set({ bodyMarkdown: body, summary, title, translatedAt, translatedModel })
       .where(eq(noteContent.id, existing.id));
   } else {
-    await db.insert(noteContent).values({ noteId, language: target, bodyMarkdown: body, summary, title });
+    await db.insert(noteContent).values({
+      noteId,
+      language: target,
+      bodyMarkdown: body,
+      summary,
+      title,
+      translatedAt,
+      translatedModel,
+    });
   }
 
   // Translate the learning guide too.

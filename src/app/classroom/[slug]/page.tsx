@@ -21,6 +21,7 @@ import { PendingFormButton } from "@/components/pending-form-button";
 import { ClassroomSideNav } from "@/components/classroom-side-nav";
 import { regenerateGuideAction, translateClassroomArticleAction } from "../actions";
 import { formatDateTime } from "@/lib/date";
+import { getModel, type ModelId } from "@/lib/ai/models";
 
 export const dynamic = "force-dynamic";
 
@@ -172,6 +173,15 @@ export default async function ClassroomArticlePage({
           )}
         </p>
 
+        {lang !== note.primaryLanguage && content?.translatedAt && (
+          <p className="text-xs text-fg-secondary">
+            {s.translatedPrefix} {formatDateTime(content.translatedAt, dateLocale)}
+            {content.translatedModel && (
+              <> · {s.translatedModelPrefix} {translatedModelNames(content.translatedModel)}</>
+            )}
+          </p>
+        )}
+
         {tagRows.length > 0 && (
           <div className="flex flex-wrap gap-2">
             {tagRows.map((tag) => (
@@ -318,6 +328,23 @@ function GuideSection({
       <div className="p-5">{children}</div>
     </section>
   );
+}
+
+/** note_content.translatedModel is a comma-separated list of ModelId (more
+ * than one means the fallback chain kicked in partway through translating
+ * this article) — render each as its human-readable display name, falling
+ * back to the raw id for anything no longer in the registry. */
+function translatedModelNames(raw: string): string {
+  return raw
+    .split(",")
+    .map((id) => {
+      try {
+        return getModel(id as ModelId).name;
+      } catch {
+        return id;
+      }
+    })
+    .join(" + ");
 }
 
 function iconProps(className = "h-4 w-4 shrink-0") {

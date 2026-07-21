@@ -98,13 +98,15 @@ async function withFallback<T>(
   label: TaskName,
   preferred: ModelId,
   attempt: (model: LanguageModel) => Promise<T>,
-  options: { grounded?: boolean } = {},
+  options: { grounded?: boolean; onModelUsed?: (modelId: ModelId) => void } = {},
 ): Promise<T> {
   const chain = chainFor(preferred, options.grounded ?? true);
   let lastError: unknown;
   for (const modelId of chain) {
     try {
-      return await attempt(resolveModel(modelId));
+      const result = await attempt(resolveModel(modelId));
+      options.onModelUsed?.(modelId);
+      return result;
     } catch (err) {
       lastError = err;
       console.error(`[ai:${label}] ${modelId} failed, falling back to next model in chain`, err);
@@ -307,6 +309,7 @@ async function translateChunk(
   chunk: string,
   target: "en" | "zh",
   modelId: ModelId,
+  onModelUsed?: (id: ModelId) => void,
 ): Promise<string> {
   const targetLabel = target === "zh" ? "Simplified Chinese" : "English";
   const result = await withFallback(
@@ -319,6 +322,7 @@ async function translateChunk(
         system: translateSystemPrompt(targetLabel),
         prompt: chunk,
       }),
+    { onModelUsed },
   );
   const translated = unescapeLiteralWhitespace(result.text.trim());
 
@@ -334,8 +338,8 @@ async function translateChunk(
     const splitAt = findSplitPoint(chunk);
     const [a, b] = [chunk.slice(0, splitAt), chunk.slice(splitAt)];
     const [ta, tb] = await Promise.all([
-      translateChunk(a, target, modelId),
-      translateChunk(b, target, modelId),
+      translateChunk(a, target, modelId, onModelUsed),
+      translateChunk(b, target, modelId, onModelUsed),
     ]);
     return `${ta}${tb}`;
   }
@@ -343,17 +347,18 @@ async function translateChunk(
   return translated;
 }
 
-export async function translateText(
+async function translateWithMeta(
   text: string,
   target: "en" | "zh",
-  modelId?: ModelId,
+  modelId: ModelId | undefined,
+  onModelUsed?: (id: ModelId) => void,
 ): Promise<string> {
   if (!text.trim()) return "";
   const chosenModel = modelId ?? TASK_MODELS.translate;
   const chunks = chunkMarkdown(text, TRANSLATE_CHUNK_MAX_CHARS);
 
   if (chunks.length <= 1) {
-    return translateChunk(text, target, chosenModel);
+    return translateChunk(text, target, chosenModel, onModelUsed);
   }
 
   // Chunks are independent, so translate them concurrently — Promise.all
@@ -361,9 +366,33 @@ export async function translateText(
   // joining is still safe. Each chunk goes through the full model
   // fallback chain and the recursive length-guard on its own.
   const translatedChunks = await Promise.all(
-    chunks.map((chunk) => translateChunk(chunk, target, chosenModel)),
+    chunks.map((chunk) => translateChunk(chunk, target, chosenModel, onModelUsed)),
   );
   return translatedChunks.join("");
+}
+
+export async function translateText(
+  text: string,
+  target: "en" | "zh",
+  modelId?: ModelId,
+): Promise<string> {
+  return translateWithMeta(text, target, modelId);
+}
+
+/**
+ * Same as translateText, but also reports which model(s) actually
+ * produced the translation (more than one means the fallback chain kicked
+ * in partway through) — used by the classroom article translate action to
+ * record "translated on <date> by <model>" against the saved content.
+ */
+export async function translateTextWithMeta(
+  text: string,
+  target: "en" | "zh",
+  modelId?: ModelId,
+): Promise<{ text: string; models: ModelId[] }> {
+  const used = new Set<ModelId>();
+  const result = await translateWithMeta(text, target, modelId, (id) => used.add(id));
+  return { text: result, models: Array.from(used) };
 }
 
 export interface TranslatedNote {

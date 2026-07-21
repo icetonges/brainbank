@@ -181,6 +181,16 @@ export const noteContent = pgTable("note_content", {
   why: text("why").default(""),
   other: text("other").default(""),
   summary: text("summary").default(""),
+  // Set only when this row was produced by the article page's AI translate
+  // button (translateClassroomArticleAction) — null for a hand-authored
+  // original-language row. Lets the article page show "Translated <date>
+  // by <model>" on the translated language only, and lets a future re-run
+  // tell a stale translation apart from a fresh one.
+  translatedAt: timestamp("translated_at", { withTimezone: true }),
+  // Comma-separated ModelId(s) actually used (see ModelId in lib/ai/models.ts).
+  // Usually one; more than one means the fallback chain kicked in partway
+  // through this row's chunks.
+  translatedModel: text("translated_model"),
 });
 
 export const tags = pgTable("tags", {

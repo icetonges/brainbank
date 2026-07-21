@@ -102,6 +102,8 @@ const en = {
     translateToZh: "翻译为中文 (Translate to Chinese)",
     translateToEn: "Translate to English",
     translating: "Translating…",
+    translatedPrefix: "AI-translated on",
+    translatedModelPrefix: "by",
     // composer
     newTitle: "New AI Classroom article",
     newDescription:
@@ -252,6 +254,8 @@ const zh: typeof en = {
     translateToZh: "翻译为中文",
     translateToEn: "Translate to English (翻译为英文)",
     translating: "翻译中…",
+    translatedPrefix: "AI 翻译于",
+    translatedModelPrefix: "使用",
     newTitle: "新建 AI 课堂文章",
     newDescription:
       "一个输入框搞定一切——撰写或粘贴任意格式的内容、链接、YouTube 视频、图片和文档（pdf、docx、xlsx、csv、pptx、txt、md、json）。网址和文件会自动摄取——只留正文、去除杂讯。保存后 AI 会把它重写成结构清晰、可直接发布的文章（标题、分节、要点——图片和事实原样保留），并生成学习地图、动手步骤和三大推荐资源。",
