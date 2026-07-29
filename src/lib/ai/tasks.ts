@@ -600,9 +600,24 @@ export async function translateNote(
 const ASSIST_SYSTEM_PROMPT =
   "You are the AI assist panel inside brainbank, a personal knowledge base. Help the user draft or refine a note's What (the concept/fact), How (mechanism or steps), and Why (context/reasoning). Be concise and concrete; prefer structured, scannable answers over long prose.";
 
+// Used by the /llm page's chatbox — a general-purpose chat, not the
+// narrower note-drafting assist above. Deliberately doesn't claim this app
+// hands it retrieval over brainbank's own notes (it doesn't — nothing here
+// implements that), only what's actually true: the underlying agent-server
+// key has tools scope (see "local API deployment.md"), so the model can
+// autonomously call its own configured knowledge-base/skill tools
+// server-side if it decides to. Overstating that in the prompt would just
+// train the model to claim capabilities it may not have.
+const KNOWLEDGE_CHAT_SYSTEM_PROMPT =
+  "You are the local chat assistant on brainbank's /llm page, running on the user's self-hosted agent-server — no external API, nothing leaves their machine. Your API key has tool-calling enabled, so you may autonomously use whatever knowledge-base search or skills your own configuration exposes when it's actually useful, not by default for every message. Be concise and concrete; prefer structured, scannable answers over long prose.";
+
+type AssistContext = "note" | "knowledge";
+
 /**
- * Streaming chat behind the AI Assist panel. Unlike the other tasks this
- * can't just retry-and-return, because the point is to pipe tokens to the
+ * Streaming chat behind the AI Assist panel (context: "note") and the /llm
+ * page's chatbox (context: "knowledge") — same chain and streaming
+ * mechanics, different system prompt. Unlike the other tasks this can't
+ * just retry-and-return, because the point is to pipe tokens to the
  * client as they arrive — so the fallback chain is applied to the *start*
  * of the stream: each model in chainFor() is tried in turn, and we peek
  * the first chunk before committing to a response. A model that errors
@@ -617,8 +632,10 @@ const ASSIST_SYSTEM_PROMPT =
 export async function streamAssist(
   messages: ModelMessage[],
   modelId?: ModelId,
+  context: AssistContext = "note",
 ): Promise<Response> {
   const chain = chainFor(modelId ?? TASK_MODELS.assist, false);
+  const systemPrompt = context === "knowledge" ? KNOWLEDGE_CHAT_SYSTEM_PROMPT : ASSIST_SYSTEM_PROMPT;
   let lastError: unknown;
 
   for (const id of chain) {
@@ -628,7 +645,7 @@ export async function streamAssist(
       const result = streamText({
         model: resolveModel(id),
         maxOutputTokens: MAX_OUTPUT_TOKENS,
-        system: ASSIST_SYSTEM_PROMPT,
+        system: systemPrompt,
         messages,
       });
       reader = result.textStream.getReader();

@@ -18,6 +18,13 @@ import { getModel, type ModelId, type ProviderId } from "./models";
 // deployment.md".
 const DEFAULT_LOCAL_MODEL = "qwen3.6:35b-a3b";
 
+/** The model tag actually sent to agent-server — LOCAL_LLM_MODEL if set,
+ * else DEFAULT_LOCAL_MODEL. Exported so the /api/ai/health route can show
+ * it without duplicating this fallback. */
+export function localModelTag(): string {
+  return process.env.LOCAL_LLM_MODEL || DEFAULT_LOCAL_MODEL;
+}
+
 function local() {
   const baseURL = process.env.LOCAL_LLM_FUNNEL_URL;
   const apiKey = process.env.LOCAL_LLM_SHARED_SECRET;
@@ -51,10 +58,7 @@ export function resolveModel(modelId: ModelId): LanguageModel {
   // slug — the actual model tag sent to agent-server is whatever
   // LOCAL_LLM_MODEL says (falling back to DEFAULT_LOCAL_MODEL), so
   // switching local models is an env var change, not a code change.
-  const wireModelId =
-    info.provider === "local"
-      ? process.env.LOCAL_LLM_MODEL || DEFAULT_LOCAL_MODEL
-      : info.id;
+  const wireModelId = info.provider === "local" ? localModelTag() : info.id;
   return client(wireModelId);
 }
 
