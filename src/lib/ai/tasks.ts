@@ -652,8 +652,43 @@ export async function streamAssist(
       first = await reader.read();
     } catch (err) {
       lastError = err;
-      console.error(`[ai:assist] ${id} failed before first token, falling back`, err);
-      continue;
+      console.error(
+        `[ai:assist] ${id} failed before first token (streaming), trying a single non-streaming call against the same model before moving on`,
+        err,
+      );
+      // Real streaming (stream: true in the wire request — see
+      // requestBodyValues in the AI SDK's own error log) has been observed
+      // failing specifically against agent-server/Ollama with a 502
+      // "agent loop failed: Expecting value: line 1 column 1 (char 0)" —
+      // that exact message is Python's json.loads("") error, and it lines
+      // up with a known upstream Ollama bug (ollama/ollama#9084, #9092):
+      // enabling tools breaks stream:true on its OpenAI-compatible /v1
+      // endpoint, silently returning one complete block instead of real
+      // SSE chunks, which agent_loop.py's incremental parser then chokes
+      // on. Our agent-server key has tools scope (see "local API
+      // deployment.md"), so every request is in the affected shape.
+      // generateText's doGenerate call never sends stream:true, so it
+      // sidesteps that path entirely — worth trying before giving up on
+      // this model. The client-facing shape doesn't change: it still gets
+      // a plain Response it reads as a stream, just delivered in one
+      // chunk instead of progressively, since generateText waits for the
+      // complete response before returning (see AI SDK docs: generateText
+      // vs streamText).
+      try {
+        const { text } = await generateText({
+          model: resolveModel(id),
+          maxOutputTokens: MAX_OUTPUT_TOKENS,
+          system: systemPrompt,
+          messages,
+        });
+        return new Response(text, {
+          headers: { "Content-Type": "text/plain; charset=utf-8" },
+        });
+      } catch (fallbackErr) {
+        lastError = fallbackErr;
+        console.error(`[ai:assist] ${id} non-streaming fallback also failed, falling back to next model in chain`, fallbackErr);
+        continue;
+      }
     }
 
     const encoder = new TextEncoder();
