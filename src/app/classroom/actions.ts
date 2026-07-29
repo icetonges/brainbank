@@ -27,18 +27,14 @@ import { eq, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
-// translateClassroomArticleAction can now run several sequential AI calls
-// in a row (each article-body chunk, then summary, then title, then up to
-// two guide fields — see that action below for why this changed from
-// Promise.all to sequential dispatch), each individually bounded by
-// TASK_TIMEOUT_MS in tasks.ts but with no outer bound on this file before
-// this line existed — it just inherited whatever this Vercel project's
-// account-level default happens to be. Setting it explicitly to this
-// plan's actual ceiling (confirmed by the exact "Task timed out after 300
-// seconds" kill observed on a different route before that route got its
-// own maxDuration) means a long article's translation gets the full
-// budget the plan allows rather than an implicit, easy-to-lower default.
-export const maxDuration = 300;
+// NOTE: a maxDuration export was tried here as a backstop (matching the one
+// on /api/ai/assist/route.ts) but "use server" files may only export async
+// functions — Turbopack fails the whole module (and cascades to every
+// importer) if a plain const is exported alongside the actions. This file
+// runs on whatever this Vercel project's account-level default duration
+// is; the real fix for translation timing out is the sequential (not
+// Promise.all) AI-call dispatch below, which removes the queue-induced
+// early-timeout failure mode without needing a longer ceiling.
 
 async function requireOwner() {
   const session = await auth();

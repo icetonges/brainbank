@@ -10,8 +10,9 @@ import { linkWikilinksFromText } from "@/lib/notes/link-wikilinks";
 import { detectPrimaryLanguage } from "@/lib/intake";
 import { translateNote } from "@/lib/ai/tasks";
 
-// Same reasoning as the identical export in classroom/actions.ts.
-export const maxDuration = 300;
+// NOTE: see the equivalent comment in classroom/actions.ts — a maxDuration
+// export here broke the build ("use server" files may only export async
+// functions), so this file runs on the account-level default duration.
 
 export async function createNote(formData: FormData) {
   const session = await auth();
