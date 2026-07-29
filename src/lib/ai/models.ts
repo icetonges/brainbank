@@ -3,23 +3,22 @@
 // The single source of truth for which models this app can call. Nothing
 // in the app talks to a provider SDK directly — everything goes through
 // resolveModel() (providers.ts) and runTask() (tasks.ts), so adding a
-// model here (including a future local/self-hosted one, see PLAN.md §6 and
-// §14) is the only step needed to make it selectable everywhere.
+// model here is the only step needed to make it selectable everywhere.
+//
+// FOR NOW, this registry holds only the local self-hosted model — Google/
+// Groq/Anthropic were deliberately pulled out (per explicit instruction)
+// so the local agent-server is the only place any AI feature can call,
+// not just the preferred/first-tried one in a fallback chain. The
+// fallback-chain machinery below (FALLBACK_CHAIN, GROUNDED_FALLBACK_CHAIN,
+// OBJECT_FALLBACK_CHAIN, AGENTIC_MODELS, NO_STRUCTURED_OUTPUT_MODELS) is
+// left in place even though it only has one model to chain through right
+// now — it costs nothing to keep, and re-adding a provider later is just
+// adding a provider() factory in providers.ts, a MODELS entry, and a line
+// in FALLBACK_CHAIN, same as before this removal.
 
-export type ProviderId = "local" | "google" | "groq" | "anthropic";
+export type ProviderId = "local";
 
-export type ModelId =
-  | "local/default"
-  | "gemini-3.5-flash"
-  | "gemini-3.1-flash-lite"
-  | "gemini-2.5-flash"
-  | "groq/compound"
-  | "openai/gpt-oss-120b"
-  | "openai/gpt-oss-20b"
-  | "qwen/qwen3.6-27b"
-  | "claude-sonnet-5"
-  | "claude-opus-4-8"
-  | "claude-haiku-4-5-20251001";
+export type ModelId = "local/default";
 
 export interface ModelInfo {
   id: ModelId;
@@ -60,187 +59,20 @@ export const MODELS: ModelInfo[] = [
     isDefault: true,
     badge: "Local",
   },
-
-  // Google Gemini (via Google AI Studio)
-  {
-    id: "gemini-3.5-flash",
-    name: "Gemini 3.5 Flash",
-    provider: "google",
-    providerLabel: "Google",
-    providerColor: "#4285f4",
-    inputPricePer1M: 1.5,
-    outputPricePer1M: 9.0,
-    contextWindow: "1M",
-    description:
-      "Flagship value model - ultimate balance of intelligence, speed, and deep thinking capabilities.",
-    isFree: false,
-    supportsVision: true,
-    badge: "Recommended",
-  },
-  {
-    id: "gemini-3.1-flash-lite",
-    name: "Gemini 3.1 Flash-Lite",
-    provider: "google",
-    providerLabel: "Google",
-    providerColor: "#4285f4",
-    inputPricePer1M: 0.25,
-    outputPricePer1M: 1.5,
-    contextWindow: "1M",
-    description:
-      "High-volume agentic tasks - ultra-low latency option optimized for massive scale.",
-    isFree: false,
-    supportsVision: true,
-  },
-  {
-    id: "gemini-2.5-flash",
-    name: "Gemini 2.5 Flash",
-    provider: "google",
-    providerLabel: "Google",
-    providerColor: "#4285f4",
-    inputPricePer1M: 0.3,
-    outputPricePer1M: 2.5,
-    contextWindow: "1M",
-    description:
-      "Proven reasoning staple - exceptional price-to-performance ratio with 1M token context.",
-    isFree: false,
-    supportsVision: true,
-  },
-
-  // Groq -- Compound (agentic, built-in web search + code execution).
-  // GA since Oct 1, 2025 — 'compound-beta' no longer exists.
-  {
-    id: "groq/compound",
-    name: "Compound",
-    provider: "groq",
-    providerLabel: "Groq",
-    providerColor: "#f55036",
-    inputPricePer1M: 0,
-    outputPricePer1M: 0,
-    description:
-      "Agentic system - built-in web search & code execution - up to 10 tool calls/request",
-    contextWindow: "128K",
-    isFree: true,
-    supportsVision: false,
-    badge: "Agentic",
-  },
-
-  // Groq -- OpenAI GPT-OSS. Groq's official replacements for the
-  // deprecated Llama 3.x/4 lineup.
-  {
-    id: "openai/gpt-oss-120b",
-    name: "GPT-OSS 120B",
-    provider: "groq",
-    providerLabel: "Groq",
-    providerColor: "#f55036",
-    inputPricePer1M: 0.15,
-    outputPricePer1M: 0.6,
-    description:
-      "Flagship open-weight reasoning model - replaces Llama 4 Scout & Llama 3.3 70B - 128K",
-    contextWindow: "128K",
-    isFree: false,
-    supportsVision: false,
-    badge: "Recommended",
-  },
-  {
-    id: "openai/gpt-oss-20b",
-    name: "GPT-OSS 20B",
-    provider: "groq",
-    providerLabel: "Groq",
-    providerColor: "#f55036",
-    inputPricePer1M: 0.075,
-    outputPricePer1M: 0.3,
-    description:
-      "Lightweight & ultra-fast (~1000 t/s) - replaces Llama 3.1 8B Instant - 128K",
-    contextWindow: "128K",
-    isFree: false,
-    supportsVision: false,
-    badge: "Fast",
-  },
-  {
-    id: "qwen/qwen3.6-27b",
-    name: "Qwen 3.6 27B",
-    provider: "groq",
-    providerLabel: "Groq",
-    providerColor: "#f55036",
-    inputPricePer1M: 0.6,
-    outputPricePer1M: 3.0,
-    description:
-      "Multimodal (text + vision) - thinking/non-thinking modes - Groq preview - only vision option since Llama 4 Scout retires",
-    contextWindow: "128K",
-    isFree: false,
-    supportsVision: true,
-    badge: "Preview",
-  },
-
-  // Anthropic Claude (paid)
-  {
-    id: "claude-sonnet-5",
-    name: "Claude Sonnet 5",
-    provider: "anthropic",
-    providerLabel: "Anthropic",
-    providerColor: "#c85a3a",
-    inputPricePer1M: 2,
-    outputPricePer1M: 10,
-    description:
-      "Balanced performance - 200K - intro pricing through 8/31/26, then $3/$15",
-    contextWindow: "200K",
-    isFree: false,
-    supportsVision: true,
-    badge: "Balanced",
-  },
-  {
-    id: "claude-opus-4-8",
-    name: "Claude Opus 4.8",
-    provider: "anthropic",
-    providerLabel: "Anthropic",
-    providerColor: "#c85a3a",
-    inputPricePer1M: 5,
-    outputPricePer1M: 25,
-    description: "Most capable - 200K",
-    contextWindow: "200K",
-    isFree: false,
-    supportsVision: true,
-  },
-  {
-    id: "claude-haiku-4-5-20251001",
-    name: "Claude Haiku 4.5",
-    provider: "anthropic",
-    providerLabel: "Anthropic",
-    providerColor: "#c85a3a",
-    inputPricePer1M: 1,
-    outputPricePer1M: 5,
-    description: "Fastest Anthropic model - 200K",
-    contextWindow: "200K",
-    isFree: false,
-    supportsVision: true,
-  },
 ];
 
 // --- FALLBACK CHAIN ---
 //
 // The order tasks.ts tries models in when a call fails (rate limit, spend
 // cap, outage, whatever) — not just a config table but an actual runtime
-// fallback (see withFallback() in tasks.ts). The local self-hosted model
-// goes first (private, free, no external API) — but it's a single Mac
-// behind a Tailscale Funnel, so it's also the entry most likely to be
-// unreachable (asleep, agent-server not running, Funnel down). Free/cheap
-// Groq models go next since leaning on them hard costs nothing; paid
-// providers are the fallback of last resort. A task's preferred model (its
-// TASK_MODELS entry, or an explicit override from the UI) is always tried
-// first — this list is what it falls through to after that, in order.
-export const FALLBACK_CHAIN: ModelId[] = [
-  "local/default", // free, private, self-hosted — tried first, may be asleep/unreachable
-  "groq/compound", // free, agentic, most capable free-tier option
-  "openai/gpt-oss-120b", // groq flagship open-weight reasoning
-  "qwen/qwen3.6-27b", // groq, adds vision support
-  "openai/gpt-oss-20b", // groq, fastest/cheapest
-  "gemini-2.5-flash",
-  "gemini-3.1-flash-lite",
-  "gemini-3.5-flash",
-  "claude-haiku-4-5-20251001",
-  "claude-sonnet-5",
-  "claude-opus-4-8",
-];
+// fallback (see withFallback() in tasks.ts). Only local/default is
+// registered right now, so this chain has exactly one entry and there is
+// no real fallback destination — if the Mac is asleep or agent-server is
+// unreachable, every AI feature fails outright instead of quietly using a
+// different provider. That's the accepted tradeoff of removing every
+// other model; re-add entries here (and a matching MODELS/providers.ts
+// entry) to restore redundancy.
+export const FALLBACK_CHAIN: ModelId[] = ["local/default"];
 
 export const DEFAULT_MODEL_ID: ModelId =
   MODELS.find((m) => m.isDefault)?.id ?? FALLBACK_CHAIN[0];
@@ -249,23 +81,50 @@ export const DEFAULT_MODEL_ID: ModelId =
 //
 // Models with autonomous tool use (web search, code execution) baked into
 // the model itself by the provider, not something the caller opts into —
-// groq/compound's whole pitch is that it decides on its own, mid-request,
-// whether to search the web or run code. That's a reasonable feature for
-// the open-ended AI Assist chat, but wrong for every other task in this
-// app: translate/summarize/tag/draft/format/publish-assist all promise to
-// operate ONLY on the text they were given. Point one of them at an
-// agentic model and a note about topic X can silently mutate mid-task
-// into a summary of whatever the model found by searching for X instead —
-// which is exactly what happened when compound became the default/first
-// fallback for every task, not just assist (translate pulled in live page
-// content it noticed a URL for instead of translating the given text).
-export const AGENTIC_MODELS: ModelId[] = ["groq/compound"];
+// this mattered when groq/compound was registered (it decided on its own,
+// mid-request, whether to search the web or run code, which broke
+// grounded tasks like translate that must operate only on the text they
+// were given — see git history for the incident). No agentic model is
+// currently registered, so this is empty, but the exclusion mechanism
+// (GROUNDED_FALLBACK_CHAIN below, applied via withFallback's `grounded`
+// option in tasks.ts) stays in place for when one is re-added.
+export const AGENTIC_MODELS: ModelId[] = [];
 
 /** FALLBACK_CHAIN with agentic models removed — what every task except
  * the AI Assist chat actually falls through (see withFallback in
  * tasks.ts). */
 export const GROUNDED_FALLBACK_CHAIN: ModelId[] = FALLBACK_CHAIN.filter(
   (id) => !AGENTIC_MODELS.includes(id),
+);
+
+// --- MODELS THAT CAN'T BE TRUSTED FOR generateObject ---
+//
+// generateObject (tag-and-link, draft, publish-assist, and translate's
+// structured note fields) needs the model to actually honor a JSON schema,
+// not just "usually return JSON". local/default has been observed
+// returning a schema-non-conformant response (tags as a comma-separated
+// string instead of an array, resources as strings instead of
+// {title,url,description} objects) — since it's the only registered
+// model, it stays in the chain regardless (excluding it here would mean
+// generateObject tasks have nowhere to go at all). The fix lives in
+// tasks.ts instead: every generateObject system prompt spells out the
+// exact JSON shape with a concrete example, and the schemas use
+// z.preprocess() to coerce the specific shape mistakes observed (string
+// -> array, string -> best-effort object) before validation runs, so a
+// near-miss response still gets used instead of being thrown out.
+//
+// This list is for models with a *structural*, unpromptable rejection
+// (e.g. the Groq qwen model formerly registered here hard-rejected
+// `response_format: json_schema` with a 400 no matter what the prompt
+// said) — worth excluding on sight since retrying is pointless. Nothing
+// currently registered fits that description.
+export const NO_STRUCTURED_OUTPUT_MODELS: ModelId[] = [];
+
+/** GROUNDED_FALLBACK_CHAIN with the models in NO_STRUCTURED_OUTPUT_MODELS
+ * removed — what every generateObject-based task (tag-and-link, draft,
+ * publish-assist, translate's structured note fields) falls through. */
+export const OBJECT_FALLBACK_CHAIN: ModelId[] = GROUNDED_FALLBACK_CHAIN.filter(
+  (id) => !NO_STRUCTURED_OUTPUT_MODELS.includes(id),
 );
 
 export function getModel(id: ModelId): ModelInfo {

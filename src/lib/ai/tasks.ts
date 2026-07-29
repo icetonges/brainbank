@@ -12,6 +12,8 @@ import {
   DEFAULT_MODEL_ID,
   FALLBACK_CHAIN,
   GROUNDED_FALLBACK_CHAIN,
+  NO_STRUCTURED_OUTPUT_MODELS,
+  OBJECT_FALLBACK_CHAIN,
   type ModelId,
 } from "./models";
 import { classroomCategoryEnum, type ClassroomCategory } from "@/lib/db/schema";
@@ -36,9 +38,14 @@ import { classroomCategoryEnum, type ClassroomCategory } from "@/lib/db/schema";
 // "Chain" isn't just naming — every task actually runs through
 // withFallback() below, which retries against FALLBACK_CHAIN (models.ts)
 // if the preferred model's call fails (rate limit, spend cap, outage).
-// Before this, a single provider error (e.g. Gemini hitting its monthly
-// spend cap) took the whole task down with it even though other
-// registered — and in some cases free — models were available.
+// Only local/default is registered right now (every other provider was
+// pulled out per explicit instruction — see models.ts's header comment),
+// so FALLBACK_CHAIN is a single entry and there's currently no real
+// fallback destination: if the Mac is asleep or agent-server is
+// unreachable, a task fails outright instead of using a different
+// provider. The machinery still runs the same way it would with more
+// models registered, so restoring redundancy later is just adding entries
+// back to models.ts/providers.ts.
 
 export type TaskName =
   | "assist"
@@ -58,30 +65,26 @@ export type TaskName =
 export const TASK_MODELS: Record<TaskName, ModelId> = {
   // assist is the one task that was always allowed an agentic,
   // web-searching model — it's an open-ended chat helper, not a transform
-  // over fixed input. It still tries the local model first like every
-  // other task; the difference is only in what it falls through to next
-  // (the full FALLBACK_CHAIN, including groq/compound) if local is
-  // unreachable — see chainFor()'s grounded=false path.
+  // over fixed input. No agentic model is currently registered (see
+  // AGENTIC_MODELS in models.ts), so this distinction is dormant right
+  // now, but the plumbing (chainFor()'s grounded=false path) is kept for
+  // when one is added back — an agentic model must never become the
+  // preferred/fallback model for the grounded tasks below.
   assist: DEFAULT_MODEL_ID,
   summarize: DEFAULT_MODEL_ID,
   "tag-and-link": DEFAULT_MODEL_ID,
   // Every other task is a *grounded* transform — it must operate only on
   // the text it's given, never on whatever a model's built-in web search
-  // decides to fetch. groq/compound is deliberately NOT used here.
-  // This was tried once (making compound the top-1 model for these four,
-  // with just a prompt-level "don't browse" instruction as the guard) and
-  // it broke a real translation in production — corrupted title AND body
-  // — despite the instruction, confirming a prompt-only guard isn't
-  // reliable against an agentic model. Reverted back to a non-agentic
-  // default. See AGENTIC_MODELS / GROUNDED_FALLBACK_CHAIN in models.ts —
-  // that's the actual enforcement mechanism (compound is structurally
-  // excluded from the chain these tasks fall through, not just
-  // discouraged by prompt), and withFallback's { grounded: true } default
-  // is what applies it. Do not flip this back to compound without a real
-  // server-side tool-disable (Groq's compound_custom.tools.enabled_tools),
-  // which the installed @ai-sdk/groq version doesn't currently expose.
-  // The local model is not agentic either, so it's safe as the preferred
-  // model for all four of these.
+  // decides to fetch. This mattered concretely when Groq's agentic
+  // "compound" model was registered: making it the top-1 model for these
+  // four tasks, guarded by only a prompt-level "don't browse" instruction,
+  // broke a real translation in production (corrupted title AND body)
+  // despite the instruction — a prompt-only guard isn't reliable against
+  // an agentic model. See AGENTIC_MODELS / GROUNDED_FALLBACK_CHAIN in
+  // models.ts for the actual (structural, not just prompted) enforcement
+  // mechanism, applied here via withFallback's { grounded: true } default.
+  // No agentic model is currently registered, so local is safe as the
+  // preferred model for all four of these regardless.
   translate: DEFAULT_MODEL_ID,
   draft: DEFAULT_MODEL_ID,
   "publish-assist": DEFAULT_MODEL_ID,
@@ -105,11 +108,29 @@ const NO_BROWSING_INSTRUCTION =
  * the first grounded model instead of honored — letting a "translate
  * this" call quietly fetch and blend in live web content is a
  * correctness bug, not a preference to respect.
+ *
+ * `objectMode` additionally strips NO_STRUCTURED_OUTPUT_MODELS (models.ts)
+ * out of the chain entirely — for generateObject calls, a model that's
+ * known to not honor a JSON schema isn't a "might fail, worth trying"
+ * candidate, it's a guaranteed Zod validation failure every time, so
+ * there's no reason to ever spend a full (often slow) generation on it. If
+ * an explicit override still asks for one anyway, it's swapped out the
+ * same way an agentic-model override is for grounded tasks.
  */
-function chainFor(preferred: ModelId, grounded: boolean): ModelId[] {
-  const chain = grounded ? GROUNDED_FALLBACK_CHAIN : FALLBACK_CHAIN;
-  const safePreferred =
-    grounded && AGENTIC_MODELS.includes(preferred) ? chain[0] : preferred;
+function chainFor(
+  preferred: ModelId,
+  grounded: boolean,
+  objectMode = false,
+): ModelId[] {
+  const chain = objectMode
+    ? OBJECT_FALLBACK_CHAIN
+    : grounded
+      ? GROUNDED_FALLBACK_CHAIN
+      : FALLBACK_CHAIN;
+  const unsafePreferred =
+    (grounded && AGENTIC_MODELS.includes(preferred)) ||
+    (objectMode && NO_STRUCTURED_OUTPUT_MODELS.includes(preferred));
+  const safePreferred = unsafePreferred ? chain[0] : preferred;
   return [safePreferred, ...chain.filter((id) => id !== safePreferred)];
 }
 
@@ -121,15 +142,20 @@ function chainFor(preferred: ModelId, grounded: boolean): ModelId[] {
  * rate limit, or spend cap no longer takes down every AI feature that
  * defaults to that model. `grounded` defaults to true — pass `false` only
  * for tasks (currently just assist) where an agentic, web-searching model
- * is acceptable.
+ * is acceptable. Pass `objectMode: true` for generateObject calls — see
+ * chainFor's doc comment.
  */
 async function withFallback<T>(
   label: TaskName,
   preferred: ModelId,
   attempt: (model: LanguageModel) => Promise<T>,
-  options: { grounded?: boolean; onModelUsed?: (modelId: ModelId) => void } = {},
+  options: {
+    grounded?: boolean;
+    objectMode?: boolean;
+    onModelUsed?: (modelId: ModelId) => void;
+  } = {},
 ): Promise<T> {
-  const chain = chainFor(preferred, options.grounded ?? true);
+  const chain = chainFor(preferred, options.grounded ?? true, options.objectMode ?? false);
   let lastError: unknown;
   for (const modelId of chain) {
     try {
@@ -145,6 +171,71 @@ async function withFallback<T>(
     ? lastError
     : new Error(`[ai:${label}] every model in the fallback chain failed`);
 }
+
+// --- SCHEMA COERCION FOR generateObject FIELDS ---
+//
+// The local self-hosted model (and possibly others without real
+// structured-output support) is instructed via the schema/prompt to
+// return a JSON array, but sometimes answers with a plain string instead
+// (e.g. tags as "one, two, three" rather than ["one","two","three"]) —
+// observed in production against local/default's publish-assist output.
+// The system prompts below now spell out the exact shape explicitly, which
+// fixes most of it, but z.preprocess() here is the backstop: it runs
+// before schema validation, so a string in an array slot is coerced into
+// an array instead of failing NoObjectGeneratedError and burning a
+// fallback attempt on a different (paid) model over one shape mistake.
+// Real arrays pass through untouched.
+function arrayOfStrings(description: string) {
+  return z.preprocess((val) => {
+    if (typeof val === "string") {
+      return val
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+    }
+    return val;
+  }, z.array(z.string()).describe(description));
+}
+
+// Same problem, one level deeper: publishAssist's `resources` needs an
+// array of {title,url,description} objects, but a weaker/local model can
+// answer with an array of plain description strings instead (also
+// observed in production). Best-effort reconstruction from a string
+// (pull out an embedded URL if present, use the leading text as the
+// title) is not as good as the model returning real objects — which is
+// why the system prompt below asks for that explicitly and shows an
+// example — but it means an otherwise-good response still validates and
+// gets used instead of being thrown away entirely.
+function resourceItemSchema() {
+  return z.preprocess((val) => {
+    if (typeof val === "string") {
+      const urlMatch = val.match(/https?:\/\/[^\s)\]"'<>]+/);
+      const titleMatch = val.match(/^[\d.\s*]*\**\s*([^*:：\-–]{1,80})/);
+      return {
+        title: (titleMatch?.[1] ?? val.slice(0, 60)).trim(),
+        url: urlMatch?.[0] ?? "",
+        description: val,
+      };
+    }
+    return val;
+  }, z.object({
+    title: z.string().describe("Name of the resource"),
+    url: z
+      .string()
+      .describe(
+        "The resource's real, stable URL — official docs, GitHub repo, or well-known site. Never invent a URL.",
+      ),
+    description: z.string().describe("One sentence: what it covers and why it's worth the time"),
+  }));
+}
+
+// Reinforces the exact JSON shape for array fields that local models have
+// been observed to flatten into a single string — appended to any
+// generateObject system prompt whose schema has an array-of-strings or
+// array-of-objects field. Cheap insurance: costs a capable model nothing
+// to already be doing this right, and measurably helps a weaker one.
+const JSON_ARRAY_SHAPE_REMINDER =
+  'Return real JSON, not a description of JSON. Every field described as a list/array MUST be an actual JSON array of separate items — e.g. ["item one","item two"], never a single comma-separated string like "item one, item two". Every field described as a list of objects MUST be an array of real JSON objects with each named property set, never a list of plain strings.';
 
 // Some models occasionally answer with real line breaks escaped as the
 // literal two-character sequence "\" + "n" (and "\t" for tabs) instead of
@@ -218,12 +309,8 @@ export async function summarizeNote(
 // --- tag-and-link ---
 
 const tagSuggestionSchema = z.object({
-  tags: z
-    .array(z.string())
-    .describe("3-6 short lowercase tags (single words or hyphenated phrases)"),
-  relatedTopics: z
-    .array(z.string())
-    .describe("0-5 topics or concepts this note is likely connected to"),
+  tags: arrayOfStrings("3-6 short lowercase tags (single words or hyphenated phrases)"),
+  relatedTopics: arrayOfStrings("0-5 topics or concepts this note is likely connected to"),
 });
 
 export type TagSuggestion = z.infer<typeof tagSuggestionSchema>;
@@ -239,10 +326,10 @@ export async function suggestTags(
       generateObject({
         model,
         schema: tagSuggestionSchema,
-        system:
-          "You tag notes in a personal knowledge base. Tags are short, lowercase, and reusable across notes (prefer existing-sounding general terms over one-off phrases).",
+        system: `You tag notes in a personal knowledge base. Tags are short, lowercase, and reusable across notes (prefer existing-sounding general terms over one-off phrases). ${JSON_ARRAY_SHAPE_REMINDER} Example of the exact shape expected: {"tags":["react","state-management"],"relatedTopics":["redux","context-api"]}`,
         prompt: noteToPrompt(note),
       }),
+    { objectMode: true },
   );
   return object;
 }
@@ -497,6 +584,7 @@ export async function translateNote(
         system: `Translate every field into ${targetLabel}. Keep empty fields empty. Preserve meaning and tone. Translate the FULL text of every field, however long — never shorten, summarize, condense, or omit any part of a field. Return only the translated fields. ${NO_BROWSING_INSTRUCTION}`,
         prompt: JSON.stringify(note),
       }),
+    { objectMode: true },
   );
   return {
     title: unescapeLiteralWhitespace(object.title),
@@ -593,9 +681,7 @@ const draftedNoteSchema = z.object({
   why: z.string().describe("The context, reasoning, or motivation behind it — empty string if not applicable"),
   other: z.string().describe("Anything else worth keeping: caveats, open questions — empty string if none"),
   summary: z.string().describe("A single dense sentence summarizing the note"),
-  tags: z
-    .array(z.string())
-    .describe("3-6 short lowercase tags, reusable across notes"),
+  tags: arrayOfStrings("3-6 short lowercase tags, reusable across notes"),
 });
 
 export type DraftedNote = z.infer<typeof draftedNoteSchema>;
@@ -711,9 +797,7 @@ const publishAssistSchema = z.object({
   category: z
     .enum(classroomCategoryEnum.enumValues)
     .describe("Which AI Classroom subtab this article belongs under"),
-  tags: z
-    .array(z.string())
-    .describe("3-6 short lowercase tags reusable across articles"),
+  tags: arrayOfStrings("3-6 short lowercase tags reusable across articles"),
   summary: z.string().describe("A single dense sentence summarizing the article"),
   learningMap: z
     .string()
@@ -726,19 +810,7 @@ const publishAssistSchema = z.object({
       "Markdown step-by-step hands-on instructions to get practical experience with this topic: numbered steps, each concrete and actionable (commands, tools, or exercises), starting from zero setup",
     ),
   resources: z
-    .array(
-      z.object({
-        title: z.string().describe("Name of the resource"),
-        url: z
-          .string()
-          .describe(
-            "The resource's real, stable URL — official docs, GitHub repo, or well-known site. Never invent a URL.",
-          ),
-        description: z
-          .string()
-          .describe("One sentence: what it covers and why it's worth the time"),
-      }),
-    )
+    .array(resourceItemSchema())
     .min(3)
     .max(3)
     .describe("The top 3 learning resources for this topic"),
@@ -786,6 +858,7 @@ export async function publishAssist(
           input.topic ? "Keep the user's topic unless it's clearly unusable; you may lightly clean it up." : "",
           input.category ? `The user already chose the category "${input.category}" — keep it.` : "",
           `${NO_BROWSING_INSTRUCTION} Suggest resources from what you already know of real, well-known documentation/repos/courses — do not browse to verify or discover one.`,
+          `${JSON_ARRAY_SHAPE_REMINDER} "resources" specifically MUST be an array of exactly 3 objects shaped like {"title":"...","url":"https://...","description":"..."} — never an array of plain strings. Example of the exact shape expected for both fields: "tags":["prompt-engineering","fine-tuning"], "resources":[{"title":"Official Docs","url":"https://example.com/docs","description":"The canonical reference for this topic."}, ...2 more objects like it].`,
         ]
           .filter(Boolean)
           .join("\n"),
@@ -796,6 +869,7 @@ export async function publishAssist(
           .filter(Boolean)
           .join("\n\n"),
       }),
+    { objectMode: true },
   );
 
   return {
@@ -820,7 +894,7 @@ export async function draftNoteFromSource(
         model,
         maxOutputTokens: MAX_OUTPUT_TOKENS,
         schema: draftedNoteSchema,
-        system: `You turn raw source material into a personal knowledge-base note using the what/how/why/other template: what is the core idea, how does it work or get applied, why does it matter, and anything else worth keeping. Be concrete and specific to the source, not generic. Leave a field as an empty string if the source genuinely has nothing for it — don't pad. ${NO_BROWSING_INSTRUCTION}`,
+        system: `You turn raw source material into a personal knowledge-base note using the what/how/why/other template: what is the core idea, how does it work or get applied, why does it matter, and anything else worth keeping. Be concrete and specific to the source, not generic. Leave a field as an empty string if the source genuinely has nothing for it — don't pad. ${NO_BROWSING_INSTRUCTION} ${JSON_ARRAY_SHAPE_REMINDER} Example: "tags":["distributed-systems","consensus"].`,
         // Deliberately excludes input.sourceUrl — the note is drafted from
         // sourceText alone (already fetched/extracted upstream by plain
         // code, see lib/ingest/extract.ts), so the model never needs the
@@ -837,6 +911,7 @@ export async function draftNoteFromSource(
           .filter(Boolean)
           .join("\n\n"),
       }),
+    { objectMode: true },
   );
   return {
     ...object,

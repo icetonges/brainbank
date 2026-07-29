@@ -2,7 +2,11 @@
 
 import { MODELS, DEFAULT_MODEL_ID, type ModelId, type ProviderId } from "@/lib/ai/models";
 
-const PROVIDER_ORDER: ProviderId[] = ["local", "google", "groq", "anthropic"];
+// Only "local" is registered right now (see models.ts) — Google/Groq/
+// Anthropic entries were removed per explicit instruction. Adding a
+// provider back to models.ts/providers.ts means adding its id back here
+// too, or it won't show up in this dropdown even though it's registered.
+const PROVIDER_ORDER: ProviderId[] = ["local"];
 
 export function ModelPicker({
   value,
