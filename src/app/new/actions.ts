@@ -10,6 +10,9 @@ import { linkWikilinksFromText } from "@/lib/notes/link-wikilinks";
 import { detectPrimaryLanguage } from "@/lib/intake";
 import { translateNote } from "@/lib/ai/tasks";
 
+// Same reasoning as the identical export in classroom/actions.ts.
+export const maxDuration = 300;
+
 export async function createNote(formData: FormData) {
   const session = await auth();
   if (!session) throw new Error("Not signed in");

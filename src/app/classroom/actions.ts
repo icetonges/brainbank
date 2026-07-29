@@ -27,6 +27,19 @@ import { eq, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
+// translateClassroomArticleAction can now run several sequential AI calls
+// in a row (each article-body chunk, then summary, then title, then up to
+// two guide fields — see that action below for why this changed from
+// Promise.all to sequential dispatch), each individually bounded by
+// TASK_TIMEOUT_MS in tasks.ts but with no outer bound on this file before
+// this line existed — it just inherited whatever this Vercel project's
+// account-level default happens to be. Setting it explicitly to this
+// plan's actual ceiling (confirmed by the exact "Task timed out after 300
+// seconds" kill observed on a different route before that route got its
+// own maxDuration) means a long article's translation gets the full
+// budget the plan allows rather than an implicit, easy-to-lower default.
+export const maxDuration = 300;
+
 async function requireOwner() {
   const session = await auth();
   if (!session) throw new Error("Not signed in");
@@ -532,11 +545,21 @@ export async function translateClassroomArticleAction(
   // The body uses translateTextWithMeta so the article page can show which
   // model(s) actually did the work (usually one; more than one means the
   // fallback chain kicked in partway through).
-  const [bodyResult, summary, title] = await Promise.all([
-    translateTextWithMeta(sourceContent.bodyMarkdown, target),
-    translateText(sourceContent.summary ?? "", target),
-    note.primaryLanguage === target ? Promise.resolve("") : translateText(note.title, target),
-  ]);
+  //
+  // Sequential, not Promise.all — this app has exactly one model
+  // registered (local/default, a single self-hosted Ollama instance that
+  // generates one response at a time), so firing body+summary+title
+  // concurrently doesn't speed anything up, it just makes agent-server
+  // queue two of the three behind the first while each one's own
+  // per-call abortSignal timeout (tasks.ts) keeps counting from dispatch
+  // time rather than from when it actually starts. That's the concrete
+  // difference from the /llm chatbox (a single request, never contends
+  // with itself) and the likely reason translation was failing/timing out
+  // even when a single chat message went through fine.
+  const bodyResult = await translateTextWithMeta(sourceContent.bodyMarkdown, target);
+  const summary = await translateText(sourceContent.summary ?? "", target);
+  const title =
+    note.primaryLanguage === target ? "" : await translateText(note.title, target);
   const body = bodyResult.text;
   const translatedModel = bodyResult.models.join(",") || null;
   const translatedAt = new Date();
@@ -566,11 +589,10 @@ export async function translateClassroomArticleAction(
     where: eq(learningGuides.noteId, noteId),
   });
   if (guide && (guide.learningMap || guide.handsOn)) {
+    // Sequential here too, same single-local-model reasoning as above.
     if (target === "zh") {
-      const [mapZh, handsOnZh] = await Promise.all([
-        guide.learningMap ? translateText(guide.learningMap, "zh") : Promise.resolve(""),
-        guide.handsOn ? translateText(guide.handsOn, "zh") : Promise.resolve(""),
-      ]);
+      const mapZh = guide.learningMap ? await translateText(guide.learningMap, "zh") : "";
+      const handsOnZh = guide.handsOn ? await translateText(guide.handsOn, "zh") : "";
       await db
         .update(learningGuides)
         .set({ learningMapZh: mapZh, handsOnZh, updatedAt: new Date() })
@@ -578,10 +600,8 @@ export async function translateClassroomArticleAction(
     } else if (note.primaryLanguage === "zh") {
       // Base guide is Chinese: preserve it in the zh columns, put the new
       // English rendition in the base columns.
-      const [mapEn, handsOnEn] = await Promise.all([
-        guide.learningMap ? translateText(guide.learningMap, "en") : Promise.resolve(""),
-        guide.handsOn ? translateText(guide.handsOn, "en") : Promise.resolve(""),
-      ]);
+      const mapEn = guide.learningMap ? await translateText(guide.learningMap, "en") : "";
+      const handsOnEn = guide.handsOn ? await translateText(guide.handsOn, "en") : "";
       await db
         .update(learningGuides)
         .set({

@@ -1,10 +1,25 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+
+type MessageStatus = "thinking" | "streaming" | "done";
+
+interface UsageInfo {
+  inputTokens: number | null;
+  outputTokens: number | null;
+  totalTokens: number | null;
+}
 
 interface ChatMessage {
   role: "user" | "assistant";
   content: string;
+  // The rest only apply to assistant messages, and only get set once a
+  // request for that message has actually started.
+  status?: MessageStatus;
+  sentAt?: number;
+  firstTokenAt?: number;
+  doneAt?: number;
+  usage?: UsageInfo;
 }
 
 interface LlmChatStrings {
@@ -14,6 +29,42 @@ interface LlmChatStrings {
   chatSend: string;
   chatThinking: string;
   chatEmpty: string;
+  chatFirstToken: string;
+  chatTotalTime: string;
+  chatTokensIn: string;
+  chatTokensOut: string;
+  chatTokensTotal: string;
+}
+
+// Mirrors USAGE_TRAILER_PREFIX/SUFFIX in src/lib/ai/tasks.ts exactly — see
+// the comment on usageTrailer() there for why token usage rides along as a
+// stripped trailer on the plain-text stream instead of a separate
+// response field. Keep these two in sync if the format ever changes.
+const USAGE_TRAILER_PREFIX = "\n\n<!--BRAINBANK:USAGE:";
+const USAGE_TRAILER_SUFFIX = "-->";
+
+/** Splits the trailer (if present) off the raw accumulated stream text.
+ * While the trailer has started but not yet fully arrived (its closing
+ * "-->" hasn't shown up in a chunk yet), `visible` simply stops just
+ * before it — so the marker's own bytes never flash on screen mid-stream,
+ * they just appear once the message is otherwise complete. */
+function splitUsageTrailer(raw: string): { visible: string; usage: UsageInfo | null } {
+  const idx = raw.indexOf(USAGE_TRAILER_PREFIX);
+  if (idx === -1) return { visible: raw, usage: null };
+  const visible = raw.slice(0, idx);
+  const rest = raw.slice(idx + USAGE_TRAILER_PREFIX.length);
+  const endIdx = rest.indexOf(USAGE_TRAILER_SUFFIX);
+  if (endIdx === -1) return { visible, usage: null };
+  try {
+    const usage = JSON.parse(rest.slice(0, endIdx)) as UsageInfo;
+    return { visible, usage };
+  } catch {
+    return { visible, usage: null };
+  }
+}
+
+function formatSeconds(ms: number): string {
+  return `${(ms / 1000).toFixed(1)}s`;
 }
 
 /**
@@ -25,13 +76,27 @@ interface LlmChatStrings {
  * local/default is currently the only registered model (see models.ts),
  * so a dropdown with one option would just be clutter: the status card
  * above this panel already shows which model is live.
+ *
+ * Shows, per assistant reply: a live "thinking…" status before the first
+ * token arrives, time-to-first-token and total elapsed time once it's
+ * done, and token usage (input/output/total) parsed out of the trailer
+ * streamAssist appends for this context — see splitUsageTrailer above.
  */
 export function LlmChatPanel({ s }: { s: LlmChatStrings }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const abortRef = useRef<AbortController | null>(null);
+
+  // Drives the live "Xs" readout on the in-flight message. Only ticks
+  // while something is actually pending, so it's not running idle.
+  useEffect(() => {
+    if (!pending) return;
+    const interval = setInterval(() => setNow(Date.now()), 200);
+    return () => clearInterval(interval);
+  }, [pending]);
 
   async function send() {
     const text = input.trim();
@@ -45,12 +110,18 @@ export function LlmChatPanel({ s }: { s: LlmChatStrings }) {
 
     const controller = new AbortController();
     abortRef.current = controller;
+    const sentAt = Date.now();
+    setNow(sentAt);
+    setMessages((prev) => [...prev, { role: "assistant", content: "", status: "thinking", sentAt }]);
 
     try {
       const res = await fetch("/api/ai/assist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: nextMessages, context: "knowledge" }),
+        body: JSON.stringify({
+          messages: nextMessages.map(({ role, content }) => ({ role, content })),
+          context: "knowledge",
+        }),
         signal: controller.signal,
       });
 
@@ -60,21 +131,48 @@ export function LlmChatPanel({ s }: { s: LlmChatStrings }) {
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
-      let assistantText = "";
-      setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
+      let raw = "";
+      let firstTokenAt: number | undefined;
 
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
-        assistantText += decoder.decode(value, { stream: true });
+        if (firstTokenAt === undefined) firstTokenAt = Date.now();
+        raw += decoder.decode(value, { stream: true });
+        const { visible, usage } = splitUsageTrailer(raw);
         setMessages((prev) => {
           const copy = [...prev];
-          copy[copy.length - 1] = { role: "assistant", content: assistantText };
+          copy[copy.length - 1] = {
+            role: "assistant",
+            content: visible,
+            status: "streaming",
+            sentAt,
+            firstTokenAt,
+            usage: usage ?? undefined,
+          };
           return copy;
         });
       }
+
+      const { visible, usage } = splitUsageTrailer(raw);
+      setMessages((prev) => {
+        const copy = [...prev];
+        copy[copy.length - 1] = {
+          role: "assistant",
+          content: visible,
+          status: "done",
+          sentAt,
+          firstTokenAt,
+          doneAt: Date.now(),
+          usage: usage ?? undefined,
+        };
+        return copy;
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
+      // Drop the placeholder bubble on failure instead of leaving a
+      // permanently-empty "thinking" message sitting in the transcript.
+      setMessages((prev) => prev.slice(0, -1));
     } finally {
       setPending(false);
     }
@@ -91,14 +189,54 @@ export function LlmChatPanel({ s }: { s: LlmChatStrings }) {
         {messages.length === 0 ? (
           <p className="text-sm text-fg-secondary">{s.chatEmpty}</p>
         ) : (
-          messages.map((m, i) => (
-            <div key={i} className="text-sm">
-              <span className="font-semibold text-fg-secondary">
-                {m.role === "user" ? "You" : "AI"}:{" "}
-              </span>
-              <span className="whitespace-pre-wrap text-fg">{m.content}</span>
-            </div>
-          ))
+          messages.map((m, i) => {
+            const isAssistant = m.role === "assistant";
+            const elapsedMs =
+              isAssistant && m.sentAt
+                ? (m.doneAt ?? (m.status !== "done" ? now : m.sentAt)) - m.sentAt
+                : undefined;
+            const firstTokenMs =
+              isAssistant && m.sentAt && m.firstTokenAt ? m.firstTokenAt - m.sentAt : undefined;
+            const hasUsage =
+              m.usage && (m.usage.inputTokens != null || m.usage.outputTokens != null || m.usage.totalTokens != null);
+
+            return (
+              <div key={i} className="text-sm">
+                <span className="font-semibold text-fg-secondary">
+                  {m.role === "user" ? "You" : "AI"}:{" "}
+                </span>
+                {isAssistant && m.status === "thinking" ? (
+                  <span className="inline-flex items-center gap-1.5 italic text-fg-secondary">
+                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" aria-hidden />
+                    {s.chatThinking}
+                    {elapsedMs !== undefined ? ` ${formatSeconds(elapsedMs)}` : ""}
+                  </span>
+                ) : (
+                  <span className="whitespace-pre-wrap text-fg">{m.content}</span>
+                )}
+
+                {isAssistant && (m.status === "streaming" || m.status === "done") && (
+                  <div className="mt-0.5 flex flex-wrap gap-x-3 text-xs text-fg-secondary">
+                    {elapsedMs !== undefined && (
+                      <span className="inline-flex items-center gap-1">
+                        {m.status === "streaming" && (
+                          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" aria-hidden />
+                        )}
+                        {firstTokenMs !== undefined && `${formatSeconds(firstTokenMs)} ${s.chatFirstToken} · `}
+                        {formatSeconds(elapsedMs)} {s.chatTotalTime}
+                      </span>
+                    )}
+                    {hasUsage && m.usage && (
+                      <span>
+                        {m.usage.inputTokens ?? "?"} {s.chatTokensIn} / {m.usage.outputTokens ?? "?"} {s.chatTokensOut}
+                        {m.usage.totalTokens != null ? ` (${m.usage.totalTokens} ${s.chatTokensTotal})` : ""}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })
         )}
       </div>
 

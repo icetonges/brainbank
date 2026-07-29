@@ -266,6 +266,29 @@ function unescapeLiteralWhitespace(text: string): string {
 // that failure mode explicit and consistent instead of provider-dependent.
 const MAX_OUTPUT_TOKENS = 8192;
 
+// Nothing in this file bounded how long to wait on agent-server before this
+// fix — if it (or the local model underneath it) hangs instead of erroring
+// (no response at all, not even a fast failure), the call rides all the way
+// to Vercel's own hard function-duration ceiling with no response ever
+// reaching the client. Observed in production on /api/ai/assist: "Vercel
+// Runtime Timeout Error: Task timed out after 300 seconds", chatbox stuck
+// on "Thinking…" the whole time, no error surfaced anywhere. abortSignal on
+// every call here makes a hang fail fast and go through the same
+// fallback/error path as any other failure, well inside that ceiling.
+// TASK_TIMEOUT_MS covers every single-shot generateText/generateObject call
+// below. streamAssist needs a different shape (see its own comment): a
+// short bound on waiting for the *first* token (STREAM_FIRST_BYTE_TIMEOUT_MS
+// — this is what actually catches a hang, since the known Ollama
+// tools+stream bug fails fast with a 502 rather than hanging, so a real
+// hang means agent-server/the Mac itself is stuck) and a much longer one
+// once tokens are actually arriving (STREAM_TOTAL_TIMEOUT_MS — has to be
+// generous enough that a real, working, long streamed answer never gets cut
+// off), plus its own bound on the non-streaming retry (FALLBACK_TIMEOUT_MS).
+const TASK_TIMEOUT_MS = 120_000;
+const STREAM_FIRST_BYTE_TIMEOUT_MS = 20_000;
+const STREAM_TOTAL_TIMEOUT_MS = 180_000;
+const FALLBACK_TIMEOUT_MS = 90_000;
+
 // --- summarize ---
 
 export interface NoteForAi {
@@ -298,6 +321,7 @@ export async function summarizeNote(
     (model) =>
       generateText({
         model,
+        abortSignal: AbortSignal.timeout(TASK_TIMEOUT_MS),
         system:
           "You write a single, dense sentence summarizing a personal knowledge-base note. No preamble, no quotes, just the sentence.",
         prompt: noteToPrompt(note),
@@ -325,6 +349,7 @@ export async function suggestTags(
     (model) =>
       generateObject({
         model,
+        abortSignal: AbortSignal.timeout(TASK_TIMEOUT_MS),
         schema: tagSuggestionSchema,
         system: `You tag notes in a personal knowledge base. Tags are short, lowercase, and reusable across notes (prefer existing-sounding general terms over one-off phrases). ${JSON_ARRAY_SHAPE_REMINDER} Example of the exact shape expected: {"tags":["react","state-management"],"relatedTopics":["redux","context-api"]}`,
         prompt: noteToPrompt(note),
@@ -437,6 +462,7 @@ async function translateChunk(
       generateText({
         model,
         maxOutputTokens: MAX_OUTPUT_TOKENS,
+        abortSignal: AbortSignal.timeout(TASK_TIMEOUT_MS),
         system: translateSystemPrompt(targetLabel),
         prompt: chunk,
       }),
@@ -455,10 +481,15 @@ async function translateChunk(
     );
     const splitAt = findSplitPoint(chunk);
     const [a, b] = [chunk.slice(0, splitAt), chunk.slice(splitAt)];
-    const [ta, tb] = await Promise.all([
-      translateChunk(a, target, modelId, onModelUsed),
-      translateChunk(b, target, modelId, onModelUsed),
-    ]);
+    // Sequential, not Promise.all — see the comment on translateWithMeta's
+    // chunk loop below for why: the local model is one instance handling
+    // one generation at a time, so firing both halves at once just queues
+    // the second behind the first inside agent-server while ITS OWN
+    // abortSignal clock (TASK_TIMEOUT_MS) keeps running from dispatch time,
+    // not from when it actually starts generating — a real risk of timing
+    // out in queue rather than actually failing to translate.
+    const ta = await translateChunk(a, target, modelId, onModelUsed);
+    const tb = await translateChunk(b, target, modelId, onModelUsed);
     return `${ta}${tb}`;
   }
 
@@ -518,13 +549,25 @@ async function translateWithMeta(
     return restoreUrls(result, urls);
   }
 
-  // Chunks are independent, so translate them concurrently — Promise.all
-  // preserves result order even though calls may resolve out of order, so
-  // joining is still safe. Each chunk goes through the full model
-  // fallback chain and the recursive length-guard on its own.
-  const translatedChunks = await Promise.all(
-    chunks.map((chunk) => translateChunk(chunk, target, chosenModel, onModelUsed)),
-  );
+  // Chunks are independent in principle, but they're translated
+  // sequentially, not concurrently — this app only ever has ONE model
+  // registered (local/default, see models.ts's header comment), a single
+  // self-hosted Ollama instance that generates one response at a time.
+  // Firing every chunk's generateText call at once via Promise.all doesn't
+  // actually parallelize the work; agent-server just queues them, and each
+  // queued call's own abortSignal (TASK_TIMEOUT_MS, see translateChunk)
+  // keeps counting down from the moment it was dispatched — not from when
+  // Ollama actually starts generating it. A long article split into several
+  // chunks could time out several of them purely for having waited in
+  // queue, which surfaces as the whole translation failing outright (this
+  // function isn't allSettled — one rejected chunk rejects the join).
+  // Sequential dispatch costs nothing in real wall-clock time against a
+  // single-instance model (it was always going to process them one at a
+  // time either way) and removes that failure mode entirely.
+  const translatedChunks: string[] = [];
+  for (const chunk of chunks) {
+    translatedChunks.push(await translateChunk(chunk, target, chosenModel, onModelUsed));
+  }
   return restoreUrls(translatedChunks.join(""), urls);
 }
 
@@ -574,6 +617,7 @@ export async function translateNote(
       generateObject({
         model,
         maxOutputTokens: MAX_OUTPUT_TOKENS,
+        abortSignal: AbortSignal.timeout(TASK_TIMEOUT_MS),
         schema: z.object({
           title: z.string(),
           what: z.string(),
@@ -613,6 +657,35 @@ const KNOWLEDGE_CHAT_SYSTEM_PROMPT =
 
 type AssistContext = "note" | "knowledge";
 
+// The /llm page's chatbox (llm-chat-panel.tsx) wants token-usage numbers
+// alongside each reply — something the plain-text stream this function
+// returns has no room for on its own, and redesigning the wire protocol
+// would mean touching the note-assist panel too (it reads this same
+// endpoint's output as plain text and knows nothing about a richer
+// format). Instead, once generation finishes, a small distinctive trailer
+// is appended to the very end of the response; the client (same constants,
+// see splitUsageTrailer in llm-chat-panel.tsx) strips it back out before
+// rendering and reads the numbers from it. Only emitted when
+// context === "knowledge" — the note-assist panel doesn't look for this
+// and would otherwise show the raw marker as garbage trailing text.
+const USAGE_TRAILER_PREFIX = "\n\n<!--BRAINBANK:USAGE:";
+const USAGE_TRAILER_SUFFIX = "-->";
+
+interface UsageLike {
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+}
+
+function usageTrailer(usage: UsageLike | undefined): string {
+  if (!usage) return "";
+  return `${USAGE_TRAILER_PREFIX}${JSON.stringify({
+    inputTokens: usage.inputTokens ?? null,
+    outputTokens: usage.outputTokens ?? null,
+    totalTokens: usage.totalTokens ?? null,
+  })}${USAGE_TRAILER_SUFFIX}`;
+}
+
 /**
  * Streaming chat behind the AI Assist panel (context: "note") and the /llm
  * page's chatbox (context: "knowledge") — same chain and streaming
@@ -641,15 +714,42 @@ export async function streamAssist(
   for (const id of chain) {
     let reader: ReadableStreamDefaultReader<string>;
     let first: ReadableStreamReadResult<string>;
+    // Only populated for context === "knowledge" (see usageTrailer above)
+    // — carrying just the promise forward, rather than the whole `result`
+    // object, keeps this hoistable out of the try block without fighting
+    // streamText's generic return type.
+    let usagePromise: Promise<UsageLike> | undefined;
+    // Bounds the streaming attempt in two phases on the same controller:
+    // a short STREAM_FIRST_BYTE_TIMEOUT_MS while nothing has arrived yet
+    // (this is what actually catches a hang — the known Ollama
+    // tools+stream bug below fails FAST with a 502, it doesn't hang, so a
+    // real hang past this point means agent-server or the Mac itself is
+    // stuck), then a much longer STREAM_TOTAL_TIMEOUT_MS once the first
+    // chunk has arrived, so a real, working, long streamed answer never
+    // gets cut off. Without this, a genuine hang rides all the way to
+    // Vercel's own hard function-duration ceiling with no response ever
+    // reaching the client — see the comment on STREAM_FIRST_BYTE_TIMEOUT_MS
+    // above for the production incident this fixes.
+    const abortController = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined = setTimeout(
+      () =>
+        abortController.abort(
+          new Error(`agent-server did not send a first token for ${id} within ${STREAM_FIRST_BYTE_TIMEOUT_MS / 1000}s`),
+        ),
+      STREAM_FIRST_BYTE_TIMEOUT_MS,
+    );
     try {
       const result = streamText({
         model: resolveModel(id),
         maxOutputTokens: MAX_OUTPUT_TOKENS,
         system: systemPrompt,
         messages,
+        abortSignal: abortController.signal,
       });
       reader = result.textStream.getReader();
+      usagePromise = context === "knowledge" ? result.usage : undefined;
       first = await reader.read();
+      clearTimeout(timer);
       // An immediately-empty stream (done on the very first read, zero
       // bytes) is NOT a legitimate "the model said nothing" answer — every
       // system prompt here asks for a real reply, and this exact shape
@@ -662,7 +762,17 @@ export async function streamAssist(
       if (first.done) {
         throw new Error(`agent-server returned an empty response for ${id} (streaming)`);
       }
+      // Reschedule on the same controller/signal, now bounding the rest of
+      // the stream instead of the wait for the first token.
+      timer = setTimeout(
+        () =>
+          abortController.abort(
+            new Error(`${id} took longer than ${STREAM_TOTAL_TIMEOUT_MS / 1000}s to finish streaming a response`),
+          ),
+        STREAM_TOTAL_TIMEOUT_MS,
+      );
     } catch (err) {
+      clearTimeout(timer);
       lastError = err;
       console.error(
         `[ai:assist] ${id} produced no usable output over streaming, trying a single non-streaming call against the same model before moving on`,
@@ -686,16 +796,18 @@ export async function streamAssist(
       // that outcome is checked for below instead of assumed to mean
       // success.
       try {
-        const { text } = await generateText({
+        const { text, usage } = await generateText({
           model: resolveModel(id),
           maxOutputTokens: MAX_OUTPUT_TOKENS,
           system: systemPrompt,
           messages,
+          abortSignal: AbortSignal.timeout(FALLBACK_TIMEOUT_MS),
         });
         if (!text.trim()) {
           throw new Error(`agent-server returned an empty response for ${id} (non-streaming)`);
         }
-        return new Response(text, {
+        const trailer = context === "knowledge" ? usageTrailer(usage) : "";
+        return new Response(text + trailer, {
           headers: { "Content-Type": "text/plain; charset=utf-8" },
         });
       } catch (fallbackErr) {
@@ -718,8 +830,20 @@ export async function streamAssist(
             if (chunk.done) break;
             controller.enqueue(encoder.encode(chunk.value));
           }
+          clearTimeout(timer);
+          if (usagePromise) {
+            try {
+              const trailer = usageTrailer(await usagePromise);
+              if (trailer) controller.enqueue(encoder.encode(trailer));
+            } catch (usageErr) {
+              // Non-fatal — the reply itself already streamed successfully;
+              // losing the usage numbers isn't worth failing the message.
+              console.error(`[ai:assist] ${id} usage lookup failed (non-fatal)`, usageErr);
+            }
+          }
           controller.close();
         } catch (err) {
+          clearTimeout(timer);
           console.error(`[ai:assist] ${id} failed mid-stream`, err);
           controller.error(err);
         }
@@ -803,6 +927,7 @@ export async function formatArticleContent(
       generateText({
         model,
         maxOutputTokens: MAX_OUTPUT_TOKENS,
+        abortSignal: AbortSignal.timeout(TASK_TIMEOUT_MS),
         system: [
       "You are a professional technical editor. Rewrite the user's raw content into a clean, well-structured, publication-ready markdown article. The input may be messy — a plain-text wall, a pasted webpage, chat/transcript fragments, a list of links, rough notes — your job is structure and polish, NOT summarization.",
       "",
@@ -912,6 +1037,7 @@ export async function publishAssist(
       generateObject({
         model,
         maxOutputTokens: MAX_OUTPUT_TOKENS,
+        abortSignal: AbortSignal.timeout(TASK_TIMEOUT_MS),
         schema: publishAssistSchema,
         system: [
           "You are the AI publish assistant for the 'AI Classroom' section of a personal knowledge base about AI.",
@@ -958,6 +1084,7 @@ export async function draftNoteFromSource(
       generateObject({
         model,
         maxOutputTokens: MAX_OUTPUT_TOKENS,
+        abortSignal: AbortSignal.timeout(TASK_TIMEOUT_MS),
         schema: draftedNoteSchema,
         system: `You turn raw source material into a personal knowledge-base note using the what/how/why/other template: what is the core idea, how does it work or get applied, why does it matter, and anything else worth keeping. Be concrete and specific to the source, not generic. Leave a field as an empty string if the source genuinely has nothing for it — don't pad. ${NO_BROWSING_INSTRUCTION} ${JSON_ARRAY_SHAPE_REMINDER} Example: "tags":["distributed-systems","consensus"].`,
         // Deliberately excludes input.sourceUrl — the note is drafted from

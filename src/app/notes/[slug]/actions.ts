@@ -13,6 +13,15 @@ import type { ModelId } from "@/lib/ai/models";
 import { linkWikilinksFromText } from "@/lib/notes/link-wikilinks";
 import { linkRelatedByTags } from "@/lib/notes/link-related";
 
+// Same reasoning as the identical export in classroom/actions.ts: these
+// actions call into tasks.ts (translateNote/summarizeNote/suggestTags),
+// each now individually bounded by its own abortSignal (TASK_TIMEOUT_MS),
+// but this file had no outer bound of its own before this line — it just
+// inherited the Vercel project's account-level default. Making it explicit
+// at this plan's actual ceiling avoids silently depending on whatever that
+// default happens to be.
+export const maxDuration = 300;
+
 async function requireOwner() {
   const session = await auth();
   if (!session) throw new Error("Not signed in");

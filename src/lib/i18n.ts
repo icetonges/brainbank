@@ -188,6 +188,11 @@ const en = {
     chatSend: "Send",
     chatThinking: "Thinking…",
     chatEmpty: "No messages yet — say something.",
+    chatFirstToken: "to first token",
+    chatTotalTime: "total",
+    chatTokensIn: "in",
+    chatTokensOut: "out",
+    chatTokensTotal: "total",
   },
 };
 
@@ -359,6 +364,11 @@ const zh: typeof en = {
     chatSend: "发送",
     chatThinking: "思考中…",
     chatEmpty: "还没有消息——说点什么吧。",
+    chatFirstToken: "首个字符",
+    chatTotalTime: "总耗时",
+    chatTokensIn: "输入",
+    chatTokensOut: "输出",
+    chatTokensTotal: "共",
   },
 };
 
