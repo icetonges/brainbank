@@ -650,10 +650,22 @@ export async function streamAssist(
       });
       reader = result.textStream.getReader();
       first = await reader.read();
+      // An immediately-empty stream (done on the very first read, zero
+      // bytes) is NOT a legitimate "the model said nothing" answer — every
+      // system prompt here asks for a real reply, and this exact shape
+      // (200 OK, zero content, no thrown error) is what agent-server
+      // returns when its tools-scoped agent_loop's internal step comes
+      // back empty. Silently returning an empty 200 to the client is how
+      // this previously showed up as a blank chat bubble with no error
+      // anywhere — throwing here routes it through the same fallback path
+      // as a thrown network error instead of being mistaken for success.
+      if (first.done) {
+        throw new Error(`agent-server returned an empty response for ${id} (streaming)`);
+      }
     } catch (err) {
       lastError = err;
       console.error(
-        `[ai:assist] ${id} failed before first token (streaming), trying a single non-streaming call against the same model before moving on`,
+        `[ai:assist] ${id} produced no usable output over streaming, trying a single non-streaming call against the same model before moving on`,
         err,
       );
       // Real streaming (stream: true in the wire request — see
@@ -668,12 +680,11 @@ export async function streamAssist(
       // on. Our agent-server key has tools scope (see "local API
       // deployment.md"), so every request is in the affected shape.
       // generateText's doGenerate call never sends stream:true, so it
-      // sidesteps that path entirely — worth trying before giving up on
-      // this model. The client-facing shape doesn't change: it still gets
-      // a plain Response it reads as a stream, just delivered in one
-      // chunk instead of progressively, since generateText waits for the
-      // complete response before returning (see AI SDK docs: generateText
-      // vs streamText).
+      // sidesteps that specific crash — but it doesn't rule out
+      // agent_loop's own tool/skill step separately coming back empty in
+      // non-streaming mode too (a 200 with empty text, not an error), so
+      // that outcome is checked for below instead of assumed to mean
+      // success.
       try {
         const { text } = await generateText({
           model: resolveModel(id),
@@ -681,6 +692,9 @@ export async function streamAssist(
           system: systemPrompt,
           messages,
         });
+        if (!text.trim()) {
+          throw new Error(`agent-server returned an empty response for ${id} (non-streaming)`);
+        }
         return new Response(text, {
           headers: { "Content-Type": "text/plain; charset=utf-8" },
         });
@@ -691,13 +705,12 @@ export async function streamAssist(
       }
     }
 
+    // Reached only when the streaming try block above completed without
+    // throwing — reader/first are guaranteed assigned, and first.done is
+    // guaranteed false (checked above), so first.value is real content.
     const encoder = new TextEncoder();
     const body = new ReadableStream<Uint8Array>({
       async start(controller) {
-        if (first.done) {
-          controller.close();
-          return;
-        }
         controller.enqueue(encoder.encode(first.value));
         try {
           while (true) {
