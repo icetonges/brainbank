@@ -2,7 +2,7 @@
 
 import { MODELS, DEFAULT_MODEL_ID, type ModelId, type ProviderId } from "@/lib/ai/models";
 
-const PROVIDER_ORDER: ProviderId[] = ["google", "groq", "anthropic"];
+const PROVIDER_ORDER: ProviderId[] = ["local", "google", "groq", "anthropic"];
 
 export function ModelPicker({
   value,

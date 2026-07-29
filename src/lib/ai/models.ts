@@ -6,9 +6,10 @@
 // model here (including a future local/self-hosted one, see PLAN.md §6 and
 // §14) is the only step needed to make it selectable everywhere.
 
-export type ProviderId = "google" | "groq" | "anthropic";
+export type ProviderId = "local" | "google" | "groq" | "anthropic";
 
 export type ModelId =
+  | "local/default"
   | "gemini-3.5-flash"
   | "gemini-3.1-flash-lite"
   | "gemini-2.5-flash"
@@ -37,6 +38,29 @@ export interface ModelInfo {
 }
 
 export const MODELS: ModelInfo[] = [
+  // Local self-hosted agent-server (Mac + Tailscale Funnel), see
+  // "local API deployment.md". No external API call, no per-token cost.
+  // The actual model tag sent over the wire comes from LOCAL_LLM_MODEL
+  // (see resolveModel() in providers.ts) rather than this id, so switching
+  // which local model you're running is a single env var change, not a
+  // code change or a new registry entry.
+  {
+    id: "local/default",
+    name: "Local (self-hosted)",
+    provider: "local",
+    providerLabel: "Local",
+    providerColor: "#16a34a",
+    inputPricePer1M: 0,
+    outputPricePer1M: 0,
+    description:
+      "Self-hosted agent-server via Tailscale Funnel — private, no external API, no per-token cost. Requires LOCAL_LLM_FUNNEL_URL + LOCAL_LLM_SHARED_SECRET and the Mac to be awake/reachable.",
+    contextWindow: "varies",
+    isFree: true,
+    supportsVision: false,
+    isDefault: true,
+    badge: "Local",
+  },
+
   // Google Gemini (via Google AI Studio)
   {
     id: "gemini-3.5-flash",
@@ -97,7 +121,6 @@ export const MODELS: ModelInfo[] = [
     contextWindow: "128K",
     isFree: true,
     supportsVision: false,
-    isDefault: true,
     badge: "Agentic",
   },
 
@@ -197,12 +220,16 @@ export const MODELS: ModelInfo[] = [
 //
 // The order tasks.ts tries models in when a call fails (rate limit, spend
 // cap, outage, whatever) — not just a config table but an actual runtime
-// fallback (see withFallback() in tasks.ts). Free/cheap Groq models go
-// first since leaning on them hard costs nothing; paid providers are the
-// fallback of last resort. A task's preferred model (its TASK_MODELS entry,
-// or an explicit override from the UI) is always tried first — this list
-// is what it falls through to after that, in order.
+// fallback (see withFallback() in tasks.ts). The local self-hosted model
+// goes first (private, free, no external API) — but it's a single Mac
+// behind a Tailscale Funnel, so it's also the entry most likely to be
+// unreachable (asleep, agent-server not running, Funnel down). Free/cheap
+// Groq models go next since leaning on them hard costs nothing; paid
+// providers are the fallback of last resort. A task's preferred model (its
+// TASK_MODELS entry, or an explicit override from the UI) is always tried
+// first — this list is what it falls through to after that, in order.
 export const FALLBACK_CHAIN: ModelId[] = [
+  "local/default", // free, private, self-hosted — tried first, may be asleep/unreachable
   "groq/compound", // free, agentic, most capable free-tier option
   "openai/gpt-oss-120b", // groq flagship open-weight reasoning
   "qwen/qwen3.6-27b", // groq, adds vision support

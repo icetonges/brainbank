@@ -49,13 +49,22 @@ export type TaskName =
   | "publish-assist"
   | "format-article";
 
+// Every task defaults to the local self-hosted model (DEFAULT_MODEL_ID —
+// see models.ts, MODELS[].isDefault) — private, free, no external API call.
+// This is a preference, not an exclusive route: every task still runs
+// through withFallback() below, so if the Mac is asleep or agent-server
+// isn't reachable, the call transparently falls through to the next model
+// in FALLBACK_CHAIN / GROUNDED_FALLBACK_CHAIN instead of failing outright.
 export const TASK_MODELS: Record<TaskName, ModelId> = {
   // assist is the one task that was always allowed an agentic,
   // web-searching model — it's an open-ended chat helper, not a transform
-  // over fixed input.
+  // over fixed input. It still tries the local model first like every
+  // other task; the difference is only in what it falls through to next
+  // (the full FALLBACK_CHAIN, including groq/compound) if local is
+  // unreachable — see chainFor()'s grounded=false path.
   assist: DEFAULT_MODEL_ID,
-  summarize: "gemini-3.1-flash-lite",
-  "tag-and-link": "gemini-3.1-flash-lite",
+  summarize: DEFAULT_MODEL_ID,
+  "tag-and-link": DEFAULT_MODEL_ID,
   // Every other task is a *grounded* transform — it must operate only on
   // the text it's given, never on whatever a model's built-in web search
   // decides to fetch. groq/compound is deliberately NOT used here.
@@ -71,10 +80,12 @@ export const TASK_MODELS: Record<TaskName, ModelId> = {
   // is what applies it. Do not flip this back to compound without a real
   // server-side tool-disable (Groq's compound_custom.tools.enabled_tools),
   // which the installed @ai-sdk/groq version doesn't currently expose.
-  translate: "openai/gpt-oss-120b",
-  draft: "openai/gpt-oss-120b",
-  "publish-assist": "openai/gpt-oss-120b",
-  "format-article": "openai/gpt-oss-120b",
+  // The local model is not agentic either, so it's safe as the preferred
+  // model for all four of these.
+  translate: DEFAULT_MODEL_ID,
+  draft: DEFAULT_MODEL_ID,
+  "publish-assist": DEFAULT_MODEL_ID,
+  "format-article": DEFAULT_MODEL_ID,
 };
 
 // Left in every grounded task's system prompt as harmless defense-in-depth

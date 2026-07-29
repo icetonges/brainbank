@@ -1,6 +1,7 @@
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGroq } from "@ai-sdk/groq";
+import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { LanguageModel } from "ai";
 import { getModel, type ModelId, type ProviderId } from "./models";
 
@@ -10,6 +11,32 @@ import { getModel, type ModelId, type ProviderId } from "./models";
 // swappable (PLAN.md §6): adding a local/self-hosted model later means
 // adding one more case here (e.g. an OpenAI-compatible client pointed at
 // your own endpoint), not touching every call site.
+
+// Default local model tag, only used when LOCAL_LLM_MODEL isn't set — kept
+// in sync with the model the deployment guide's `keys_admin.py` output
+// showed as the agent-server's current production model. See "local API
+// deployment.md".
+const DEFAULT_LOCAL_MODEL = "qwen3.6:35b-a3b";
+
+function local() {
+  const baseURL = process.env.LOCAL_LLM_FUNNEL_URL;
+  const apiKey = process.env.LOCAL_LLM_SHARED_SECRET;
+  if (!baseURL || !apiKey) {
+    throw new Error(
+      "LOCAL_LLM_FUNNEL_URL / LOCAL_LLM_SHARED_SECRET are not set. See \"local API deployment.md\" — create a key with keys_admin.py on the agent-server Mac, then set both vars locally (.env.local) and in Vercel.",
+    );
+  }
+  // agent-server speaks the OpenAI chat-completions wire format at
+  // <funnel-url>:8443/v1/chat/completions (per the deployment guide), so a
+  // generic OpenAI-compatible client — not the official OpenAI SDK, which
+  // targets api.openai.com's newer Responses API by default — is the
+  // correct fit here.
+  return createOpenAICompatible({
+    name: "local-llm",
+    baseURL: `${baseURL.replace(/\/+$/, "")}/v1`,
+    apiKey,
+  });
+}
 
 function google() {
   const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
@@ -40,6 +67,7 @@ function anthropic() {
 }
 
 const PROVIDER_FACTORIES: Record<ProviderId, () => { (id: string): LanguageModel }> = {
+  local,
   google,
   groq,
   anthropic,
@@ -50,12 +78,21 @@ export function resolveModel(modelId: ModelId): LanguageModel {
   const info = getModel(modelId);
   const factory = PROVIDER_FACTORIES[info.provider];
   const client = factory();
-  return client(info.id);
+  // The "local" provider's registry id (local/default) is just a stable UI
+  // slug — the actual model tag sent to agent-server is whatever
+  // LOCAL_LLM_MODEL says (falling back to DEFAULT_LOCAL_MODEL), so
+  // switching local models is an env var change, not a code change.
+  const wireModelId =
+    info.provider === "local"
+      ? process.env.LOCAL_LLM_MODEL || DEFAULT_LOCAL_MODEL
+      : info.id;
+  return client(wireModelId);
 }
 
-/** Which providers currently have an API key configured. */
+/** Which providers currently have credentials configured. */
 export function configuredProviders(): Record<ProviderId, boolean> {
   return {
+    local: Boolean(process.env.LOCAL_LLM_FUNNEL_URL && process.env.LOCAL_LLM_SHARED_SECRET),
     google: Boolean(process.env.GOOGLE_GENERATIVE_AI_API_KEY),
     groq: Boolean(process.env.GROQ_API_KEY),
     anthropic: Boolean(process.env.ANTHROPIC_API_KEY),
