@@ -718,7 +718,11 @@ export async function streamAssist(
     // — carrying just the promise forward, rather than the whole `result`
     // object, keeps this hoistable out of the try block without fighting
     // streamText's generic return type.
-    let usagePromise: Promise<UsageLike> | undefined;
+    // result.usage below is typed PromiseLike<LanguageModelUsage> by the AI
+    // SDK (a bare thenable, not a full Promise — no .catch/.finally), so
+    // this has to be PromiseLike too rather than Promise; `await` works the
+    // same either way where usagePromise is consumed below.
+    let usagePromise: PromiseLike<UsageLike> | undefined;
     // Bounds the streaming attempt in two phases on the same controller:
     // a short STREAM_FIRST_BYTE_TIMEOUT_MS while nothing has arrived yet
     // (this is what actually catches a hang — the known Ollama
