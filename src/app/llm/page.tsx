@@ -1,18 +1,19 @@
-import { redirect } from "next/navigation";
-import { auth } from "@/auth";
 import { getLang } from "@/lib/i18n-server";
 import { t } from "@/lib/i18n";
 import { LlmStatusCard } from "@/components/llm-status-card";
 import { LlmChatPanel } from "@/components/llm-chat-panel";
 
+// Intentionally public, unlike most of the rest of the app (/new, /admin) —
+// this is a status page + chatbox for the self-hosted local model, and the
+// owner explicitly wants anonymous visitors to be able to see it's online
+// and try it. See the matching auth-removal comments on
+// src/app/api/ai/health/route.ts and the context === "knowledge" branch of
+// src/app/api/ai/assist/route.ts, which this page's components call.
 export default async function LlmPage({
   searchParams,
 }: {
   searchParams: Promise<{ lang?: string }>;
 }) {
-  const session = await auth();
-  if (!session) redirect("/login");
-
   const { lang: langParam } = await searchParams;
   const lang = await getLang(langParam);
   const s = t(lang).llm;

@@ -47,6 +47,15 @@ export async function Header() {
           >
             {s.classroom}
           </Link>
+          {/* Public regardless of session — see the auth-removal comments
+              on src/app/llm/page.tsx for why this one differs from the
+              other signed-in-only links below. */}
+          <Link
+            href="/llm"
+            className="rounded-md px-3 py-1.5 text-sm font-medium text-fg-secondary hover:text-accent transition-colors"
+          >
+            {s.llm}
+          </Link>
 
           {session ? (
             <>
@@ -67,12 +76,6 @@ export async function Header() {
                 className="rounded-md px-3 py-1.5 text-sm font-medium text-fg-secondary hover:text-accent transition-colors"
               >
                 {s.obsidian}
-              </Link>
-              <Link
-                href="/llm"
-                className="rounded-md px-3 py-1.5 text-sm font-medium text-fg-secondary hover:text-accent transition-colors"
-              >
-                {s.llm}
               </Link>
               <Link
                 href="/new"

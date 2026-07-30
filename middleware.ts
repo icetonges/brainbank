@@ -10,5 +10,8 @@ export default auth((req) => {
 });
 
 export const config = {
-  matcher: ["/new/:path*", "/admin/:path*", "/llm/:path*"],
+  // /llm is intentionally public — see the auth-removal comments on
+  // src/app/llm/page.tsx, src/app/api/ai/health/route.ts, and the
+  // context === "knowledge" branch of src/app/api/ai/assist/route.ts.
+  matcher: ["/new/:path*", "/admin/:path*"],
 };

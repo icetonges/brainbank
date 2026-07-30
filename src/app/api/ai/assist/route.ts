@@ -27,12 +27,20 @@ interface AssistRequestBody {
 }
 
 export async function POST(req: Request) {
-  const session = await auth();
-  if (!session) {
-    return new Response("Unauthorized", { status: 401 });
-  }
-
   const body: AssistRequestBody = await req.json();
+
+  // context: "knowledge" is the public /llm chatbox — intentionally usable
+  // without signing in, per the owner. context: "note" (default) is the
+  // AiAssistPanel embedded in the note-drafting flow on /new, which stays
+  // behind auth like the rest of that page — checked here rather than in
+  // middleware.ts because this one route serves both, and only one of the
+  // two contexts should be gated.
+  if ((body.context ?? "note") !== "knowledge") {
+    const session = await auth();
+    if (!session) {
+      return new Response("Unauthorized", { status: 401 });
+    }
+  }
 
   if (body.modelId && !MODELS.some((m) => m.id === body.modelId)) {
     return new Response("Unknown model id", { status: 400 });

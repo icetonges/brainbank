@@ -1,4 +1,3 @@
-import { auth } from "@/auth";
 import { localModelTag } from "@/lib/ai/providers";
 
 export const runtime = "nodejs";
@@ -28,16 +27,12 @@ interface HealthResult {
 /**
  * Server-side proxy for agent-server's /health — never called directly
  * from the client, because that would mean shipping LOCAL_LLM_SHARED_SECRET
- * to the browser. Requires a brainbank session for the same reason the
- * other /api/ai/* routes do: this reveals whether/how the self-hosted
- * backend is configured, which shouldn't be probeable anonymously.
+ * to the browser; this route holds the secret server-side and only ever
+ * returns status/latency/model, never the key itself. Intentionally public
+ * (no auth check) — it backs the status card on /llm, which the owner
+ * wants visible to anonymous visitors.
  */
 export async function GET() {
-  const session = await auth();
-  if (!session) {
-    return new Response("Unauthorized", { status: 401 });
-  }
-
   const checkedAt = new Date().toISOString();
   const baseURL = process.env.LOCAL_LLM_FUNNEL_URL;
   const apiKey = process.env.LOCAL_LLM_SHARED_SECRET;
