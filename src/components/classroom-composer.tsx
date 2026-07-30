@@ -16,6 +16,7 @@ import {
 } from "@/app/classroom/extract-actions";
 import { t, type Lang } from "@/lib/i18n";
 import { SubcategoryField } from "@/components/subcategory-field";
+import { MODELS, DEFAULT_MODEL_ID, type ModelId } from "@/lib/ai/models";
 
 // Converts pasted rich HTML (from a rendered webpage, Google Doc, Notion,
 // Word, another classroom article, etc.) into the markdown syntax this
@@ -81,6 +82,14 @@ export function ClassroomComposer({
   // exists — created lazily on the first upload so a plain text article
   // never leaves an empty draft behind.
   const [draft, setDraft] = useState<{ noteId: number; slug: string } | null>(null);
+  // Which model publishAssist/formatArticleContent should prefer for this
+  // article — see publishClassroomArticle in classroom/actions.ts, which
+  // reads this from the "modelId" field below and passes it through as
+  // their optional modelId override. Falling back to it if it fails is
+  // handled automatically by the existing fallback-chain machinery
+  // (chainFor/withFallback in tasks.ts) — picking a model here doesn't
+  // turn off the chain, it just changes which model tries first.
+  const [modelId, setModelId] = useState<ModelId>(DEFAULT_MODEL_ID);
   const [uploadPct, setUploadPct] = useState<number | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -312,7 +321,31 @@ export function ClassroomComposer({
             sectionNewPlaceholder: s.sectionNewPlaceholder,
           }}
         />
+        {/* Which model publishAssist/formatArticleContent tries first —
+            see publishClassroomArticle in classroom/actions.ts. A hidden
+            input carries the value through the native <form action>
+            submit (FormData), same pattern as SaveButton's useFormStatus
+            below; the visible <select> stays a plain controlled element so
+            the heavyweight-model warning can react to it. */}
+        <select
+          value={modelId}
+          onChange={(e) => setModelId(e.target.value as ModelId)}
+          aria-label={s.modelLabel}
+          className="flex-1 rounded-md border border-border bg-bg-elevated px-3 py-2 text-sm text-fg outline-none focus:border-accent sm:min-w-[160px]"
+        >
+          {MODELS.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.name}
+              {m.id === DEFAULT_MODEL_ID ? " ★" : ""}
+            </option>
+          ))}
+        </select>
+        <input type="hidden" name="modelId" value={modelId} />
       </div>
+
+      {MODELS.find((m) => m.id === modelId)?.heavy && (
+        <p className="-mt-2 text-sm text-warn">⚠️ {s.modelHeavyWarning}</p>
+      )}
 
       <textarea
         ref={bodyRef}

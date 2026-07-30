@@ -38,14 +38,15 @@ import { classroomCategoryEnum, type ClassroomCategory } from "@/lib/db/schema";
 // "Chain" isn't just naming — every task actually runs through
 // withFallback() below, which retries against FALLBACK_CHAIN (models.ts)
 // if the preferred model's call fails (rate limit, spend cap, outage).
-// Only local/default is registered right now (every other provider was
-// pulled out per explicit instruction — see models.ts's header comment),
-// so FALLBACK_CHAIN is a single entry and there's currently no real
-// fallback destination: if the Mac is asleep or agent-server is
-// unreachable, a task fails outright instead of using a different
-// provider. The machinery still runs the same way it would with more
-// models registered, so restoring redundancy later is just adding entries
-// back to models.ts/providers.ts.
+// All three registered models (models.ts) run through the same
+// agent-server (every other provider was pulled out per explicit
+// instruction — see models.ts's header comment), so this doesn't protect
+// against the Mac being asleep or Funnel being down — every model fails
+// together in that case. It DOES protect against one model erroring or
+// timing out (a gpt-oss:120b cold-load timeout, a transient agent_loop
+// failure) while the others are fine, and it's what makes the classroom
+// composer's model picker a real "try my pick, fall back automatically"
+// choice rather than just a label.
 
 export type TaskName =
   | "assist"
@@ -568,10 +569,11 @@ async function translateWithMeta(
   }
 
   // Chunks are independent in principle, but they're translated
-  // sequentially, not concurrently — this app only ever has ONE model
-  // registered (local/default, see models.ts's header comment), a single
-  // self-hosted Ollama instance that generates one response at a time.
-  // Firing every chunk's generateText call at once via Promise.all doesn't
+  // sequentially, not concurrently — all three registered models
+  // (models.ts) run through the same physical Mac Studio / single Ollama
+  // instance, which generates one response at a time regardless of which
+  // of the three is asked. Firing every chunk's generateText call at once
+  // via Promise.all doesn't
   // actually parallelize the work; agent-server just queues them, and each
   // queued call's own abortSignal (TASK_TIMEOUT_MS, see translateChunk)
   // keeps counting down from the moment it was dispatched — not from when

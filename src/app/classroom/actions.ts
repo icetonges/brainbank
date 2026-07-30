@@ -21,6 +21,7 @@ import {
   translateTextWithMeta,
   type PublishAssistResult,
 } from "@/lib/ai/tasks";
+import { MODELS, type ModelId } from "@/lib/ai/models";
 import { linkWikilinksFromText } from "@/lib/notes/link-wikilinks";
 import { linkRelatedByTags } from "@/lib/notes/link-related";
 import { eq, and } from "drizzle-orm";
@@ -234,6 +235,16 @@ export async function publishClassroomArticle(formData: FormData) {
   const rawLanguage = String(formData.get("language") ?? "").trim();
   const body = String(formData.get("body") ?? "").trim();
   const sourceUrl = normalizeSourceUrl(String(formData.get("sourceUrl") ?? ""));
+  // The composer's model picker (classroom-composer.tsx) — validated
+  // against the registry rather than trusted as-is, same defensive pattern
+  // as /api/ai/assist/route.ts's modelId check. An unrecognized value
+  // (only reachable by hand-crafting the POST — the <select> only ever
+  // submits a real MODELS id) falls back to undefined, which publishAssist
+  // /formatArticleContent already treat as "use the task's default."
+  const rawModelId = String(formData.get("modelId") ?? "");
+  const modelId: ModelId | undefined = MODELS.some((m) => m.id === rawModelId)
+    ? (rawModelId as ModelId)
+    : undefined;
 
   if (body.length < 10) throw new Error("Write at least a few words first");
   if (body.length > 100_000) throw new Error("Content is limited to 100,000 characters");
@@ -255,7 +266,7 @@ export async function publishClassroomArticle(formData: FormData) {
     ? rawCategory
     : undefined;
 
-  // Two AI passes over the raw content, in parallel:
+  // Two AI passes over the raw content:
   //  - publishAssist: everything the article *page* needs (topic, subtab,
   //    tags, summary, learning guide, resources)
   //  - formatArticleContent: rewrites the raw paste itself into a clean,
@@ -264,10 +275,31 @@ export async function publishClassroomArticle(formData: FormData) {
   // Either failing degrades gracefully — the article still publishes with
   // whichever pieces succeeded (the original body if formatting failed,
   // no guide if assist failed).
-  const [assistResult, formattedResult] = await Promise.allSettled([
-    publishAssist({ topic, category, content: body }),
-    formatArticleContent({ topic, content: body }),
-  ]);
+  //
+  // Sequential, not Promise.allSettled — all three registered models
+  // (models.ts) run through the same single Mac, which generates one
+  // response at a time regardless of which model is asked, so firing both
+  // calls at once doesn't actually parallelize the work; it just queues
+  // the second behind the first while its own abortSignal timeout
+  // (TASK_TIMEOUT_MS, tasks.ts) keeps counting from dispatch time rather
+  // than when it actually starts. That risk is worse now that a heavy
+  // model (gpt-oss:120b) is selectable here — a cold load already eats
+  // tens of seconds on its own; queuing a second call behind it made a
+  // timeout on that second call more likely, not less. Still built as
+  // PromiseSettledResult-shaped values so the graceful-degradation logic
+  // below is unchanged.
+  const assistResult: PromiseSettledResult<PublishAssistResult> = await publishAssist(
+    { topic, category, content: body },
+    modelId,
+  )
+    .then((value) => ({ status: "fulfilled" as const, value }))
+    .catch((reason) => ({ status: "rejected" as const, reason }));
+  const formattedResult: PromiseSettledResult<string> = await formatArticleContent(
+    { topic, content: body },
+    modelId,
+  )
+    .then((value) => ({ status: "fulfilled" as const, value }))
+    .catch((reason) => ({ status: "rejected" as const, reason }));
   const assist: PublishAssistResult | null =
     assistResult.status === "fulfilled" ? assistResult.value : null;
   if (assistResult.status === "rejected") {

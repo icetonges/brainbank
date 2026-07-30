@@ -5,20 +5,25 @@
 // resolveModel() (providers.ts) and runTask() (tasks.ts), so adding a
 // model here is the only step needed to make it selectable everywhere.
 //
-// FOR NOW, this registry holds only the local self-hosted model — Google/
-// Groq/Anthropic were deliberately pulled out (per explicit instruction)
-// so the local agent-server is the only place any AI feature can call,
-// not just the preferred/first-tried one in a fallback chain. The
-// fallback-chain machinery below (FALLBACK_CHAIN, GROUNDED_FALLBACK_CHAIN,
-// OBJECT_FALLBACK_CHAIN, AGENTIC_MODELS, NO_STRUCTURED_OUTPUT_MODELS) is
-// left in place even though it only has one model to chain through right
-// now — it costs nothing to keep, and re-adding a provider later is just
-// adding a provider() factory in providers.ts, a MODELS entry, and a line
-// in FALLBACK_CHAIN, same as before this removal.
+// FOR NOW, every registered model runs through the same local self-hosted
+// agent-server — Google/Groq/Anthropic were deliberately pulled out (per
+// explicit instruction) so that backend is the only place any AI feature
+// can call, not just the preferred/first-tried one in a fallback chain.
+// The three entries below are the three chat models actually available on
+// that one agent-server (see HANDOFF-FOR-WINDOWS.md §2 — verified by
+// reading Ollama's manifests directly on the Mac; a fourth model,
+// nomic-embed-text, exists on the same server but is embedding-only and
+// deliberately NOT registered here — it's not a chat model and must never
+// show up in a picker). Re-adding an external provider later is still just
+// a provider() factory in providers.ts, a MODELS entry, and a line in
+// FALLBACK_CHAIN, same as before.
 
 export type ProviderId = "local";
 
-export type ModelId = "local/default";
+export type ModelId =
+  | "local/qwen3.6-35b-a3b"
+  | "local/qwen3-vl-30b"
+  | "local/gpt-oss-120b";
 
 export interface ModelInfo {
   id: ModelId;
@@ -34,30 +39,85 @@ export interface ModelInfo {
   supportsVision: boolean;
   isDefault?: boolean;
   badge?: string;
+  // The exact Ollama model tag sent over the wire (see resolveModel() in
+  // providers.ts) — HANDOFF-FOR-WINDOWS.md §2 is explicit that these must
+  // be used exactly; an unrecognized tag makes Ollama try to *download*
+  // it, "which is not something a web request should be able to trigger."
+  // Only the default entry's tag can still be overridden via the
+  // LOCAL_LLM_MODEL env var (backward-compatible with the single-model
+  // setup this registry replaces) — the other two are always exactly this.
+  wireId: string;
+  // Set on a model that can't coexist with the others in the Mac's VRAM
+  // (see HANDOFF-FOR-WINDOWS.md §2's "gpt-oss:120b constraint" table) —
+  // selecting it evicts whatever was loaded and the first request after
+  // waits for a full cold load (tens of seconds to over a minute). The
+  // picker UI surfaces this as an explicit warning; per the handoff doc,
+  // "Don't remove those warnings."
+  heavy?: boolean;
 }
 
 export const MODELS: ModelInfo[] = [
-  // Local self-hosted agent-server (Mac + Tailscale Funnel), see
-  // "local API deployment.md". No external API call, no per-token cost.
-  // The actual model tag sent over the wire comes from LOCAL_LLM_MODEL
-  // (see resolveModel() in providers.ts) rather than this id, so switching
-  // which local model you're running is a single env var change, not a
-  // code change or a new registry entry.
+  // Mixture-of-experts — only ~3B params active per token despite the
+  // 35B/22.3 GiB size, which is why it's the fastest of the three
+  // (measured 72 tokens/sec on the Mac). Default for every task.
   {
-    id: "local/default",
-    name: "Local (self-hosted)",
+    id: "local/qwen3.6-35b-a3b",
+    name: "Qwen3.6 35B (fast, default)",
     provider: "local",
     providerLabel: "Local",
     providerColor: "#16a34a",
     inputPricePer1M: 0,
     outputPricePer1M: 0,
     description:
-      "Self-hosted agent-server via Tailscale Funnel — private, no external API, no per-token cost. Requires LOCAL_LLM_FUNNEL_URL + LOCAL_LLM_SHARED_SECRET and the Mac to be awake/reachable.",
+      "Self-hosted agent-server via Tailscale Funnel — private, no external API, no per-token cost. Mixture-of-experts (~3B active params/token), the fastest of the three local models (~72 tok/s). Requires LOCAL_LLM_FUNNEL_URL + LOCAL_LLM_SHARED_SECRET and the Mac to be awake/reachable.",
     contextWindow: "varies",
     isFree: true,
     supportsVision: false,
     isDefault: true,
     badge: "Local",
+    wireId: "qwen3.6:35b-a3b",
+  },
+  // The only one of the three that accepts image input (vision-language).
+  // Coexists in VRAM alongside the default model (40.5 GiB combined, both
+  // stay warm — see the handoff doc's table), so switching to this one and
+  // back doesn't trigger the slow evict/reload cycle gpt-oss:120b does.
+  {
+    id: "local/qwen3-vl-30b",
+    name: "Qwen3-VL 30B (vision)",
+    provider: "local",
+    providerLabel: "Local",
+    providerColor: "#16a34a",
+    inputPricePer1M: 0,
+    outputPricePer1M: 0,
+    description:
+      "Self-hosted agent-server via Tailscale Funnel — private, no external API, no per-token cost. Vision-language — the only local model that accepts images. Fits in VRAM alongside the default model, so it stays warm.",
+    contextWindow: "varies",
+    isFree: true,
+    supportsVision: true,
+    badge: "Local",
+    wireId: "qwen3-vl:30b",
+  },
+  // Largest/most capable, but cannot be co-resident with either other
+  // model (77.8 GiB VRAM total; this alone is 60.9 GiB, and both other
+  // pairings with it exceed the limit — see the handoff doc's table).
+  // Selecting it evicts whatever was loaded; the next request waits for a
+  // full cold load of ~65 GB, which can take 60+ seconds.
+  {
+    id: "local/gpt-oss-120b",
+    name: "GPT-OSS 120B (largest, slow to switch to)",
+    provider: "local",
+    providerLabel: "Local",
+    providerColor: "#16a34a",
+    inputPricePer1M: 0,
+    outputPricePer1M: 0,
+    description:
+      "Self-hosted agent-server via Tailscale Funnel — private, no external API, no per-token cost. The largest and most capable of the three, but can't share VRAM with the other two — selecting it evicts whatever else was loaded and the next request waits for a full cold load.",
+    contextWindow: "varies",
+    isFree: true,
+    supportsVision: false,
+    badge: "Local",
+    wireId: "gpt-oss:120b",
+    heavy: true,
   },
 ];
 
@@ -65,14 +125,25 @@ export const MODELS: ModelInfo[] = [
 //
 // The order tasks.ts tries models in when a call fails (rate limit, spend
 // cap, outage, whatever) — not just a config table but an actual runtime
-// fallback (see withFallback() in tasks.ts). Only local/default is
-// registered right now, so this chain has exactly one entry and there is
-// no real fallback destination — if the Mac is asleep or agent-server is
-// unreachable, every AI feature fails outright instead of quietly using a
-// different provider. That's the accepted tradeoff of removing every
-// other model; re-add entries here (and a matching MODELS/providers.ts
-// entry) to restore redundancy.
-export const FALLBACK_CHAIN: ModelId[] = ["local/default"];
+// fallback (see withFallback() in tasks.ts). All three chain entries run
+// through the same agent-server, so this doesn't protect against the Mac
+// being asleep or Funnel being down (every model fails together in that
+// case) — what it does protect against is one specific model erroring or
+// timing out (a cold-load timeout on gpt-oss:120b, a transient agent_loop
+// failure, etc.) while the others are fine. Ordered fastest/most-reliable
+// first: the default model, then the vision model (which stays warm
+// alongside it — see MODELS above), then the heavyweight model last since
+// falling through to it costs a slow VRAM swap. When a task explicitly
+// requests a specific model (e.g. the classroom composer's model picker),
+// chainFor() in tasks.ts puts that choice first and appends the rest of
+// this chain after it — so picking gpt-oss:120b still means "try gpt-oss,
+// then fall back to the other two if it fails," not "only ever use
+// gpt-oss."
+export const FALLBACK_CHAIN: ModelId[] = [
+  "local/qwen3.6-35b-a3b",
+  "local/qwen3-vl-30b",
+  "local/gpt-oss-120b",
+];
 
 export const DEFAULT_MODEL_ID: ModelId =
   MODELS.find((m) => m.isDefault)?.id ?? FALLBACK_CHAIN[0];
@@ -101,13 +172,16 @@ export const GROUNDED_FALLBACK_CHAIN: ModelId[] = FALLBACK_CHAIN.filter(
 //
 // generateObject (tag-and-link, draft, publish-assist, and translate's
 // structured note fields) needs the model to actually honor a JSON schema,
-// not just "usually return JSON". local/default has been observed
-// returning a schema-non-conformant response (tags as a comma-separated
-// string instead of an array, resources as strings instead of
-// {title,url,description} objects) — since it's the only registered
-// model, it stays in the chain regardless (excluding it here would mean
-// generateObject tasks have nowhere to go at all). The fix lives in
-// tasks.ts instead: every generateObject system prompt spells out the
+// not just "usually return JSON". The default local model has been
+// observed returning schema-non-conformant responses (tags as a
+// comma-separated string instead of an array, resources as strings instead
+// of {title,url,description} objects, handsOn as an array instead of a
+// string) — every local model shares the same agent-server, which per
+// HANDOFF-FOR-WINDOWS.md doesn't support strict structured-output
+// enforcement (response_format is best-effort JSON, not a hard schema), so
+// none of the three are excluded here; that would just mean generateObject
+// tasks have nowhere to go. The fix lives in tasks.ts instead: every
+// generateObject system prompt spells out the
 // exact JSON shape with a concrete example, and the schemas use
 // z.preprocess() to coerce the specific shape mistakes observed (string
 // -> array, string -> best-effort object) before validation runs, so a

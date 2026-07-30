@@ -128,6 +128,9 @@ const en = {
     uncategorized: "Uncategorized",
     bodyPlaceholder:
       "Drop everything here — text, markdown, files, links… No formatting needed; a messy paste is fine.\nPaste one or more URLs alone and each page's main content is fetched with the ads and navigation stripped; YouTube links pull the transcript. Attach, paste, or drag in documents (pdf, docx, xlsx, csv, pptx, txt, md, json) and their content is extracted right here. Images upload and appear as markdown; math ($x^2$), code blocks, and ```mermaid diagrams render automatically.\n\nClick Save and AI will restructure it all into a polished article — headings, sections, callouts, key takeaways, with every image, link, and fact kept — plus a learning map, step-by-step hands-on instructions, the top 3 sources, and tags for the right AI Classroom subtab.",
+    modelLabel: "AI model",
+    modelHeavyWarning:
+      "Heavyweight — can't stay loaded alongside the other models. Selecting it evicts whatever's currently loaded, so the next run may take 60+ seconds to start.",
     save: "Save",
     publishing: "Publishing…",
     publishingHint:
@@ -309,6 +312,9 @@ const zh: typeof en = {
     uncategorized: "未分类",
     bodyPlaceholder:
       "把所有内容放进来——文字、Markdown、文件、链接……无需排版，随意粘贴即可。\n单独粘贴一个或多个网址，会自动抓取每个页面的正文内容（去除广告和导航栏）；YouTube 链接会提取字幕。添加、粘贴或拖入文档（pdf、docx、xlsx、csv、pptx、txt、md、json），内容会直接提取到这里。图片自动上传并以 Markdown 插入；数学公式（$x^2$）、代码块和 ```mermaid 图表自动渲染。\n\n点击保存后，AI 会把内容重新整理成排版精美的文章——分节标题、要点列表、核心提要，所有图片、链接和事实原样保留——并生成学习地图、分步动手指南、三大推荐资源，以及对应 AI 课堂子栏目的标签。",
+    modelLabel: "AI 模型",
+    modelHeavyWarning:
+      "重量级模型——无法与其他模型同时驻留显存。选择它会先卸载当前已加载的模型，因此下一次运行可能需要等待 60 秒以上。",
     save: "保存",
     publishing: "发布中…",
     publishingHint: "AI 正在排版文章，并生成学习地图、动手步骤和推荐资源……",
