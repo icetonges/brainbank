@@ -196,6 +196,9 @@ const en = {
     chatTokensIn: "in",
     chatTokensOut: "out",
     chatTokensTotal: "total",
+    modelLabel: "AI model",
+    modelHeavyWarning:
+      "Heavyweight — can't stay loaded alongside the other models. Selecting it evicts whatever's currently loaded, so the next reply may take 60+ seconds to start.",
   },
 };
 
@@ -375,6 +378,9 @@ const zh: typeof en = {
     chatTokensIn: "输入",
     chatTokensOut: "输出",
     chatTokensTotal: "共",
+    modelLabel: "AI 模型",
+    modelHeavyWarning:
+      "重量级模型——无法与其他模型同时驻留显存。选择它会先卸载当前已加载的模型，因此下一次回复可能需要等待 60 秒以上。",
   },
 };
 

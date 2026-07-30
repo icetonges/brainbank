@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { MODELS, DEFAULT_MODEL_ID, type ModelId } from "@/lib/ai/models";
 
 type MessageStatus = "thinking" | "streaming" | "done";
 
@@ -34,6 +35,8 @@ interface LlmChatStrings {
   chatTokensIn: string;
   chatTokensOut: string;
   chatTokensTotal: string;
+  modelLabel: string;
+  modelHeavyWarning: string;
 }
 
 // Mirrors USAGE_TRAILER_PREFIX/SUFFIX in src/lib/ai/tasks.ts exactly — see
@@ -72,10 +75,11 @@ function formatSeconds(ms: number): string {
  * model, distinct from the note-drafting AiAssistPanel embedded on /new
  * (same backend route, /api/ai/assist, but sent with context: "knowledge"
  * so tasks.ts uses KNOWLEDGE_CHAT_SYSTEM_PROMPT instead of the note-assist
- * one — see streamAssist in src/lib/ai/tasks.ts). No model picker here:
- * local/default is currently the only registered model (see models.ts),
- * so a dropdown with one option would just be clutter: the status card
- * above this panel already shows which model is live.
+ * one — see streamAssist in src/lib/ai/tasks.ts). Three local models are
+ * now registered (models.ts, per HANDOFF-FOR-WINDOWS.md §2), so there's a
+ * picker below the intro text — same pattern as the classroom composer's
+ * (validated server-side too: /api/ai/assist/route.ts rejects an unknown
+ * modelId with a 400 before it ever reaches streamAssist).
  *
  * Shows, per assistant reply: a live "thinking…" status before the first
  * token arrives, time-to-first-token and total elapsed time once it's
@@ -88,6 +92,11 @@ export function LlmChatPanel({ s }: { s: LlmChatStrings }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  // Applies to the NEXT message sent — each request is independent (the
+  // whole transcript is resent every time, see send() below), so changing
+  // this mid-conversation is safe and just means "use this model from here
+  // on," not a retroactive change to earlier replies.
+  const [modelId, setModelId] = useState<ModelId>(DEFAULT_MODEL_ID);
   const abortRef = useRef<AbortController | null>(null);
 
   // Drives the live "Xs" readout on the in-flight message. Only ticks
@@ -121,6 +130,7 @@ export function LlmChatPanel({ s }: { s: LlmChatStrings }) {
         body: JSON.stringify({
           messages: nextMessages.map(({ role, content }) => ({ role, content })),
           context: "knowledge",
+          modelId,
         }),
         signal: controller.signal,
       });
@@ -184,6 +194,25 @@ export function LlmChatPanel({ s }: { s: LlmChatStrings }) {
         {s.chatTitle}
       </h2>
       <p className="text-sm text-fg-secondary">{s.chatIntro}</p>
+
+      <div className="flex items-center gap-2">
+        <select
+          value={modelId}
+          onChange={(e) => setModelId(e.target.value as ModelId)}
+          aria-label={s.modelLabel}
+          className="rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none focus:border-accent"
+        >
+          {MODELS.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.name}
+              {m.id === DEFAULT_MODEL_ID ? " ★" : ""}
+            </option>
+          ))}
+        </select>
+      </div>
+      {MODELS.find((m) => m.id === modelId)?.heavy && (
+        <p className="text-sm text-warn">⚠️ {s.modelHeavyWarning}</p>
+      )}
 
       <div className="flex min-h-[24rem] flex-1 flex-col gap-3 overflow-y-auto rounded-md border border-border bg-bg p-3">
         {messages.length === 0 ? (
