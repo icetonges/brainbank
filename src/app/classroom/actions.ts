@@ -410,11 +410,31 @@ export async function regenerateGuideAction(noteId: number, slug: string) {
   }
   if (!note || !content?.bodyMarkdown) throw new Error("Nothing to build a guide from");
 
-  const assist = await publishAssist({
-    topic: note.title,
-    category: note.category ?? undefined,
-    content: content.bodyMarkdown,
-  });
+  // Unlike publishClassroomArticle/updateClassroomArticle (which run
+  // publishAssist as one optional pass alongside a publish/save that
+  // already has other important side effects to complete), this action's
+  // entire job IS the AI call — but it still shouldn't crash the whole
+  // page on an AI failure (agent-server unreachable, an expired/rotated
+  // LOCAL_LLM_SHARED_SECRET returning 401, a timeout, etc.). An uncaught
+  // throw here previously propagated straight to the root error.tsx
+  // boundary and replaced the entire article page with a bare
+  // "Something went wrong" + digest — accurate in the server logs but
+  // unhelpful on screen, and needlessly destructive for what's just a
+  // "regenerate" action the user can retry. Catch and re-throw a message
+  // that's actually informative in that boundary instead.
+  let assist: PublishAssistResult;
+  try {
+    assist = await publishAssist({
+      topic: note.title,
+      category: note.category ?? undefined,
+      content: content.bodyMarkdown,
+    });
+  } catch (err) {
+    console.error("regenerateGuideAction: publishAssist failed:", err);
+    throw new Error(
+      "Couldn't regenerate the guide — the local AI model didn't respond. Check /llm's status card, then try again.",
+    );
+  }
 
   await saveGuide(noteId, assist);
   await applyTags(noteId, assist.tags);

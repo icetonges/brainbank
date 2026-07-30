@@ -229,6 +229,24 @@ function resourceItemSchema() {
   }));
 }
 
+// The inverse shape mistake from arrayOfStrings above: a field documented
+// as a markdown STRING (numbered/bulleted steps as lines within one block
+// of text) sometimes comes back as a JSON array of strings instead — one
+// array item per step — observed in production on publishAssist's handsOn
+// field against local/default. Reconstructing a numbered markdown list from
+// the array is strictly better than throwing the whole generateObject call
+// away over a shape mistake the content itself already has right.
+function markdownStringOrList(description: string) {
+  return z.preprocess((val) => {
+    if (Array.isArray(val)) {
+      return val
+        .map((item, i) => `${i + 1}. ${typeof item === "string" ? item : JSON.stringify(item)}`)
+        .join("\n");
+    }
+    return val;
+  }, z.string().describe(description));
+}
+
 // Reinforces the exact JSON shape for array fields that local models have
 // been observed to flatten into a single string — appended to any
 // generateObject system prompt whose schema has an array-of-strings or
@@ -998,16 +1016,26 @@ const publishAssistSchema = z.object({
     .describe(
       "A markdown learning map for this topic: an ordered roadmap from beginner to competent, grouped into stages, each stage with 2-4 concrete things to learn and why they matter",
     ),
-  handsOn: z
-    .string()
-    .describe(
-      "Markdown step-by-step hands-on instructions to get practical experience with this topic: numbered steps, each concrete and actionable (commands, tools, or exercises), starting from zero setup",
-    ),
-  resources: z
-    .array(resourceItemSchema())
-    .min(3)
-    .max(3)
-    .describe("The top 3 learning resources for this topic"),
+  handsOn: markdownStringOrList(
+    "Markdown step-by-step hands-on instructions to get practical experience with this topic: numbered steps, each concrete and actionable (commands, tools, or exercises), starting from zero setup",
+  ),
+  // Ideally exactly 3 (the prompt below asks for that explicitly), but not
+  // enforced as a hard minimum — local/default has been observed omitting
+  // this field entirely on an otherwise-good response (handsOn's example is
+  // the same generation: everything else came back correctly-shaped, this
+  // one field just didn't). A missing/empty field failing the whole
+  // generateObject call and throwing away a good topic/summary/learning-map
+  // is a worse outcome than an article that lands with 1-2 resources (or
+  // none, worth re-running "Generate AI guide" for) instead of exactly 3.
+  resources: z.preprocess(
+    (val) => (val === undefined || val === null ? [] : val),
+    z
+      .array(resourceItemSchema())
+      .max(3)
+      .describe(
+        "The top 3 learning resources for this topic — never omit this field; include fewer than 3 real ones if that's genuinely all that fit, rather than leaving it out",
+      ),
+  ),
 });
 
 export type PublishAssistResult = z.infer<typeof publishAssistSchema>;
@@ -1053,7 +1081,8 @@ export async function publishAssist(
           input.topic ? "Keep the user's topic unless it's clearly unusable; you may lightly clean it up." : "",
           input.category ? `The user already chose the category "${input.category}" — keep it.` : "",
           `${NO_BROWSING_INSTRUCTION} Suggest resources from what you already know of real, well-known documentation/repos/courses — do not browse to verify or discover one.`,
-          `${JSON_ARRAY_SHAPE_REMINDER} "resources" specifically MUST be an array of exactly 3 objects shaped like {"title":"...","url":"https://...","description":"..."} — never an array of plain strings. Example of the exact shape expected for both fields: "tags":["prompt-engineering","fine-tuning"], "resources":[{"title":"Official Docs","url":"https://example.com/docs","description":"The canonical reference for this topic."}, ...2 more objects like it].`,
+          `${JSON_ARRAY_SHAPE_REMINDER} "resources" specifically MUST be an array of exactly 3 objects shaped like {"title":"...","url":"https://...","description":"..."} — never an array of plain strings, and never omitted from the response even if you can only think of 1 or 2 real ones. Example of the exact shape expected for both fields: "tags":["prompt-engineering","fine-tuning"], "resources":[{"title":"Official Docs","url":"https://example.com/docs","description":"The canonical reference for this topic."}, ...2 more objects like it].`,
+          `"handsOn" specifically MUST be a single JSON string containing markdown (numbered steps as lines of text within that one string, e.g. "1. Do X\\n2. Do Y\\n3. Do Z") — never a JSON array with one step per array item.`,
         ]
           .filter(Boolean)
           .join("\n"),
