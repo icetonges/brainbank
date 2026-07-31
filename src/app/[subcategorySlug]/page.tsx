@@ -167,14 +167,21 @@ export default async function SubcategoryLandingPage({
             </nav>
           )}
 
-          <div className="flex flex-col gap-4">
+          {/* Grid rather than one full-width column per section — mirrors
+              the /classroom overview grid (sm:grid-cols-2 lg:grid-cols-3),
+              so a subcategory with a handful of short sections (like this
+              one) reads as side-by-side boxes instead of a long, mostly-
+              empty scroll. A section with a lot of articles just grows
+              taller in its own cell; the grid doesn't try to balance
+              heights across columns. */}
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {sectionsWithArticles.map((sec, i) => {
               const tone = sectionTone(i);
               return (
                 <section
                   key={sec.id}
                   id={`section-${sec.id}`}
-                  className={`scroll-mt-20 overflow-hidden rounded-xl border border-border border-l-4 ${tone.bar}`}
+                  className={`scroll-mt-20 flex flex-col overflow-hidden rounded-xl border border-border border-l-4 ${tone.bar}`}
                 >
                   <div
                     className={`flex items-center gap-2 ${tone.tint} px-4 py-2 text-sm font-semibold ${tone.text}`}
@@ -204,7 +211,7 @@ export default async function SubcategoryLandingPage({
             })}
 
             {unsectioned.length > 0 && (
-              <section className="overflow-hidden rounded-xl border border-border">
+              <section className="flex flex-col overflow-hidden rounded-xl border border-border">
                 {sectionsWithArticles.length > 0 && (
                   <div className="flex items-center gap-2 bg-bg px-4 py-2 text-sm font-semibold text-fg-secondary">
                     <span className="h-1.5 w-1.5 rounded-full bg-fg-secondary/60" aria-hidden />
