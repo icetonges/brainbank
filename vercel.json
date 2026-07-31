@@ -1,0 +1,10 @@
+{
+  "functions": {
+    "src/app/classroom/**": {
+      "maxDuration": 290
+    },
+    "src/app/api/ai/**": {
+      "maxDuration": 290
+    }
+  }
+}

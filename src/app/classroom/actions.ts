@@ -38,14 +38,30 @@ import { redirect } from "next/navigation";
 // duration ceiling comes from that page's own route segment config, not
 // from this file. Every page that calls into an AI-backed action here
 // (classroom/[slug]/page.tsx, classroom/[slug]/edit/page.tsx,
-// classroom/new/page.tsx) now exports `maxDuration = 290` itself — see the
+// classroom/new/page.tsx) exports `maxDuration = 290` itself — see the
 // comment on classroom/[slug]/page.tsx for the failure mode this fixes
 // (translate/regenerate repeatably dying with "An unexpected response was
 // received from the server" once a call ran past the account's
-// unconfigured default duration). The sequential (not Promise.all)
-// AI-call dispatch below still matters on its own merits — it avoids
-// queuing calls behind each other against the single local model — but it
-// was never sufficient by itself without a real ceiling to run in.
+// unconfigured default duration).
+//
+// That page-level export is the officially documented mechanism (Server
+// Actions inherit Route Segment Config from their invoking page), but it
+// has a long history of NOT actually being honored for Server Actions
+// specifically, independent of whether it's honored for the page's own
+// render — see vercel/next.js discussions #58855 and #64437: multiple
+// people needed a `vercel.json` "functions" glob entry as a second,
+// platform-level ceiling before the Server Action's timeout actually
+// changed, especially in an `src/app` layout like this one (a bare
+// "app/**" glob silently doesn't match). See /vercel.json at the repo
+// root — it sets the same maxDuration=290 for src/app/classroom/** and
+// src/app/api/ai/** directly at the Vercel config level, so the ceiling
+// applies even if Next's page-level inheritance doesn't take effect for a
+// given deploy.
+//
+// The sequential (not Promise.all) AI-call dispatch below still matters
+// on its own merits — it avoids queuing calls behind each other against
+// the single local model — but it was never sufficient by itself without
+// a real ceiling to run in.
 
 async function requireOwner() {
   const session = await auth();
