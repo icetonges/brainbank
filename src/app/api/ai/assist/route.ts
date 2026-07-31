@@ -15,7 +15,21 @@ export const runtime = "nodejs";
 // 300 seconds" and no response at all reaching the client, the way it did
 // before this fix — including if the chain grows to more than one model
 // later.
-export const maxDuration = 290;
+//
+// Raised from 290 -> 500 to give translateClassroomArticleAction's
+// validation-retry cascade (tasks.ts's detectTranslationProblem /
+// TranslationQualityError) more headroom against a document with several
+// chunks that each need a second warm-model attempt. NOTE: 290 was
+// originally chosen as "just under" Vercel's classic 300s serverless
+// ceiling (the exact "Task timed out after 300 seconds" message above is
+// what an unconfigured function hit). 500 exceeds that classic ceiling —
+// it only actually takes effect if this Vercel project has Fluid Compute
+// enabled (Pro allows up to 800s, Enterprise up to 900s, with Fluid on).
+// Without Fluid Compute, Vercel is expected to reject this value at
+// deploy/build time or silently clamp it back down — verify Fluid Compute
+// is on for this project (Project Settings -> Functions) before relying
+// on 500 actually being honored.
+export const maxDuration = 500;
 
 interface AssistRequestBody {
   messages: { role: "user" | "assistant"; content: string }[];

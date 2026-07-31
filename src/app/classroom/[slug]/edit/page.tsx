@@ -17,7 +17,10 @@ export const dynamic = "force-dynamic";
 // ../[slug]/page.tsx for why this has to live here (Server Actions inherit
 // their Vercel Function duration from the invoking page, not from the
 // "use server" file) rather than on actions.ts itself.
-export const maxDuration = 290;
+// See the maxDuration comment on ../page.tsx: raised 290 -> 500, which
+// requires Fluid Compute to be enabled on this Vercel project to actually
+// be honored (500 exceeds the classic 300s serverless ceiling).
+export const maxDuration = 500;
 
 export default async function EditClassroomArticlePage({
   params,

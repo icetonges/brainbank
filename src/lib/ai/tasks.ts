@@ -181,9 +181,13 @@ async function withFallback<T>(
     onModelUsed?: (modelId: ModelId) => void;
   } = {},
 ): Promise<T> {
-  const chain = chainFor(preferred, options.grounded ?? true, options.objectMode ?? false);
+  // A mutable queue (not a plain for-of over the static chain array) so a
+  // quality-gate failure (see the heavy-skip branch below) can prune
+  // upcoming candidates instead of just running through all of them.
+  const queue = chainFor(preferred, options.grounded ?? true, options.objectMode ?? false);
   let lastError: unknown;
-  for (const modelId of chain) {
+  while (queue.length > 0) {
+    const modelId = queue.shift() as ModelId;
     try {
       const result = await attempt(resolveModel(modelId));
       options.onModelUsed?.(modelId);
@@ -206,12 +210,36 @@ async function withFallback<T>(
       // body had already saved successfully). Stop the chain early here
       // instead of burning the clock on retries that can't succeed.
       const failedProvider = getModel(modelId).provider;
-      const remaining = chain.slice(chain.indexOf(modelId) + 1);
-      if (isInfraFailure(err) && remaining.every((id) => getModel(id).provider === failedProvider)) {
+      if (isInfraFailure(err) && queue.every((id) => getModel(id).provider === failedProvider)) {
         console.error(
           `[ai:${label}] ${modelId}'s failure looks like the shared "${failedProvider}" agent-server is unreachable, not a model-specific issue — every remaining model in the chain is the same provider, so skipping them instead of retrying`,
         );
         break;
+      }
+      // A TranslationQualityError (tasks.ts's translate-quality gate)
+      // means THIS model produced a bad response, not that the shared
+      // agent-server is down — worth trying a different already-warm
+      // model, but not worth paying a `heavy` model's cold VRAM-swap cost
+      // (60s+, see models.ts's `heavy` flag) chasing what's frequently a
+      // stylistic disagreement rather than a real error. Observed in
+      // production: two warm models both flagged the same chunk for the
+      // same reason, and gpt-oss-120b (heavy) cold-loading in response to
+      // try a third time pushed a multi-chunk translation past Vercel's
+      // 290s ceiling with nothing ever getting saved — worse than just
+      // accepting a warm model's answer would have been. Skip any
+      // remaining heavy candidate specifically for this error type; it's
+      // still tried for anything else (a real thrown error, a
+      // generateObject schema failure, etc.).
+      if (err instanceof TranslationQualityError) {
+        const before = queue.length;
+        for (let i = queue.length - 1; i >= 0; i--) {
+          if (getModel(queue[i]).heavy) queue.splice(i, 1);
+        }
+        if (queue.length < before) {
+          console.error(
+            `[ai:${label}] ${modelId} failed a quality check — skipping the remaining heavy model rather than paying its cold-load cost for it`,
+          );
+        }
       }
     }
   }
@@ -641,16 +669,26 @@ function detectTranslationProblem(
   const before = structureCounts(original);
   const after = structureCounts(translated);
   const totalBefore = before.headings + before.listItems + before.tableRows;
-  const drift =
-    Math.abs(before.headings - after.headings) +
-    Math.abs(before.listItems - after.listItems) +
-    Math.abs(before.tableRows - after.tableRows);
-  // Allow a drift of 1 outright (a boundary line the regex just barely
+  // Only flag content that appears to have been LOST — headings or list
+  // items that disappeared. An INCREASE (e.g. a run of values reformatted
+  // into a table) doesn't reliably mean anything was dropped — observed
+  // in production as a false trigger (a chunk went from 0 table rows to
+  // 6, with two different models agreeing, which looks like a legitimate
+  // reformatting of tabular-looking content rather than two independent
+  // models making the identical mistake). A net decrease has no such
+  // innocent explanation and matches the actual bug this check exists
+  // for (a run of list items collapsed into one paragraph), so only
+  // decreases count toward the drift total.
+  const drop =
+    Math.max(0, before.headings - after.headings) +
+    Math.max(0, before.listItems - after.listItems) +
+    Math.max(0, before.tableRows - after.tableRows);
+  // Allow a drop of 1 outright (a boundary line the regex just barely
   // miscounts either side of isn't worth failing over); beyond that,
-  // require the drift to be a real fraction of the total so one dropped
+  // require the drop to be a real fraction of the total so one dropped
   // bullet in a huge chunk doesn't false-positive.
-  if (drift > 1 && totalBefore > 0 && drift / totalBefore > 0.2) {
-    return `markdown structure changed (headings/list-items/table-rows ${before.headings}/${before.listItems}/${before.tableRows} -> ${after.headings}/${after.listItems}/${after.tableRows})`;
+  if (drop > 1 && totalBefore > 0 && drop / totalBefore > 0.2) {
+    return `markdown structure lost content (headings/list-items/table-rows ${before.headings}/${before.listItems}/${before.tableRows} -> ${after.headings}/${after.listItems}/${after.tableRows})`;
   }
 
   return null;

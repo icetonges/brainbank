@@ -41,9 +41,18 @@ export const dynamic = "force-dynamic";
 // platform response instead of RSC, which the client surfaces as "An
 // unexpected response was received from the server" — repeatable on every
 // Translate/Regenerate click against a slow local agent-server, not an
-// intermittent fluke. Matches /api/ai/assist/route.ts's maxDuration=290
+// intermittent fluke. Matches /api/ai/assist/route.ts's maxDuration=500
 // (same reasoning, same ceiling — see that file's comment).
-export const maxDuration = 290;
+//
+// Raised from 290 -> 500 for headroom against the validation-retry
+// cascade in translateClassroomArticleAction (tasks.ts's
+// detectTranslationProblem/TranslationQualityError can cost a second
+// warm-model attempt per chunk on a long article). This exceeds the
+// classic Vercel serverless 300s ceiling that 290 was originally chosen
+// to stay just under — it only takes effect with Fluid Compute enabled on
+// this Vercel project (Project Settings -> Functions); otherwise Vercel
+// is expected to reject or clamp this value at deploy time.
+export const maxDuration = 500;
 
 export default async function ClassroomArticlePage({
   params,

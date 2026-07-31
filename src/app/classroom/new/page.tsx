@@ -16,7 +16,10 @@ import { ClassroomComposer } from "@/components/classroom-composer";
 // ../[slug]/page.tsx for why this has to be exported here rather than
 // from actions.ts (Server Actions inherit their Vercel Function duration
 // from the invoking page, not the "use server" file).
-export const maxDuration = 290;
+// See the maxDuration comment on ../[slug]/page.tsx: raised 290 -> 500,
+// which requires Fluid Compute to be enabled on this Vercel project to
+// actually be honored (500 exceeds the classic 300s serverless ceiling).
+export const maxDuration = 500;
 
 export default async function NewClassroomArticlePage({
   searchParams,

@@ -38,7 +38,7 @@ import { redirect } from "next/navigation";
 // duration ceiling comes from that page's own route segment config, not
 // from this file. Every page that calls into an AI-backed action here
 // (classroom/[slug]/page.tsx, classroom/[slug]/edit/page.tsx,
-// classroom/new/page.tsx) exports `maxDuration = 290` itself — see the
+// classroom/new/page.tsx) exports `maxDuration = 500` itself — see the
 // comment on classroom/[slug]/page.tsx for the failure mode this fixes
 // (translate/regenerate repeatably dying with "An unexpected response was
 // received from the server" once a call ran past the account's
@@ -53,10 +53,14 @@ import { redirect } from "next/navigation";
 // platform-level ceiling before the Server Action's timeout actually
 // changed, especially in an `src/app` layout like this one (a bare
 // "app/**" glob silently doesn't match). See /vercel.json at the repo
-// root — it sets the same maxDuration=290 for src/app/classroom/** and
+// root — it sets the same maxDuration=500 for src/app/classroom/** and
 // src/app/api/ai/** directly at the Vercel config level, so the ceiling
 // applies even if Next's page-level inheritance doesn't take effect for a
 // given deploy.
+//
+// 500 requires Fluid Compute enabled on the Vercel project — it exceeds
+// the classic 300s serverless ceiling that the original 290 was chosen to
+// stay just under. See the maxDuration comment on classroom/[slug]/page.tsx.
 //
 // The sequential (not Promise.all) AI-call dispatch below still matters
 // on its own merits — it avoids queuing calls behind each other against
