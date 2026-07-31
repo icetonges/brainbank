@@ -31,11 +31,21 @@ import { redirect } from "next/navigation";
 // NOTE: a maxDuration export was tried here as a backstop (matching the one
 // on /api/ai/assist/route.ts) but "use server" files may only export async
 // functions — Turbopack fails the whole module (and cascades to every
-// importer) if a plain const is exported alongside the actions. This file
-// runs on whatever this Vercel project's account-level default duration
-// is; the real fix for translation timing out is the sequential (not
-// Promise.all) AI-call dispatch below, which removes the queue-induced
-// early-timeout failure mode without needing a longer ceiling.
+// importer) if a plain const is exported alongside the actions.
+//
+// That's not actually where this needs to live, though: a Server Action
+// runs as the Vercel Function for the *page* that invoked it, so its
+// duration ceiling comes from that page's own route segment config, not
+// from this file. Every page that calls into an AI-backed action here
+// (classroom/[slug]/page.tsx, classroom/[slug]/edit/page.tsx,
+// classroom/new/page.tsx) now exports `maxDuration = 290` itself — see the
+// comment on classroom/[slug]/page.tsx for the failure mode this fixes
+// (translate/regenerate repeatably dying with "An unexpected response was
+// received from the server" once a call ran past the account's
+// unconfigured default duration). The sequential (not Promise.all)
+// AI-call dispatch below still matters on its own merits — it avoids
+// queuing calls behind each other against the single local model — but it
+// was never sufficient by itself without a real ceiling to run in.
 
 async function requireOwner() {
   const session = await auth();

@@ -10,6 +10,14 @@ import { SubcategoryField } from "@/components/subcategory-field";
 import { updateClassroomArticle } from "../../actions";
 
 export const dynamic = "force-dynamic";
+// This page's Save button can trigger updateClassroomArticle's optional
+// AI regenerate pass (classroom/actions.ts, "regenerate" checkbox ->
+// publishAssist), which is a slow local-model call same as the article
+// page's actions. See the matching maxDuration comment on
+// ../[slug]/page.tsx for why this has to live here (Server Actions inherit
+// their Vercel Function duration from the invoking page, not from the
+// "use server" file) rather than on actions.ts itself.
+export const maxDuration = 290;
 
 export default async function EditClassroomArticlePage({
   params,

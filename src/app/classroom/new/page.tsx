@@ -8,6 +8,16 @@ import { getLang } from "@/lib/i18n-server";
 import { t, CLASSROOM_TAB_LABELS_ZH } from "@/lib/i18n";
 import { ClassroomComposer } from "@/components/classroom-composer";
 
+// The composer's Save button runs publishClassroomArticle (classroom/
+// actions.ts) — two sequential local-model calls (publishAssist,
+// formatArticleContent), plus a third (translateClassroomArticleAction)
+// when the article is published in Chinese. Same slow-local-model
+// exposure as the article and edit pages; see the maxDuration comment on
+// ../[slug]/page.tsx for why this has to be exported here rather than
+// from actions.ts (Server Actions inherit their Vercel Function duration
+// from the invoking page, not the "use server" file).
+export const maxDuration = 290;
+
 export default async function NewClassroomArticlePage({
   searchParams,
 }: {

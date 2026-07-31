@@ -24,6 +24,26 @@ import { formatDateTime } from "@/lib/date";
 import { getModel, type ModelId } from "@/lib/ai/models";
 
 export const dynamic = "force-dynamic";
+// Server Actions run as a Vercel Function for the page that invoked them —
+// NOT for the "use server" file the action is defined in — so this is
+// where regenerateGuideAction and translateClassroomArticleAction
+// (classroom/actions.ts) actually get their execution-time ceiling.
+// classroom/actions.ts explicitly could NOT export this itself (a "use
+// server" file may only export async functions; Turbopack fails the whole
+// module, and every importer, if a plain const like this sits alongside
+// them — see the comment at the top of that file), so without this export
+// those two AI-backed actions were silently running on the Vercel
+// project's unconfigured account-level default duration instead — often
+// well under the 120s a single local-model call (TASK_TIMEOUT_MS,
+// tasks.ts) can take, let alone the sequential body+summary+title(+guide)
+// calls translateClassroomArticleAction makes. When the account default
+// was hit mid-call, Vercel killed the function and returned its own
+// platform response instead of RSC, which the client surfaces as "An
+// unexpected response was received from the server" — repeatable on every
+// Translate/Regenerate click against a slow local agent-server, not an
+// intermittent fluke. Matches /api/ai/assist/route.ts's maxDuration=290
+// (same reasoning, same ceiling — see that file's comment).
+export const maxDuration = 290;
 
 export default async function ClassroomArticlePage({
   params,
