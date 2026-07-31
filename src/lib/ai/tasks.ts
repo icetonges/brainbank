@@ -11,6 +11,7 @@ import {
   AGENTIC_MODELS,
   DEFAULT_MODEL_ID,
   FALLBACK_CHAIN,
+  getModel,
   GROUNDED_FALLBACK_CHAIN,
   NO_STRUCTURED_OUTPUT_MODELS,
   OBJECT_FALLBACK_CHAIN,
@@ -146,6 +147,30 @@ function chainFor(
  * is acceptable. Pass `objectMode: true` for generateObject calls — see
  * chainFor's doc comment.
  */
+// Distinguishes "the shared local agent-server itself is down, unreachable,
+// or hung" from "this specific model gave a bad response" (wrong JSON shape,
+// validation failure, etc). The former is pointless to retry against a
+// different *local* model — see withFallback below for why — the latter
+// genuinely can succeed on a different local model (e.g. a schema issue
+// specific to qwen3.6, or gpt-oss:120b's cold-load timeout). Matches our
+// own AbortSignal.timeout() firing (name "TimeoutError", or "AbortError"
+// on older runtimes) and raw fetch-level failures (ECONNREFUSED/ENOTFOUND/
+// "fetch failed") — not, e.g., a Zod validation error or a thrown
+// application Error with an unrelated message.
+function isInfraFailure(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  if (err.name === "TimeoutError" || err.name === "AbortError") return true;
+  const msg = err.message.toLowerCase();
+  return (
+    msg.includes("fetch failed") ||
+    msg.includes("econnrefused") ||
+    msg.includes("enotfound") ||
+    msg.includes("network") ||
+    msg.includes("timed out") ||
+    msg.includes("timeout")
+  );
+}
+
 async function withFallback<T>(
   label: TaskName,
   preferred: ModelId,
@@ -166,6 +191,28 @@ async function withFallback<T>(
     } catch (err) {
       lastError = err;
       console.error(`[ai:${label}] ${modelId} failed, falling back to next model in chain`, err);
+      // All three registered models currently share one ProviderId
+      // ("local" — see models.ts's header comment) — meaning they're all
+      // the same single physical Mac/agent-server behind a Tailscale
+      // Funnel, not independent services. When a failure looks like that
+      // shared infrastructure being down/hung rather than a model-specific
+      // bad response, trying the next local model is guaranteed to fail
+      // the same way and costs another full TASK_TIMEOUT_MS doing it —
+      // multiplied by however many sequential AI calls a task like
+      // translateClassroomArticleAction makes, this is exactly what turns
+      // one degraded agent-server into a multi-minute cascade that blows
+      // through the page's maxDuration even after raising it (observed:
+      // the action dying mid-guide-translation on a long article after the
+      // body had already saved successfully). Stop the chain early here
+      // instead of burning the clock on retries that can't succeed.
+      const failedProvider = getModel(modelId).provider;
+      const remaining = chain.slice(chain.indexOf(modelId) + 1);
+      if (isInfraFailure(err) && remaining.every((id) => getModel(id).provider === failedProvider)) {
+        console.error(
+          `[ai:${label}] ${modelId}'s failure looks like the shared "${failedProvider}" agent-server is unreachable, not a model-specific issue — every remaining model in the chain is the same provider, so skipping them instead of retrying`,
+        );
+        break;
+      }
     }
   }
   throw lastError instanceof Error
@@ -458,7 +505,7 @@ function translateSystemPrompt(targetLabel: string): string {
 
 If the text contains markdown, preserve its structure exactly — keep every heading marker (#, ##, ###), bullet (-, *) and numbered list marker, blank line between blocks, bold (**text**) and italic (*text*) marker, and table pipe/row layout in place; translate only the prose inside those elements. Leave code blocks (fenced with \`\`\`), inline code (\`text\`), URLs, and link targets ([text](url) — translate the link text, not the URL) untouched. A run of short list items must come back as the same number of separate list items, not collapsed into one paragraph.
 
-This may be one fragment of a longer document that was split into pieces before translation. Translate ONLY the text given, in full, start to end — never summarize, shorten, condense, or skip any part of it, however long it is. Do not add an introduction, conclusion, or any commentary — your output is spliced directly between other translated fragments with no separator.
+This may be one fragment of a longer document that was split into pieces before translation. Translate ONLY the text given, in full, start to end — never summarize, shorten, condense, or skip any part of it, however long it is. Do not add an introduction, conclusion, or any commentary — your output is spliced directly between other translated fragments (each fragment already starts and ends at a complete block boundary, like a paragraph or heading — never mid-sentence).
 
 Output real line breaks between blocks, never the two characters backslash-n as text.
 
@@ -509,7 +556,15 @@ async function translateChunk(
     // out in queue rather than actually failing to translate.
     const ta = await translateChunk(a, target, modelId, onModelUsed);
     const tb = await translateChunk(b, target, modelId, onModelUsed);
-    return `${ta}${tb}`;
+    // `a` originally ended at (or right after) a blank line — findSplitPoint
+    // snaps the split there specifically so neither half cuts through a
+    // block — but the `.trim()` a few lines up strips that blank line back
+    // off of `ta` once translated. Re-adding it here is what keeps a
+    // paragraph and the list/heading that followed it from being fused into
+    // one unbroken block once ta+tb are concatenated (this is the same
+    // fix, and the same reasoning, as the top-level chunk join in
+    // translateWithMeta below).
+    return `${ta}\n\n${tb}`;
   }
 
   return translated;
@@ -588,7 +643,21 @@ async function translateWithMeta(
   for (const chunk of chunks) {
     translatedChunks.push(await translateChunk(chunk, target, chosenModel, onModelUsed));
   }
-  return restoreUrls(translatedChunks.join(""), urls);
+  // chunkMarkdown's own chunks are built from splitIntoBlocks, which keeps
+  // each block's trailing blank line specifically so `chunks.join("")`
+  // reconstructs the ORIGINAL text exactly (see its doc comment) — but
+  // translateChunk above ends every translated chunk with `.trim()`, which
+  // strips that same trailing blank line back off before it ever gets
+  // here. Joining with "" the way the original chunks do therefore fuses
+  // every chunk boundary — a paragraph ending one chunk and a heading or
+  // list starting the next lose their separating blank line and collapse
+  // into a single run-on block once rendered. This is exactly the
+  // formatting-loss bug seen on longer translated classroom articles (the
+  // original English, produced in one un-chunked generateText call, never
+  // hits this path). Every chunk here is a whole, complete markdown
+  // block(s) — never a mid-block fragment — so a blank line between
+  // consecutive chunks is always the correct separator to restore.
+  return restoreUrls(translatedChunks.join("\n\n"), urls);
 }
 
 export async function translateText(
