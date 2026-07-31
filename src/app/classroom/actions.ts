@@ -630,13 +630,76 @@ export async function translateClassroomArticleAction(
   // difference from the /llm chatbox (a single request, never contends
   // with itself) and the likely reason translation was failing/timing out
   // even when a single chat message went through fine.
-  const bodyResult = await translateTextWithMeta(sourceContent.bodyMarkdown, target);
-  const summary = await translateText(sourceContent.summary ?? "", target);
-  const title =
-    note.primaryLanguage === target ? "" : await translateText(note.title, target);
+  //
+  // --- Transactional commit ---
+  // Every piece below is translated (and, inside translateText /
+  // translateTextWithMeta, validated — see tasks.ts's
+  // detectTranslationProblem/TranslationQualityError) BEFORE any database
+  // write happens. If body/summary/title fails validation on every model
+  // in the fallback chain, the catch below rethrows and NOTHING is
+  // written — the existing content stays exactly as it was, and the
+  // owner sees a clear, specific error (surfaced by the classroom route's
+  // error.tsx) instead of a silently corrupted translation landing on the
+  // page. This app's Neon connection uses the neon-http driver, which has
+  // no real multi-statement SQL transaction support, so "transactional"
+  // here means "translate-and-validate everything first, commit after" —
+  // not a literal BEGIN/COMMIT — but it gets the guarantee that actually
+  // matters: a bad translation is never observable, only ever a clean
+  // failure.
+  let bodyResult!: Awaited<ReturnType<typeof translateTextWithMeta>>;
+  let summary = "";
+  let title = "";
+  try {
+    bodyResult = await translateTextWithMeta(sourceContent.bodyMarkdown, target);
+    summary = await translateText(sourceContent.summary ?? "", target);
+    title = note.primaryLanguage === target ? "" : await translateText(note.title, target);
+  } catch (err) {
+    console.error(
+      `[translate] article ${noteId} (${slug}) -> ${target} failed before any write`,
+      err,
+    );
+    throw new Error(
+      `Translation didn't pass validation after trying every available model. Nothing was saved — the existing content is unchanged. (${
+        err instanceof Error ? err.message : "unknown error"
+      })`,
+    );
+  }
   const body = bodyResult.text;
   const translatedModel = bodyResult.models.join(",") || null;
   const translatedAt = new Date();
+
+  // Translate the learning guide too — same translate-then-commit order,
+  // but its failure doesn't take down the article translation above: the
+  // body/summary/title already passed validation, and regenerateGuideAction
+  // lets the owner retry just the guide independently later, so throwing
+  // away a good article translation over an unrelated guide failure would
+  // be strictly worse than leaving the guide's existing translation as-is.
+  const guide = await db.query.learningGuides.findFirst({
+    where: eq(learningGuides.noteId, noteId),
+  });
+  let guideTranslation: { mapText: string; handsOnText: string } | null = null;
+  if (guide && (guide.learningMap || guide.handsOn)) {
+    try {
+      // Sequential here too, same single-local-model reasoning as above.
+      if (target === "zh") {
+        guideTranslation = {
+          mapText: guide.learningMap ? await translateText(guide.learningMap, "zh") : "",
+          handsOnText: guide.handsOn ? await translateText(guide.handsOn, "zh") : "",
+        };
+      } else if (note.primaryLanguage === "zh") {
+        guideTranslation = {
+          mapText: guide.learningMap ? await translateText(guide.learningMap, "en") : "",
+          handsOnText: guide.handsOn ? await translateText(guide.handsOn, "en") : "",
+        };
+      }
+    } catch (err) {
+      console.error(
+        `[translate] article ${noteId} (${slug}) guide -> ${target} failed validation, keeping existing guide translation`,
+        err,
+      );
+      guideTranslation = null;
+    }
+  }
 
   const existing = await db.query.noteContent.findFirst({
     where: and(eq(noteContent.noteId, noteId), eq(noteContent.language, target)),
@@ -658,29 +721,24 @@ export async function translateClassroomArticleAction(
     });
   }
 
-  // Translate the learning guide too.
-  const guide = await db.query.learningGuides.findFirst({
-    where: eq(learningGuides.noteId, noteId),
-  });
-  if (guide && (guide.learningMap || guide.handsOn)) {
-    // Sequential here too, same single-local-model reasoning as above.
+  if (guideTranslation && guide) {
     if (target === "zh") {
-      const mapZh = guide.learningMap ? await translateText(guide.learningMap, "zh") : "";
-      const handsOnZh = guide.handsOn ? await translateText(guide.handsOn, "zh") : "";
       await db
         .update(learningGuides)
-        .set({ learningMapZh: mapZh, handsOnZh, updatedAt: new Date() })
+        .set({
+          learningMapZh: guideTranslation.mapText,
+          handsOnZh: guideTranslation.handsOnText,
+          updatedAt: new Date(),
+        })
         .where(eq(learningGuides.id, guide.id));
     } else if (note.primaryLanguage === "zh") {
       // Base guide is Chinese: preserve it in the zh columns, put the new
       // English rendition in the base columns.
-      const mapEn = guide.learningMap ? await translateText(guide.learningMap, "en") : "";
-      const handsOnEn = guide.handsOn ? await translateText(guide.handsOn, "en") : "";
       await db
         .update(learningGuides)
         .set({
-          learningMap: mapEn,
-          handsOn: handsOnEn,
+          learningMap: guideTranslation.mapText,
+          handsOn: guideTranslation.handsOnText,
           learningMapZh: guide.learningMapZh || guide.learningMap,
           handsOnZh: guide.handsOnZh || guide.handsOn,
           updatedAt: new Date(),

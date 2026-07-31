@@ -514,6 +514,162 @@ ${NO_BROWSING_INSTRUCTION} This includes any URL that appears inside the text be
 Return only the translation, no commentary.`;
 }
 
+// --- TRANSLATION QUALITY VALIDATION ---
+//
+// generateText returning 200/non-empty/finishReason !== "length" is NOT
+// the same as "this chunk actually got translated" — observed in
+// production against the local default model (see the "Local Server
+// Latency Investigation" article's own Chinese translation): a short
+// chunk sometimes comes back as a conversational refusal or clarifying
+// question ("I need the original English text you want translated...")
+// instead of a translation, and a long, numeric/technical chunk sometimes
+// comes back with dropped or duplicated sentences, or drifts into the
+// wrong language. Both look identical to a good response at the
+// generateText call site — no thrown error, no truncation — which is why
+// they were previously spliced straight into the saved article.
+// detectTranslationProblem() is the check that closes that gap; a
+// non-null result is turned into a thrown TranslationQualityError (see
+// translateChunk/translateNote below) so it flows through the exact same
+// withFallback() escalation as a network error: try the next model in the
+// chain instead of silently keeping a bad answer from this one.
+
+/** A model that ignores "return only the translation, no commentary"
+ * tends to do so in one of a handful of recognizable shapes — a
+ * clarifying question, an apology/refusal, a request for the source text
+ * — in either language. This isn't an exhaustive classifier, just enough
+ * to catch the failure mode actually observed. */
+const REFUSAL_PATTERNS: RegExp[] = [
+  /please provide/i,
+  /could you (please )?provide/i,
+  /i need the (original|source) (text|content)/i,
+  /as an ai( language model)?/i,
+  /i('m| am) sorry,? (but )?i (can'?t|cannot|am unable to)/i,
+  /i (can'?t|cannot|am unable to) (translate|assist|help)/i,
+  /请提供/,
+  /我需要(原文|原始文本|源文本)/,
+  /作为(一个)?(AI|人工智能)/,
+  /很抱歉[，,]?(我)?(无法|不能)/,
+];
+
+function looksLikeRefusalOrMeta(text: string): boolean {
+  return REFUSAL_PATTERNS.some((p) => p.test(text));
+}
+
+/** Strips fenced/inline code and the §URLn§ placeholders (protectUrls
+ * below) before the language/structure checks run — none of that content
+ * is ever expected to be in the target language, and code left untouched
+ * is the system prompt being followed correctly, not a translation
+ * failure. */
+function stripNonProseForChecks(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/`[^`]*`/g, " ")
+    .replace(/§URL\d+§/g, " ");
+}
+
+const CJK_PATTERN = /[一-鿿㐀-䶿]/g;
+const LETTER_PATTERN = /[A-Za-z一-鿿㐀-䶿]/g;
+
+/** Fraction of CJK characters among "letters" (Latin + CJK) in the text,
+ * or -1 if there isn't enough letter content to judge anything from (a
+ * chunk that's just a heading, a lone code fence, or a table of numbers
+ * shouldn't be flagged for not "looking Chinese enough"). */
+function cjkRatio(text: string): number {
+  const letters = text.match(LETTER_PATTERN);
+  if (!letters || letters.length < 20) return -1;
+  const cjk = text.match(CJK_PATTERN);
+  return (cjk?.length ?? 0) / letters.length;
+}
+
+/** Counts of the markdown structure elements translateSystemPrompt
+ * explicitly promises to preserve 1:1 (heading markers, list items, table
+ * rows) — a cheap, code-level check on the one guarantee a prompt-only
+ * instruction can't enforce by itself. A large mismatch is exactly the
+ * shape of the "list collapsed into one paragraph" / dropped-section bugs
+ * seen before. */
+function structureCounts(text: string): {
+  headings: number;
+  listItems: number;
+  tableRows: number;
+} {
+  let headings = 0;
+  let listItems = 0;
+  let tableRows = 0;
+  for (const line of text.split("\n")) {
+    if (/^\s{0,3}#{1,6}\s/.test(line)) headings++;
+    else if (/^\s*([-*+]|\d+[.)])\s/.test(line)) listItems++;
+    else if (/^\s*\|.*\|\s*$/.test(line)) tableRows++;
+  }
+  return { headings, listItems, tableRows };
+}
+
+/**
+ * Returns a short human-readable problem description if `translated`
+ * doesn't look like a genuine translation of `original`, or null if it
+ * passes. Deliberately conservative — a false positive just costs a retry
+ * against the next model in the fallback chain; a false negative is the
+ * exact bug this exists to catch, so each check errs toward flagging.
+ */
+function detectTranslationProblem(
+  original: string,
+  translated: string,
+  target: "en" | "zh",
+): string | null {
+  const trimmed = translated.trim();
+  if (!trimmed && original.trim()) return "empty output for non-empty input";
+
+  if (looksLikeRefusalOrMeta(trimmed)) {
+    return "output looks like a refusal or clarifying question, not a translation";
+  }
+
+  const originalProse = stripNonProseForChecks(original);
+  const translatedProse = stripNonProseForChecks(trimmed);
+
+  if (target === "zh") {
+    const outRatio = cjkRatio(translatedProse);
+    const inRatio = cjkRatio(originalProse);
+    if (outRatio >= 0 && outRatio < 0.15 && (inRatio < 0 || inRatio < 0.05)) {
+      return `output has almost no Chinese characters (ratio ${outRatio.toFixed(2)})`;
+    }
+  } else {
+    const outRatio = cjkRatio(translatedProse);
+    if (outRatio > 0.3) {
+      return `output is still mostly Chinese characters (ratio ${outRatio.toFixed(2)})`;
+    }
+  }
+
+  const before = structureCounts(original);
+  const after = structureCounts(translated);
+  const totalBefore = before.headings + before.listItems + before.tableRows;
+  const drift =
+    Math.abs(before.headings - after.headings) +
+    Math.abs(before.listItems - after.listItems) +
+    Math.abs(before.tableRows - after.tableRows);
+  // Allow a drift of 1 outright (a boundary line the regex just barely
+  // miscounts either side of isn't worth failing over); beyond that,
+  // require the drift to be a real fraction of the total so one dropped
+  // bullet in a huge chunk doesn't false-positive.
+  if (drift > 1 && totalBefore > 0 && drift / totalBefore > 0.2) {
+    return `markdown structure changed (headings/list-items/table-rows ${before.headings}/${before.listItems}/${before.tableRows} -> ${after.headings}/${after.listItems}/${after.tableRows})`;
+  }
+
+  return null;
+}
+
+/** Thrown by translateChunk/translateNote when a response passes
+ * generateText/generateObject with no error but fails
+ * detectTranslationProblem — deliberately a plain Error (not matched by
+ * isInfraFailure in withFallback above), so the chain treats it as "this
+ * model gave a bad response, try the next one" rather than "the shared
+ * agent-server is down, stop retrying" — see withFallback's isInfraFailure
+ * comment for that distinction. */
+class TranslationQualityError extends Error {
+  constructor(reason: string) {
+    super(`translation failed quality check: ${reason}`);
+    this.name = "TranslationQualityError";
+  }
+}
+
 async function translateChunk(
   chunk: string,
   target: "en" | "zh",
@@ -531,6 +687,16 @@ async function translateChunk(
         abortSignal: AbortSignal.timeout(TASK_TIMEOUT_MS),
         system: translateSystemPrompt(targetLabel),
         prompt: chunk,
+      }).then((r) => {
+        // A still-truncated response ("length") is handled by the
+        // split-and-retry logic below, not here — a half-finished chunk
+        // can fail these checks for reasons that have nothing to do with
+        // translation quality (cut off mid-sentence, mid-CJK-character).
+        if (r.finishReason !== "length") {
+          const problem = detectTranslationProblem(chunk, r.text, target);
+          if (problem) throw new TranslationQualityError(problem);
+        }
+        return r;
       }),
     { onModelUsed },
   );
@@ -716,6 +882,18 @@ export async function translateNote(
         }),
         system: `Translate every field into ${targetLabel}. Keep empty fields empty. Preserve meaning and tone. Translate the FULL text of every field, however long — never shorten, summarize, condense, or omit any part of a field. Return only the translated fields. ${NO_BROWSING_INSTRUCTION}`,
         prompt: JSON.stringify(note),
+      }).then((r) => {
+        // Same quality gate as translateChunk above, applied per field —
+        // a generateObject call can return a schema-valid object whose
+        // string fields are still a refusal/clarifying question or the
+        // wrong language, and that's just as invisible to the caller as
+        // the plain-text case.
+        const fields = ["title", "what", "how", "why", "other"] as const;
+        for (const field of fields) {
+          const problem = detectTranslationProblem(note[field] ?? "", r.object[field] ?? "", target);
+          if (problem) throw new TranslationQualityError(`field "${field}": ${problem}`);
+        }
+        return r;
       }),
     { objectMode: true },
   );
