@@ -3,13 +3,14 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { reorderSectionArticles } from "@/app/classroom/actions";
-import { formatDate } from "@/lib/date";
+import { formatDateTime } from "@/lib/date";
 
 interface Article {
   id: number;
   slug: string;
   title: string;
   createdAt: string;
+  status?: string;
 }
 
 /**
@@ -20,6 +21,11 @@ interface Article {
  * reorderSectionArticles persists each article's new `sectionOrder` in the
  * background. Native HTML5 drag events rather than a library, since this is
  * the only drag surface in the app.
+ *
+ * Row styling (status badge, hover-accent title, formatDateTime, chevron)
+ * deliberately mirrors ArticleRow on the /classroom overview page (see
+ * classroom/page.tsx) — this page is meant to read as "the same shelf,
+ * drilled in," not a visually distinct list.
  */
 export function SectionArticleList({
   sectionId,
@@ -60,7 +66,7 @@ export function SectionArticleList({
   }
 
   return (
-    <ul className="flex flex-col divide-y divide-border bg-bg-elevated">
+    <ul className="flex flex-col divide-y divide-border">
       {items.map((a, i) => (
         <li
           key={a.id}
@@ -69,27 +75,52 @@ export function SectionArticleList({
           onDragOver={(e) => canReorder && e.preventDefault()}
           onDrop={() => canReorder && handleDrop(i)}
           onDragEnd={() => setDragIndex(null)}
-          className={`flex items-center gap-2 px-4 py-2.5 text-sm transition-colors ${
+          className={`group flex items-center gap-2 text-sm transition-colors ${
             dragIndex === i ? "opacity-40" : ""
           } ${canReorder ? "cursor-grab active:cursor-grabbing" : ""}`}
         >
           {canReorder && (
-            <span aria-hidden className="shrink-0 select-none text-fg-secondary">
+            <span aria-hidden className="shrink-0 select-none pl-4 text-fg-secondary">
               ⠿
             </span>
           )}
           <Link
             href={`/classroom/${a.slug}?lang=${lang}`}
             draggable={false}
-            className="line-clamp-1 flex-1 text-fg-secondary hover:text-accent transition-colors"
+            className={`flex flex-1 items-center justify-between gap-3 py-2.5 ${canReorder ? "pr-4" : "px-4"}`}
           >
-            {a.title}
+            <span className="line-clamp-1 text-fg transition-colors group-hover:text-accent">
+              {a.title}
+            </span>
+            <span className="flex shrink-0 items-center gap-2 text-xs text-fg-secondary">
+              {a.status && a.status !== "published" && (
+                <span className="rounded-full bg-warn/15 px-2 py-0.5 text-[10px] font-semibold text-warn">
+                  {a.status}
+                </span>
+              )}
+              {formatDateTime(a.createdAt, dateLocale)}
+              <Chevron />
+            </span>
           </Link>
-          <span className="shrink-0 text-xs text-fg-secondary">
-            {formatDate(a.createdAt, dateLocale)}
-          </span>
         </li>
       ))}
     </ul>
+  );
+}
+
+function Chevron() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      className="h-3.5 w-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M6 3l5 5-5 5" />
+    </svg>
   );
 }

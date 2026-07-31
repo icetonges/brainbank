@@ -7,7 +7,8 @@ import { eq, and, asc } from "drizzle-orm";
 import { getLang } from "@/lib/i18n-server";
 import { t } from "@/lib/i18n";
 import { SectionArticleList } from "@/components/section-article-list";
-import { formatDate } from "@/lib/date";
+import { formatDateTime } from "@/lib/date";
+import { sectionTone } from "@/lib/classroom/section-tones";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +17,7 @@ interface ArticleRow {
   slug: string;
   title: string;
   createdAt: Date;
+  status: string;
   sectionId: number | null;
 }
 
@@ -28,6 +30,13 @@ interface ArticleRow {
  * everyone else gets the same list read-only. Articles filed under the
  * subcategory but with no section land in a catch-all group at the bottom
  * so nothing silently disappears from the page.
+ *
+ * Styling deliberately mirrors one "card" from the /classroom overview grid
+ * (classroom/page.tsx) — same gradient header band + letter tile + count
+ * badge, same per-section color rotation (sectionTone), same ArticleRow
+ * look for individual rows — rather than the plain list this page used to
+ * be. Drilling into a subcategory should feel like zooming into its card,
+ * not landing on a differently-styled page.
  */
 export default async function SubcategoryLandingPage({
   params,
@@ -68,6 +77,7 @@ export default async function SubcategoryLandingPage({
       translatedTitle: noteContent.title,
       primaryLanguage: notes.primaryLanguage,
       createdAt: notes.createdAt,
+      status: notes.status,
       sectionId: notes.sectionId,
     })
     .from(notes)
@@ -84,6 +94,7 @@ export default async function SubcategoryLandingPage({
     slug: a.slug,
     title: lang === a.primaryLanguage ? a.title : a.translatedTitle || a.title,
     createdAt: a.createdAt,
+    status: a.status,
     sectionId: a.sectionId,
   }));
 
@@ -104,16 +115,33 @@ export default async function SubcategoryLandingPage({
     .filter((sec) => sec.articles.length > 0);
 
   const isEmpty = sectionsWithArticles.length === 0 && unsectioned.length === 0;
+  const total =
+    sectionsWithArticles.reduce((n, sec) => n + sec.articles.length, 0) + unsectioned.length;
 
   return (
-    <div className="flex flex-col gap-8">
-      <div className="flex flex-col gap-2">
-        <Link href="/classroom" className="w-fit text-sm text-accent hover:underline">
-          ← {s.title}
-        </Link>
-        <h1 className="text-3xl font-semibold text-fg">{subcategory.name}</h1>
-        {session && !isEmpty && <p className="text-sm text-fg-secondary">{s.dragHint}</p>}
+    <div className="flex flex-col gap-6">
+      <Link href="/classroom" className="w-fit text-sm text-accent hover:underline">
+        ← {s.title}
+      </Link>
+
+      {/* Same header band as one card on the /classroom overview grid
+          (letter tile + gradient + count badge) — see classroom/page.tsx —
+          so this reads as "that card, opened," not a different page. */}
+      <div className="flex items-center gap-3 overflow-hidden rounded-2xl border border-border bg-gradient-to-r from-accent/15 via-accent/5 to-transparent px-5 py-4">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent text-lg font-bold text-accent-fg">
+          {subcategory.name.charAt(0).toUpperCase()}
+        </span>
+        <span className="min-w-0 flex-1 truncate text-xl font-semibold text-fg">
+          {subcategory.name}
+        </span>
+        {!isEmpty && (
+          <span className="shrink-0 rounded-full bg-accent/15 px-2.5 py-0.5 text-xs font-semibold text-accent">
+            {total}
+          </span>
+        )}
       </div>
+
+      {session && !isEmpty && <p className="text-sm text-fg-secondary">{s.dragHint}</p>}
 
       {isEmpty ? (
         <div className="rounded-lg border border-dashed border-border p-8 text-center text-fg-secondary">
@@ -123,67 +151,86 @@ export default async function SubcategoryLandingPage({
         <>
           {sectionsWithArticles.length > 1 && (
             <nav className="flex flex-wrap gap-2">
-              {sectionsWithArticles.map((sec) => (
-                <a
-                  key={sec.id}
-                  href={`#section-${sec.id}`}
-                  className="rounded-full border border-border px-3 py-1 text-xs text-fg-secondary transition-colors hover:border-accent hover:text-accent"
-                >
-                  {sec.name}
-                </a>
-              ))}
+              {sectionsWithArticles.map((sec, i) => {
+                const tone = sectionTone(i);
+                return (
+                  <a
+                    key={sec.id}
+                    href={`#section-${sec.id}`}
+                    className="flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs text-fg-secondary transition-colors hover:border-accent hover:text-accent"
+                  >
+                    <span className={`h-1.5 w-1.5 rounded-full ${tone.dot}`} aria-hidden />
+                    {sec.name}
+                  </a>
+                );
+              })}
             </nav>
           )}
 
-          <div className="flex flex-col gap-6">
-            {sectionsWithArticles.map((sec) => (
-              <section
-                key={sec.id}
-                id={`section-${sec.id}`}
-                className="scroll-mt-20 overflow-hidden rounded-xl border border-border"
-              >
-                <div className="flex items-center justify-between gap-2 bg-bg px-4 py-3">
-                  <h2 className="font-semibold text-fg">{sec.name}</h2>
-                  <span className="shrink-0 rounded-full bg-accent/15 px-2.5 py-0.5 text-xs font-semibold text-accent">
-                    {sec.articles.length}
-                  </span>
-                </div>
-                <SectionArticleList
-                  sectionId={sec.id}
-                  subcategorySlug={subcategory.slug}
-                  articles={sec.articles.map((a) => ({
-                    id: a.id,
-                    slug: a.slug,
-                    title: a.title,
-                    createdAt: a.createdAt.toISOString(),
-                  }))}
-                  lang={lang}
-                  canReorder={Boolean(session)}
-                  dateLocale={dateLocale}
-                />
-              </section>
-            ))}
+          <div className="flex flex-col gap-4">
+            {sectionsWithArticles.map((sec, i) => {
+              const tone = sectionTone(i);
+              return (
+                <section
+                  key={sec.id}
+                  id={`section-${sec.id}`}
+                  className={`scroll-mt-20 overflow-hidden rounded-xl border border-border border-l-4 ${tone.bar}`}
+                >
+                  <div
+                    className={`flex items-center gap-2 ${tone.tint} px-4 py-2 text-sm font-semibold ${tone.text}`}
+                  >
+                    <span className={`h-1.5 w-1.5 rounded-full ${tone.dot}`} aria-hidden />
+                    {sec.name}
+                    <span className="ml-auto text-xs font-normal opacity-80">
+                      {sec.articles.length}
+                    </span>
+                  </div>
+                  <SectionArticleList
+                    sectionId={sec.id}
+                    subcategorySlug={subcategory.slug}
+                    articles={sec.articles.map((a) => ({
+                      id: a.id,
+                      slug: a.slug,
+                      title: a.title,
+                      createdAt: a.createdAt.toISOString(),
+                      status: a.status,
+                    }))}
+                    lang={lang}
+                    canReorder={Boolean(session)}
+                    dateLocale={dateLocale}
+                  />
+                </section>
+              );
+            })}
 
             {unsectioned.length > 0 && (
               <section className="overflow-hidden rounded-xl border border-border">
-                <div className="flex items-center justify-between gap-2 bg-bg px-4 py-3">
-                  <h2 className="font-semibold text-fg">{s.moreArticles}</h2>
-                  <span className="shrink-0 rounded-full bg-accent/15 px-2.5 py-0.5 text-xs font-semibold text-accent">
-                    {unsectioned.length}
-                  </span>
-                </div>
-                <ul className="flex flex-col divide-y divide-border bg-bg-elevated">
+                {sectionsWithArticles.length > 0 && (
+                  <div className="flex items-center gap-2 bg-bg px-4 py-2 text-sm font-semibold text-fg-secondary">
+                    <span className="h-1.5 w-1.5 rounded-full bg-fg-secondary/60" aria-hidden />
+                    {s.moreArticles}
+                    <span className="ml-auto text-xs font-normal opacity-80">
+                      {unsectioned.length}
+                    </span>
+                  </div>
+                )}
+                <ul className="flex flex-col divide-y divide-border">
                   {unsectioned.map((a) => (
                     <li key={a.slug}>
                       <Link
                         href={`/classroom/${a.slug}?lang=${lang}`}
-                        className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm hover:bg-bg transition-colors"
+                        className="group flex items-center justify-between gap-3 px-4 py-2.5 text-sm transition-colors hover:bg-bg"
                       >
-                        <span className="line-clamp-1 text-fg-secondary hover:text-accent transition-colors">
+                        <span className="line-clamp-1 text-fg transition-colors group-hover:text-accent">
                           {a.title}
                         </span>
-                        <span className="shrink-0 text-xs text-fg-secondary">
-                          {formatDate(a.createdAt, dateLocale)}
+                        <span className="flex shrink-0 items-center gap-2 text-xs text-fg-secondary">
+                          {a.status !== "published" && (
+                            <span className="rounded-full bg-warn/15 px-2 py-0.5 text-[10px] font-semibold text-warn">
+                              {a.status}
+                            </span>
+                          )}
+                          {formatDateTime(a.createdAt, dateLocale)}
                         </span>
                       </Link>
                     </li>
