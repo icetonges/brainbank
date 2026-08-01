@@ -10,6 +10,10 @@ import {
   primaryKey,
   jsonb,
   unique,
+  index,
+  real,
+  boolean,
+  vector,
 } from "drizzle-orm/pg-core";
 
 // --- enums ---
@@ -24,6 +28,14 @@ export const sourceTypeEnum = pgEnum("source_type", [
   "image",
   "video",
   "obsidian",
+  // A daily diary entry (see diaryEntries below). Diary entries are stored
+  // as regular `notes` rows on purpose rather than in a table of their own:
+  // that way they inherit the media/upload pipeline, the shared `tags`
+  // table, [[wikilink]] edges, and full-text search for free, AND — more
+  // importantly — the knowledge graph spans diary and classroom content in
+  // one place instead of two disconnected islands. Diary-specific fields
+  // (when it happened, mood, energy) live in the diaryEntries side-table.
+  "diary",
 ]);
 export const languageEnum = pgEnum("language", ["en", "zh"]);
 export const mediaKindEnum = pgEnum("media_kind", [
@@ -271,6 +283,306 @@ export const learningGuides = pgTable("learning_guides", {
   resources: jsonb("resources").$type<GuideResource[]>().default([]).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// --- DIARY ---
+//
+// One row per diary entry, extending the `notes` row that actually holds
+// the title/body/media/tags (source_type "diary", status always "private").
+// Same 1:1 side-table pattern as learningGuides: the shared columns stay on
+// `notes` so every existing feature keeps working, and only the fields that
+// are meaningless for a non-diary note live here.
+export const titleSourceEnum = pgEnum("title_source", ["auto", "manual"]);
+
+// A coarse self-report, captured with one click in the composer rather than
+// typed. Deliberately a small fixed scale — the point is a signal the
+// knowledge engine can correlate against ("side-project entries are mostly
+// energized; work entries mostly drained"), not precise emotional logging.
+export const moodEnum = pgEnum("diary_mood", [
+  "great",
+  "good",
+  "neutral",
+  "low",
+  "rough",
+]);
+
+export type TitleSource = (typeof titleSourceEnum.enumValues)[number];
+export type DiaryMood = (typeof moodEnum.enumValues)[number];
+
+export const diaryEntries = pgTable(
+  "diary_entries",
+  {
+    id: serial("id").primaryKey(),
+    noteId: integer("note_id")
+      .notNull()
+      .unique()
+      .references(() => notes.id, { onDelete: "cascade" }),
+    // When the entry is ABOUT, which is not the same as when the row was
+    // created (notes.createdAt) — backdating yesterday's evening at 7am the
+    // next morning is normal diary behavior, and every timeline, heatmap,
+    // and "this week" synthesis window keys off this instead.
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).defaultNow().notNull(),
+    // Whether notes.title was written by the user or generated from the
+    // body by the AI — lets the UI show "AI-named, click to rename" and
+    // lets a re-distill safely regenerate an auto title without ever
+    // clobbering one the user typed themselves.
+    titleSource: titleSourceEnum("title_source").default("auto").notNull(),
+    mood: moodEnum("mood"),
+    // 1–5 self-reported energy, same rationale as mood above. Null = not
+    // recorded, which is common and must stay cheap to leave blank.
+    energy: integer("energy"),
+    // The freeform "scratch pad" half of the composer — unstructured
+    // fragments, todo shards, half-thoughts. Kept separate from the main
+    // body so the AI can be told to treat it as raw material (mine it for
+    // atoms) without it being rendered as part of the written entry.
+    scratch: text("scratch").default("").notNull(),
+    // Set once the distillation job has successfully turned this entry into
+    // knowledge atoms. Null means "never distilled" — the assistant page's
+    // backlog query looks for exactly that, so a failed or skipped run is
+    // retried rather than silently lost.
+    distilledAt: timestamp("distilled_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("diary_entries_occurred_at_idx").on(t.occurredAt)],
+);
+
+// --- KNOWLEDGE LAYER ---
+//
+// The self-evolving part. The design goal is that the knowledge base gets
+// SMARTER over time, not merely BIGGER — which means it needs more than an
+// append-only pile of AI summaries. Four mechanisms do that work:
+//
+//   1. Atoms, not documents. Each entry is distilled into small standalone
+//      claims ("prefers deep work before 10am", "shipping X taught Y").
+//      Small units can be independently reinforced, contradicted, merged,
+//      and retired; a blob summary can only be replaced wholesale.
+//   2. Reinforcement. A new entry that restates something already known
+//      doesn't create a duplicate — it bumps that atom's confidence and
+//      reinforcement count and appends a source row. Repeated observations
+//      therefore become *stronger beliefs*, and the evidence trail behind
+//      any claim stays inspectable.
+//   3. Contradiction. When new evidence conflicts with an existing atom,
+//      the pair gets an explicit "contradicts" link and is surfaced for
+//      review, so beliefs get UPDATED rather than duplicated. This is the
+//      difference between a system that learns and one that just hoards.
+//   4. Decay + trim. Atoms not reinforced for a long time lose salience and
+//      fall into a "stale?" queue. Nothing is auto-deleted (that would lose
+//      real history); the owner archives or pins deliberately.
+//
+// Insights (highlights, themes, ideas, business opportunities) are then
+// synthesized OVER the atom set rather than over raw entries — one step of
+// abstraction that both improves quality and keeps raw personal text out of
+// the synthesis prompt.
+
+export const atomKindEnum = pgEnum("atom_kind", [
+  "fact", // something true about the world or the owner's situation
+  "preference", // how they like to work/live
+  "pattern", // a recurring behavior or correlation observed over time
+  "goal", // something they're trying to achieve
+  "person", // a relationship and what matters about it
+  "project", // ongoing work, side project, or venture
+  "skill", // a capability being built
+  "question", // an unresolved thread worth returning to
+  "idea", // a seed worth developing
+]);
+
+export const atomStatusEnum = pgEnum("atom_status", [
+  "active",
+  "archived", // manually trimmed — kept for history, excluded from synthesis
+  "merged", // folded into another atom; mergedIntoId points at the survivor
+]);
+
+export const knowledgeOriginEnum = pgEnum("knowledge_origin", ["auto", "manual"]);
+
+export const atomLinkTypeEnum = pgEnum("atom_link_type", [
+  "supports",
+  "contradicts",
+  "refines",
+  "caused-by",
+  "relates-to",
+]);
+
+export type AtomKind = (typeof atomKindEnum.enumValues)[number];
+export type AtomStatus = (typeof atomStatusEnum.enumValues)[number];
+export type KnowledgeOrigin = (typeof knowledgeOriginEnum.enumValues)[number];
+export type AtomLinkType = (typeof atomLinkTypeEnum.enumValues)[number];
+
+// nomic-embed-text (already present on the agent-server — see models.ts's
+// note that it's embedding-only and never registered as a chat model)
+// returns 768-dimension vectors. Changing embedding model means changing
+// this number AND re-embedding every existing atom, so it's exported for
+// the embedding lib to assert against rather than duplicated as a literal.
+export const EMBEDDING_DIMENSIONS = 768;
+
+export const knowledgeAtoms = pgTable(
+  "knowledge_atoms",
+  {
+    id: serial("id").primaryKey(),
+    kind: atomKindEnum("kind").default("fact").notNull(),
+    // One self-contained sentence — this is what gets embedded, matched,
+    // and shown on the constellation. Kept short deliberately: a claim you
+    // can't state in a sentence is usually two claims.
+    statement: varchar("statement", { length: 500 }).notNull(),
+    // Optional supporting nuance, caveats, or the reasoning behind it.
+    detail: text("detail").default("").notNull(),
+    // 0–1. Starts modest for a single observation and climbs with each
+    // independent reinforcement (see reinforceAtom in lib/knowledge/distill).
+    confidence: real("confidence").default(0.5).notNull(),
+    // How central this is to the owner's life/work right now. Decays with
+    // time-since-reinforcement, which is what drives the "stale?" queue.
+    salience: real("salience").default(0.5).notNull(),
+    reinforcementCount: integer("reinforcement_count").default(1).notNull(),
+    status: atomStatusEnum("status").default("active").notNull(),
+    origin: knowledgeOriginEnum("origin").default("auto").notNull(),
+    // Pinned atoms never decay and are never suggested for trimming — the
+    // owner has said explicitly "this one matters, stop asking".
+    pinned: boolean("pinned").default(false).notNull(),
+    // Set when status = "merged": which atom absorbed this one. Keeps old
+    // ids resolvable instead of breaking every source row pointing here.
+    mergedIntoId: integer("merged_into_id"),
+    embedding: vector("embedding", { dimensions: EMBEDDING_DIMENSIONS }),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).defaultNow().notNull(),
+    lastReinforcedAt: timestamp("last_reinforced_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    // HNSW over cosine distance — what similarAtoms() in
+    // lib/knowledge/similarity.ts orders by. Requires the pgvector
+    // extension (`CREATE EXTENSION IF NOT EXISTS vector;`) to exist BEFORE
+    // db:push runs, or index creation fails.
+    index("knowledge_atoms_embedding_idx").using(
+      "hnsw",
+      t.embedding.op("vector_cosine_ops"),
+    ),
+    index("knowledge_atoms_status_idx").on(t.status),
+  ],
+);
+
+// The evidence trail: every entry that produced OR reinforced an atom.
+// Append-only — this is what makes a claim auditable ("why do you think
+// that about me?") and what the UI shows when you expand an atom.
+export const knowledgeAtomSources = pgTable(
+  "knowledge_atom_sources",
+  {
+    id: serial("id").primaryKey(),
+    atomId: integer("atom_id")
+      .notNull()
+      .references(() => knowledgeAtoms.id, { onDelete: "cascade" }),
+    noteId: integer("note_id").references(() => notes.id, { onDelete: "cascade" }),
+    // The specific sentence/passage that justified it, quoted from the
+    // entry — far more useful in review than just a link to the entry.
+    excerpt: text("excerpt").default("").notNull(),
+    // False for the row that created the atom, true for every later
+    // observation that re-confirmed it.
+    isReinforcement: boolean("is_reinforcement").default(false).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("knowledge_atom_sources_atom_idx").on(t.atomId)],
+);
+
+// The graph among atoms — how the assistant reasons about structure
+// ("these three goals all depend on that one skill").
+export const knowledgeLinks = pgTable(
+  "knowledge_links",
+  {
+    id: serial("id").primaryKey(),
+    fromAtomId: integer("from_atom_id")
+      .notNull()
+      .references(() => knowledgeAtoms.id, { onDelete: "cascade" }),
+    toAtomId: integer("to_atom_id")
+      .notNull()
+      .references(() => knowledgeAtoms.id, { onDelete: "cascade" }),
+    linkType: atomLinkTypeEnum("link_type").default("relates-to").notNull(),
+    // Why the engine drew this link — shown on hover in the constellation.
+    rationale: text("rationale").default("").notNull(),
+    // Contradictions start unresolved and appear in the review queue; the
+    // owner resolves by editing/archiving one side.
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    origin: knowledgeOriginEnum("origin").default("auto").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [unique().on(t.fromAtomId, t.toAtomId, t.linkType)],
+);
+
+export const insightKindEnum = pgEnum("insight_kind", [
+  "highlight", // what actually mattered in a period
+  "theme", // a through-line the owner may not have noticed
+  "idea", // a creative suggestion built from their own material
+  "business", // a venture/monetization angle grounded in their skills
+  "recommendation", // a concrete "do this next"
+  "reflection", // a question worth sitting with
+]);
+
+export const insightStatusEnum = pgEnum("insight_status", [
+  "new",
+  "starred",
+  "dismissed",
+  "acted-on",
+]);
+
+export type InsightKind = (typeof insightKindEnum.enumValues)[number];
+export type InsightStatus = (typeof insightStatusEnum.enumValues)[number];
+
+export const knowledgeInsights = pgTable(
+  "knowledge_insights",
+  {
+    id: serial("id").primaryKey(),
+    kind: insightKindEnum("kind").default("highlight").notNull(),
+    title: varchar("title", { length: 300 }).notNull(),
+    body: text("body").default("").notNull(),
+    status: insightStatusEnum("status").default("new").notNull(),
+    // The window this was synthesized over, so the UI can group "this
+    // week" vs "all time" and a later run can supersede an older one.
+    periodStart: timestamp("period_start", { withTimezone: true }),
+    periodEnd: timestamp("period_end", { withTimezone: true }),
+    // Comma-separated ModelId(s) — same convention as
+    // noteContent.translatedModel.
+    generatedModel: text("generated_model"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("knowledge_insights_status_idx").on(t.status)],
+);
+
+// Which atoms an insight was built from — the "show your work" link, so a
+// suggestion is never an unattributable assertion.
+export const knowledgeInsightAtoms = pgTable(
+  "knowledge_insight_atoms",
+  {
+    insightId: integer("insight_id")
+      .notNull()
+      .references(() => knowledgeInsights.id, { onDelete: "cascade" }),
+    atomId: integer("atom_id")
+      .notNull()
+      .references(() => knowledgeAtoms.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.insightId, t.atomId] })],
+);
+
+// One row per distillation or synthesis pass — same observability pattern
+// as ingestionJobs/obsidianSyncRuns, so the assistant page can show what
+// the engine has been doing and surface failures instead of hiding them.
+export const knowledgeRunKindEnum = pgEnum("knowledge_run_kind", [
+  "distill",
+  "synthesize",
+  "decay",
+]);
+
+export const knowledgeRuns = pgTable("knowledge_runs", {
+  id: serial("id").primaryKey(),
+  kind: knowledgeRunKindEnum("kind").default("distill").notNull(),
+  status: jobStatusEnum("status").default("queued").notNull(),
+  noteId: integer("note_id").references(() => notes.id, { onDelete: "cascade" }),
+  atomsCreated: integer("atoms_created").default(0).notNull(),
+  atomsReinforced: integer("atoms_reinforced").default(0).notNull(),
+  linksCreated: integer("links_created").default(0).notNull(),
+  insightsCreated: integer("insights_created").default(0).notNull(),
+  error: text("error"),
+  startedAt: timestamp("started_at", { withTimezone: true }),
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
 // Tracks one run of the Obsidian one-way sync (PLAN.md §8) — a single

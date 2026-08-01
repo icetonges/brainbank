@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { notes, noteContent, noteTags, tags as tagsTable, media as mediaTable, ingestionJobs } from "@/lib/db/schema";
 import type { NoteStatus } from "@/lib/db/schema";
 import { eq, and, desc } from "drizzle-orm";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { renderWithWikilinks } from "@/lib/notes/render-wikilinks";
 import { UploadWidget } from "@/components/upload-widget";
@@ -63,6 +63,13 @@ export default async function NotePage({
   }
 
   if (!loadError && !note) notFound();
+
+  // Diary entries are `notes` rows too (source_type "diary" — see the
+  // enum comment in schema.ts), but this page renders the
+  // what/how/why/other template, which is meaningless for one. Send them
+  // to their real home rather than showing an empty scaffold. Nothing
+  // links here for a diary entry; this catches a hand-typed or stale URL.
+  if (note?.sourceType === "diary") redirect(`/diary/${slug}`);
 
   if (loadError) {
     return (

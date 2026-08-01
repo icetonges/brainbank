@@ -275,6 +275,13 @@ export async function publishClassroomArticle(formData: FormData) {
   const modelId: ModelId | undefined = MODELS.some((m) => m.id === rawModelId)
     ? (rawModelId as ModelId)
     : undefined;
+  // The composer's "Private" checkbox — a private article is stored with
+  // status "private" instead of "published" (see schema.ts's noteStatusEnum,
+  // and the article/list pages' `note.status !== "published" && !session`
+  // gate) so it 404s for anyone not logged in as the owner, same as a
+  // draft. Can be flipped later from the article page's lock/unlock button
+  // (setArticlePrivacyAction below) or the edit form.
+  const isPrivate = formData.get("private") === "on";
 
   if (body.length < 10) throw new Error("Write at least a few words first");
   if (body.length > 100_000) throw new Error("Content is limited to 100,000 characters");
@@ -306,18 +313,14 @@ export async function publishClassroomArticle(formData: FormData) {
   // whichever pieces succeeded (the original body if formatting failed,
   // no guide if assist failed).
   //
-  // Sequential, not Promise.allSettled — all three registered models
-  // (models.ts) run through the same single Mac, which generates one
-  // response at a time regardless of which model is asked, so firing both
-  // calls at once doesn't actually parallelize the work; it just queues
-  // the second behind the first while its own abortSignal timeout
-  // (TASK_TIMEOUT_MS, tasks.ts) keeps counting from dispatch time rather
-  // than when it actually starts. That risk is worse now that a heavy
-  // model (gpt-oss:120b) is selectable here — a cold load already eats
-  // tens of seconds on its own; queuing a second call behind it made a
-  // timeout on that second call more likely, not less. Still built as
-  // PromiseSettledResult-shaped values so the graceful-degradation logic
-  // below is unchanged.
+  // Sequential, not Promise.allSettled — both local models (models.ts)
+  // run through the same single Mac, which generates one response at a
+  // time regardless of which model is asked, so firing both calls at once
+  // doesn't actually parallelize the work; it just queues the second
+  // behind the first while its own abortSignal timeout (TASK_TIMEOUT_MS,
+  // tasks.ts) keeps counting from dispatch time rather than when it
+  // actually starts. Still built as PromiseSettledResult-shaped values so
+  // the graceful-degradation logic below is unchanged.
   const assistResult: PromiseSettledResult<PublishAssistResult> = await publishAssist(
     { topic, category, content: body },
     modelId,
@@ -372,7 +375,7 @@ export async function publishClassroomArticle(formData: FormData) {
       .set({
         slug,
         title: finalTopic,
-        status: "published",
+        status: isPrivate ? "private" : "published",
         category: finalCategory,
         subcategoryId,
         sectionId,
@@ -408,7 +411,7 @@ export async function publishClassroomArticle(formData: FormData) {
       .values({
         slug,
         title: finalTopic,
-        status: "published",
+        status: isPrivate ? "private" : "published",
         sourceType: "manual",
         category: finalCategory,
         subcategoryId,
@@ -526,6 +529,12 @@ export async function updateClassroomArticle(
   const body = String(formData.get("body") ?? "").trim();
   const sourceUrl = normalizeSourceUrl(String(formData.get("sourceUrl") ?? ""));
   const regenerate = formData.get("regenerate") === "on";
+  // Same private/public checkbox as the composer (see publishClassroomArticle
+  // above) — the edit page only ever loads an already-published-or-private
+  // article (never a mid-upload "draft"), so unconditionally setting status
+  // from this checkbox on every save is safe: there's no third state here
+  // that could be clobbered.
+  const isPrivate = formData.get("private") === "on";
 
   if (!topic) throw new Error("Topic is required");
   if (!isClassroomCategory(rawCategory)) throw new Error("Pick a category");
@@ -547,6 +556,7 @@ export async function updateClassroomArticle(
     .update(notes)
     .set({
       title: topic.slice(0, 500),
+      status: isPrivate ? "private" : "published",
       category: rawCategory,
       subcategoryId,
       sectionId,
@@ -761,6 +771,41 @@ export async function deleteClassroomArticle(noteId: number) {
   await db.delete(notes).where(eq(notes.id, noteId));
   revalidatePath("/classroom");
   redirect("/classroom");
+}
+
+/**
+ * The article page's lock/unlock button (PrivacyToggleButton) — flips an
+ * article between "published" (visible to anyone) and "private" (visible
+ * only to the logged-in owner; see the `note.status !== "published" &&
+ * !session` gate on the article/list/side-nav pages). Double mode, not a
+ * one-way "make private" — calling this again with makePrivate=false
+ * un-locks it back to public.
+ *
+ * Deliberately refuses to touch a "draft" note (an in-progress composer
+ * upload that hasn't been published yet — see createClassroomDraft) since
+ * that status means something different and unrelated; only an already
+ * published-or-private article's visibility is meant to be toggled here.
+ */
+export async function setArticlePrivacyAction(
+  noteId: number,
+  slug: string,
+  makePrivate: boolean,
+) {
+  await requireOwner();
+
+  const note = await db.query.notes.findFirst({ where: eq(notes.id, noteId) });
+  if (!note) throw new Error("Article not found");
+  if (note.status !== "published" && note.status !== "private") {
+    throw new Error(`Can't toggle visibility on a note with status "${note.status}"`);
+  }
+
+  await db
+    .update(notes)
+    .set({ status: makePrivate ? "private" : "published", updatedAt: new Date() })
+    .where(eq(notes.id, noteId));
+
+  revalidatePath(`/classroom/${slug}`);
+  revalidatePath("/classroom");
 }
 
 /**

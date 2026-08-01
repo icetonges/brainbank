@@ -133,6 +133,19 @@ export default async function EditClassroomArticlePage({
           {s.regenerateOnSave}
         </label>
 
+        {/* Same private/public switch as the article page's lock/unlock
+            button (PrivacyToggleButton) — updateClassroomArticle sets
+            status from this checkbox on every save. */}
+        <label className="flex items-center gap-2 text-sm text-fg-secondary">
+          <input
+            type="checkbox"
+            name="private"
+            defaultChecked={note.status === "private"}
+            className="accent-current"
+          />
+          🔒 {s.privateCheckboxLabel}
+        </label>
+
         <div className="flex items-center gap-3">
           <button
             type="submit"

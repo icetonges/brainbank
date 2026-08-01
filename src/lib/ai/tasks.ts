@@ -13,6 +13,7 @@ import {
   FALLBACK_CHAIN,
   getModel,
   GROUNDED_FALLBACK_CHAIN,
+  LOCAL_ONLY_CHAIN,
   NO_STRUCTURED_OUTPUT_MODELS,
   OBJECT_FALLBACK_CHAIN,
   type ModelId,
@@ -56,7 +57,13 @@ export type TaskName =
   | "translate"
   | "draft"
   | "publish-assist"
-  | "format-article";
+  | "format-article"
+  // Diary + knowledge engine. The first two run local-only (raw diary text
+  // never leaves the Mac — see LOCAL_ONLY_CHAIN in models.ts); "synthesize"
+  // operates on already-distilled atoms and uses the normal chain.
+  | "diary-title"
+  | "distill"
+  | "synthesize";
 
 // Every task defaults to the local self-hosted model (DEFAULT_MODEL_ID —
 // see models.ts, MODELS[].isDefault) — private, free, no external API call.
@@ -91,6 +98,13 @@ export const TASK_MODELS: Record<TaskName, ModelId> = {
   draft: DEFAULT_MODEL_ID,
   "publish-assist": DEFAULT_MODEL_ID,
   "format-article": DEFAULT_MODEL_ID,
+  // All three default to the local model like everything else, but the two
+  // diary-facing ones additionally pass { localOnly: true } at the call
+  // site, which is what actually prevents falling through to Google — a
+  // preferred-model default alone would not (see chainFor).
+  "diary-title": DEFAULT_MODEL_ID,
+  distill: DEFAULT_MODEL_ID,
+  synthesize: DEFAULT_MODEL_ID,
 };
 
 // Left in every grounded task's system prompt as harmless defense-in-depth
@@ -123,16 +137,33 @@ function chainFor(
   preferred: ModelId,
   grounded: boolean,
   objectMode = false,
+  localOnly = false,
 ): ModelId[] {
-  const chain = objectMode
+  const base = objectMode
     ? OBJECT_FALLBACK_CHAIN
     : grounded
       ? GROUNDED_FALLBACK_CHAIN
       : FALLBACK_CHAIN;
+  // `localOnly` is the diary privacy boundary (see LOCAL_ONLY_CHAIN in
+  // models.ts). Intersecting rather than replacing keeps every other
+  // guarantee above intact — a local-only OBJECT-mode call still excludes
+  // any local model that can't do structured output, it just also can't
+  // escape to Google.
+  const chain = localOnly ? base.filter((id) => LOCAL_ONLY_CHAIN.includes(id)) : base;
   const unsafePreferred =
     (grounded && AGENTIC_MODELS.includes(preferred)) ||
-    (objectMode && NO_STRUCTURED_OUTPUT_MODELS.includes(preferred));
+    (objectMode && NO_STRUCTURED_OUTPUT_MODELS.includes(preferred)) ||
+    // An explicit override pointing at a non-local model is IGNORED under
+    // localOnly, exactly like an agentic override is under `grounded`:
+    // honoring a caller's model preference is never worth quietly sending
+    // diary text to a commercial API.
+    (localOnly && !LOCAL_ONLY_CHAIN.includes(preferred));
   const safePreferred = unsafePreferred ? chain[0] : preferred;
+  if (!safePreferred) {
+    throw new Error(
+      "No eligible model for this task — a local-only task found no local model registered (see LOCAL_ONLY_CHAIN in models.ts).",
+    );
+  }
   return [safePreferred, ...chain.filter((id) => id !== safePreferred)];
 }
 
@@ -178,13 +209,20 @@ async function withFallback<T>(
   options: {
     grounded?: boolean;
     objectMode?: boolean;
+    /** Diary privacy boundary — see chainFor / LOCAL_ONLY_CHAIN. */
+    localOnly?: boolean;
     onModelUsed?: (modelId: ModelId) => void;
   } = {},
 ): Promise<T> {
   // A mutable queue (not a plain for-of over the static chain array) so a
   // quality-gate failure (see the heavy-skip branch below) can prune
   // upcoming candidates instead of just running through all of them.
-  const queue = chainFor(preferred, options.grounded ?? true, options.objectMode ?? false);
+  const queue = chainFor(
+    preferred,
+    options.grounded ?? true,
+    options.objectMode ?? false,
+    options.localOnly ?? false,
+  );
   let lastError: unknown;
   while (queue.length > 0) {
     const modelId = queue.shift() as ModelId;
@@ -1476,4 +1514,377 @@ export async function draftNoteFromSource(
     other: unescapeLiteralWhitespace(object.other),
     summary: unescapeLiteralWhitespace(object.summary),
   };
+}
+
+// =====================================================================
+// DIARY + KNOWLEDGE ENGINE
+// =====================================================================
+//
+// PRIVACY: diaryTitleAndTags and extractKnowledgeAtoms both pass
+// { localOnly: true }, which structurally removes every non-local model
+// from their fallback chain (see chainFor / LOCAL_ONLY_CHAIN in models.ts).
+// Raw diary text therefore has no code path to a commercial API, even when
+// the Mac is unreachable — in that case these throw and the caller retries
+// later. synthesizeInsights deliberately does NOT set the flag: it reads
+// distilled atoms (one abstraction step off raw text), where availability
+// is worth more than the marginal privacy delta.
+
+// --- diary-title (auto subject line + life tags) ---
+
+const diaryTitleSchema = z.object({
+  title: z
+    .string()
+    .describe(
+      "A short, specific, human subject line for this diary entry (max ~70 chars). Concrete and evocative of what actually happened, never generic like 'Daily entry' or 'My thoughts'.",
+    ),
+  tags: arrayOfStrings(
+    "2-5 lowercase tags. Prefer the provided life-area vocabulary; add specific free-form tags only when they add real recall value.",
+  ),
+  mood: z
+    .enum(["great", "good", "neutral", "low", "rough"])
+    .describe("Overall emotional tone of the entry, inferred from how it's written"),
+});
+
+export type DiaryTitleResult = z.infer<typeof diaryTitleSchema>;
+
+/**
+ * Names and tags a diary entry from its content — the "subject title auto
+ * generated" half of the composer (the user can always type their own,
+ * which sets titleSource="manual" and stops this from overwriting it).
+ *
+ * `lifeAreas` is the curated vocabulary from lib/knowledge/taxonomy.ts,
+ * passed in rather than imported so this module stays free of knowledge-
+ * layer imports (tasks.ts is the AI boundary; it shouldn't know about the
+ * knowledge domain).
+ */
+export async function diaryTitleAndTags(
+  input: { body: string; scratch?: string; occurredAt: Date },
+  lifeAreas: string[],
+  modelId?: ModelId,
+): Promise<DiaryTitleResult> {
+  const { object } = await withFallback(
+    "diary-title",
+    modelId ?? TASK_MODELS["diary-title"],
+    (model) =>
+      generateObject({
+        model,
+        maxOutputTokens: 1024,
+        abortSignal: AbortSignal.timeout(TASK_TIMEOUT_MS),
+        schema: diaryTitleSchema,
+        system: [
+          "You name and tag personal diary entries. You are reading someone's private journal — be respectful, literal, and never moralize, advise, or editorialize.",
+          "",
+          `Preferred life-area tags (use these where they fit): ${lifeAreas.join(", ")}.`,
+          "You may add up to 2 specific free-form tags beyond that list when the entry has a concrete recurring subject worth tracking (a project name, a place, an activity). Lowercase, hyphenated.",
+          "",
+          "The title must read like something the author would recognize at a glance in a list a year from now — reference the actual specific thing that happened, not the category of thing.",
+          "Write the title in the same language the entry is written in.",
+          "",
+          NO_BROWSING_INSTRUCTION,
+          JSON_ARRAY_SHAPE_REMINDER,
+          'Example: {"title":"Rewired the deploy pipeline, finally green","tags":["work","side-project"],"mood":"good"}',
+        ].join("\n"),
+        prompt: [
+          `Date: ${input.occurredAt.toISOString().slice(0, 10)}`,
+          `Entry:\n${input.body}`,
+          input.scratch?.trim() ? `Scratch notes:\n${input.scratch}` : null,
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
+      }),
+    { objectMode: true, localOnly: true },
+  );
+  return { ...object, title: object.title.trim().slice(0, 200) };
+}
+
+// --- distill (diary entry -> candidate knowledge atoms) ---
+
+const atomCandidateSchema = z.object({
+  kind: z
+    .enum([
+      "fact",
+      "preference",
+      "pattern",
+      "goal",
+      "person",
+      "project",
+      "skill",
+      "question",
+      "idea",
+    ])
+    .describe("What type of knowledge this is"),
+  statement: z
+    .string()
+    .describe(
+      "ONE self-contained sentence, written in the third person about the author (e.g. 'Prefers deep work before 10am'). Must stand alone without the entry for context.",
+    ),
+  detail: z
+    .string()
+    .describe("Optional supporting nuance or caveat. Empty string if there's nothing to add."),
+  excerpt: z
+    .string()
+    .describe("The short passage from the entry that justifies this, quoted near-verbatim."),
+  confidence: z
+    .number()
+    .describe(
+      "0.0-1.0 — how strongly this single entry supports the claim. A passing mention is ~0.3; an explicit clear statement is ~0.8.",
+    ),
+});
+
+const distillSchema = z.object({
+  atoms: z.preprocess(
+    (val) => (val === undefined || val === null ? [] : val),
+    z
+      .array(atomCandidateSchema)
+      .max(8)
+      .describe("The durable knowledge worth remembering from this entry. Zero is a valid answer."),
+  ),
+});
+
+export type AtomCandidate = z.infer<typeof atomCandidateSchema>;
+
+/**
+ * The core extraction step: reads one diary entry and proposes small,
+ * standalone claims worth remembering. Everything downstream (dedupe,
+ * reinforcement, contradiction, decay) operates on these — see
+ * lib/knowledge/distill.ts.
+ *
+ * The prompt fights the two failure modes that make this kind of feature
+ * useless in practice: (1) restating the entry as "atoms" (transient
+ * events aren't knowledge), and (2) inventing generic self-help platitudes
+ * that would be true of anyone. Both are called out explicitly with
+ * examples, because a weaker local model will happily do either.
+ */
+export async function extractKnowledgeAtoms(
+  input: { title: string; body: string; scratch?: string; occurredAt: Date },
+  modelId?: ModelId,
+): Promise<AtomCandidate[]> {
+  const { object } = await withFallback(
+    "distill",
+    modelId ?? TASK_MODELS.distill,
+    (model) =>
+      generateObject({
+        model,
+        maxOutputTokens: MAX_OUTPUT_TOKENS,
+        abortSignal: AbortSignal.timeout(TASK_TIMEOUT_MS),
+        schema: distillSchema,
+        system: [
+          "You extract DURABLE knowledge from a person's private diary entry, building a long-term model of who they are, what they're working on, and how they operate. You are reading private material: be precise and respectful, never judgmental.",
+          "",
+          "Extract only things that will still be TRUE and USEFUL months from now:",
+          "- preferences and working habits ('Thinks best in the morning, schedules meetings after lunch')",
+          "- ongoing projects and their state ('Building a personal knowledge base app called BrainBank')",
+          "- goals and intentions ('Wants to ship the diary feature before the end of the quarter')",
+          "- people who matter and what about them ('Daughter Mia is learning piano; practices together on weekends')",
+          "- skills being built, and evidence of progress",
+          "- recurring patterns the author may not have named themselves",
+          "- open questions and unresolved threads",
+          "- ideas worth developing later",
+          "",
+          "DO NOT extract:",
+          "- transient events with no lasting significance ('Had pasta for lunch', 'It rained today')",
+          "- restatements of the entry — you are distilling, not summarizing",
+          "- generic advice or platitudes true of anyone ('Rest is important', 'Consistency matters'). Every atom must be specific to THIS person.",
+          "- anything you inferred beyond what the text supports. No speculation.",
+          "",
+          "Write every statement in the third person about the author, self-contained, so it makes sense read on its own years later with no other context.",
+          "Returning an empty array is correct and expected for a mundane entry. Never pad.",
+          "Write statements in the same language the entry is written in.",
+          "",
+          NO_BROWSING_INSTRUCTION,
+          JSON_ARRAY_SHAPE_REMINDER,
+          'Example: {"atoms":[{"kind":"preference","statement":"Prefers to do deep technical work before 10am and batch meetings in the afternoon","detail":"Has said this holds even on days that start badly.","excerpt":"got the hard part done before standup again","confidence":0.7}]}',
+        ].join("\n"),
+        prompt: [
+          `Date: ${input.occurredAt.toISOString().slice(0, 10)}`,
+          `Title: ${input.title}`,
+          `Entry:\n${input.body}`,
+          input.scratch?.trim() ? `Scratch notes (raw fragments — mine these too):\n${input.scratch}` : null,
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
+      }),
+    { objectMode: true, localOnly: true },
+  );
+
+  return object.atoms.map((a) => ({
+    ...a,
+    statement: unescapeLiteralWhitespace(a.statement).trim().slice(0, 500),
+    detail: unescapeLiteralWhitespace(a.detail ?? "").trim(),
+    excerpt: (a.excerpt ?? "").trim().slice(0, 1000),
+    // Clamp — a model returning 1.5 or -0.2 shouldn't poison the
+    // confidence arithmetic in reinforceAtom.
+    confidence: Math.min(1, Math.max(0, Number(a.confidence) || 0.5)),
+  }));
+}
+
+// --- reconcile (is this candidate the same belief as an existing atom?) ---
+
+const reconcileSchema = z.object({
+  verdict: z
+    .enum(["same", "contradicts", "refines", "distinct"])
+    .describe(
+      "same = restates the existing atom; contradicts = incompatible with it; refines = narrows/extends it; distinct = unrelated",
+    ),
+  rationale: z.string().describe("One short sentence explaining the verdict"),
+});
+
+export type ReconcileVerdict = z.infer<typeof reconcileSchema>;
+
+/**
+ * Vector similarity gets us CANDIDATE matches; it can't tell "I now prefer
+ * mornings" from "I no longer prefer mornings" — those embed almost
+ * identically while meaning opposite things. This second pass makes that
+ * call, and it's what lets the knowledge base UPDATE a belief instead of
+ * storing both halves of a contradiction forever.
+ */
+export async function reconcileAtom(
+  candidate: { kind: string; statement: string },
+  existing: { kind: string; statement: string; detail: string },
+  modelId?: ModelId,
+): Promise<ReconcileVerdict> {
+  const { object } = await withFallback(
+    "distill",
+    modelId ?? TASK_MODELS.distill,
+    (model) =>
+      generateObject({
+        model,
+        maxOutputTokens: 512,
+        abortSignal: AbortSignal.timeout(TASK_TIMEOUT_MS),
+        schema: reconcileSchema,
+        system: [
+          "You compare two claims about the same person and decide their relationship. Be strict and literal.",
+          "",
+          "- 'same': they assert the same thing, even if worded differently.",
+          "- 'contradicts': both cannot be true of the person at the same time. Pay close attention to negation, reversal, and change over time — 'prefers X' vs 'no longer prefers X' is a contradiction, not a match.",
+          "- 'refines': the new claim narrows, qualifies, or adds detail to the existing one without conflicting.",
+          "- 'distinct': they're about different things.",
+          "",
+          "When genuinely unsure between 'same' and 'distinct', answer 'distinct' — a duplicate atom is easy to merge later, but wrongly collapsing two different beliefs silently destroys information.",
+          NO_BROWSING_INSTRUCTION,
+        ].join("\n"),
+        prompt: [
+          `Existing (${existing.kind}): ${existing.statement}`,
+          existing.detail ? `Existing detail: ${existing.detail}` : null,
+          `New (${candidate.kind}): ${candidate.statement}`,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      }),
+    { objectMode: true, localOnly: true },
+  );
+  return object;
+}
+
+// --- synthesize (atoms -> highlights, themes, ideas, business angles) ---
+
+const insightSchema = z.object({
+  kind: z
+    .enum(["highlight", "theme", "idea", "business", "recommendation", "reflection"])
+    .describe("What type of insight this is"),
+  title: z.string().describe("A punchy one-line title (max ~90 chars)"),
+  body: z
+    .string()
+    .describe(
+      "2-5 sentences of markdown. Concrete and specific to this person's actual material. For 'business', include what the angle is, why THEY specifically are positioned for it, and a realistic first step.",
+    ),
+  atomIndexes: z.preprocess(
+    (val) => (val === undefined || val === null ? [] : val),
+    z
+      .array(z.number())
+      .describe("Indexes (from the numbered list given) of the atoms this insight draws on"),
+  ),
+});
+
+const synthesizeSchema = z.object({
+  insights: z.preprocess(
+    (val) => (val === undefined || val === null ? [] : val),
+    z.array(insightSchema).max(8).describe("The insights worth surfacing"),
+  ),
+});
+
+export type SynthesizedInsight = z.infer<typeof insightSchema>;
+
+export interface SynthesizeInput {
+  /** Numbered atom list — index position is what atomIndexes refers to. */
+  atoms: { kind: string; statement: string; detail: string; reinforcementCount: number }[];
+  /** Human label for the window being synthesized ("this week", "all time"). */
+  periodLabel: string;
+  /** Restrict output to these kinds, or omit for the full mix. */
+  kinds?: string[];
+}
+
+/**
+ * The "gets smarter over time" payoff: reads the accumulated atom set and
+ * produces highlights, themes the author hasn't named, ideas, and business
+ * angles grounded in their own material.
+ *
+ * Note this runs on the NORMAL chain (no localOnly) — it reads distilled
+ * atoms, not raw entries. See this section's header comment.
+ */
+export async function synthesizeInsights(
+  input: SynthesizeInput,
+  modelId?: ModelId,
+  onModelUsed?: (id: ModelId) => void,
+): Promise<SynthesizedInsight[]> {
+  if (input.atoms.length === 0) return [];
+
+  const numbered = input.atoms
+    .map(
+      (a, i) =>
+        `[${i}] (${a.kind}, seen ${a.reinforcementCount}x) ${a.statement}${a.detail ? ` — ${a.detail}` : ""}`,
+    )
+    .join("\n");
+
+  const { object } = await withFallback(
+    "synthesize",
+    modelId ?? TASK_MODELS.synthesize,
+    (model) =>
+      generateObject({
+        model,
+        maxOutputTokens: MAX_OUTPUT_TOKENS,
+        abortSignal: AbortSignal.timeout(TASK_TIMEOUT_MS),
+        schema: synthesizeSchema,
+        system: [
+          "You are a sharp, candid personal strategist. You've been given a knowledge base distilled from someone's diary: durable facts about how they work, what they're building, who matters to them, and what they're trying to achieve.",
+          "",
+          "Produce insights that are worth their attention:",
+          "- highlight: what genuinely mattered in this period, stated so they feel it",
+          "- theme: a through-line across several atoms they probably haven't named themselves. This is the highest-value output — connect things that sit far apart.",
+          "- idea: a specific creative direction built from their OWN material",
+          "- business: a venture or monetization angle. Say what the angle is, why THIS person is unusually positioned for it given their actual skills and projects, and a realistic first step. No generic startup advice.",
+          "- recommendation: one concrete thing to do next",
+          "- reflection: a question worth sitting with, drawn from a tension or contradiction in the material",
+          "",
+          "Rules:",
+          "- Ground every insight in the atoms provided and cite their indexes. Never invent facts about this person.",
+          "- Atoms reinforced many times are well-established; a single-sighting atom is tentative — weight them accordingly and don't build a business plan on one weak observation.",
+          "- Be specific and non-obvious. A generic insight that would apply to any professional is a failure, even if it's true.",
+          "- Be direct. Skip the flattery and the hedging.",
+          input.kinds?.length
+            ? `- Only produce insights of these kinds: ${input.kinds.join(", ")}.`
+            : "- Produce a mix, weighted toward themes and ideas.",
+          "",
+          NO_BROWSING_INSTRUCTION,
+          JSON_ARRAY_SHAPE_REMINDER,
+        ].join("\n"),
+        prompt: [
+          `Period: ${input.periodLabel}`,
+          `Knowledge base (${input.atoms.length} atoms):`,
+          numbered,
+        ].join("\n\n"),
+      }),
+    { objectMode: true, onModelUsed },
+  );
+
+  return object.insights.map((i) => ({
+    ...i,
+    title: unescapeLiteralWhitespace(i.title).trim().slice(0, 300),
+    body: unescapeLiteralWhitespace(i.body).trim(),
+    // Drop hallucinated out-of-range indexes rather than letting them
+    // become broken insight->atom links.
+    atomIndexes: (i.atomIndexes ?? []).filter(
+      (n) => Number.isInteger(n) && n >= 0 && n < input.atoms.length,
+    ),
+  }));
 }

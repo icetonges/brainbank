@@ -5,25 +5,30 @@
 // resolveModel() (providers.ts) and runTask() (tasks.ts), so adding a
 // model here is the only step needed to make it selectable everywhere.
 //
-// FOR NOW, every registered model runs through the same local self-hosted
-// agent-server — Google/Groq/Anthropic were deliberately pulled out (per
-// explicit instruction) so that backend is the only place any AI feature
-// can call, not just the preferred/first-tried one in a fallback chain.
-// The three entries below are the three chat models actually available on
-// that one agent-server (see HANDOFF-FOR-WINDOWS.md §2 — verified by
-// reading Ollama's manifests directly on the Mac; a fourth model,
-// nomic-embed-text, exists on the same server but is embedding-only and
-// deliberately NOT registered here — it's not a chat model and must never
-// show up in a picker). Re-adding an external provider later is still just
-// a provider() factory in providers.ts, a MODELS entry, and a line in
-// FALLBACK_CHAIN, same as before.
+// Two local chat models run through the same self-hosted agent-server (see
+// HANDOFF-FOR-WINDOWS.md §2 — verified by reading Ollama's manifests
+// directly on the Mac; a third model, nomic-embed-text, exists on the same
+// server but is embedding-only and deliberately NOT registered here — it's
+// not a chat model and must never show up in a picker). gpt-oss:120b (the
+// former third local entry) was removed outright — it couldn't coexist in
+// VRAM with the other two, and every selection of it paid a 60+ second
+// cold-load tax, which made it a poor fit for an automatic fallback chain.
+// Its replacement as the chain's last resort is a real commercial API —
+// google/gemini-2.5-flash-lite (see providers.ts's google() factory) —
+// re-adding Google (previously pulled out entirely per explicit
+// instruction, alongside Groq/Anthropic) specifically and only as that
+// last-ditch fallback: cheap, fast, and doesn't depend on the Mac being
+// awake or Funnel being reachable, unlike every local entry. Re-adding
+// another external provider later is still just a provider() factory in
+// providers.ts, a MODELS entry, and a line in FALLBACK_CHAIN, same as
+// before.
 
-export type ProviderId = "local";
+export type ProviderId = "local" | "google";
 
 export type ModelId =
   | "local/qwen3.6-35b-a3b"
   | "local/qwen3-vl-30b"
-  | "local/gpt-oss-120b";
+  | "google/gemini-2.5-flash-lite";
 
 export interface ModelInfo {
   id: ModelId;
@@ -48,18 +53,20 @@ export interface ModelInfo {
   // setup this registry replaces) — the other two are always exactly this.
   wireId: string;
   // Set on a model that can't coexist with the others in the Mac's VRAM
-  // (see HANDOFF-FOR-WINDOWS.md §2's "gpt-oss:120b constraint" table) —
-  // selecting it evicts whatever was loaded and the first request after
-  // waits for a full cold load (tens of seconds to over a minute). The
-  // picker UI surfaces this as an explicit warning; per the handoff doc,
-  // "Don't remove those warnings."
+  // (see HANDOFF-FOR-WINDOWS.md §2's VRAM-constraint table) — selecting it
+  // evicts whatever was loaded and the first request after waits for a
+  // full cold load (tens of seconds to over a minute). The picker UI
+  // surfaces this as an explicit warning. Nothing currently registered
+  // sets this (the one local model that did, gpt-oss:120b, was removed —
+  // see this file's header comment) but the flag/warning machinery stays
+  // in place for if a heavy local model is ever added back.
   heavy?: boolean;
 }
 
 export const MODELS: ModelInfo[] = [
   // Mixture-of-experts — only ~3B params active per token despite the
-  // 35B/22.3 GiB size, which is why it's the fastest of the three
-  // (measured 72 tokens/sec on the Mac). Default for every task.
+  // 35B/22.3 GiB size, which is why it's the fastest of the two local
+  // models (measured 72 tokens/sec on the Mac). Default for every task.
   {
     id: "local/qwen3.6-35b-a3b",
     name: "Qwen3.6 35B (fast, default)",
@@ -69,7 +76,7 @@ export const MODELS: ModelInfo[] = [
     inputPricePer1M: 0,
     outputPricePer1M: 0,
     description:
-      "Self-hosted agent-server via Tailscale Funnel — private, no external API, no per-token cost. Mixture-of-experts (~3B active params/token), the fastest of the three local models (~72 tok/s). Requires LOCAL_LLM_FUNNEL_URL + LOCAL_LLM_SHARED_SECRET and the Mac to be awake/reachable.",
+      "Self-hosted agent-server via Tailscale Funnel — private, no external API, no per-token cost. Mixture-of-experts (~3B active params/token), the fastest of the two local models (~72 tok/s). Requires LOCAL_LLM_FUNNEL_URL + LOCAL_LLM_SHARED_SECRET and the Mac to be awake/reachable.",
     contextWindow: "varies",
     isFree: true,
     supportsVision: false,
@@ -77,10 +84,12 @@ export const MODELS: ModelInfo[] = [
     badge: "Local",
     wireId: "qwen3.6:35b-a3b",
   },
-  // The only one of the three that accepts image input (vision-language).
-  // Coexists in VRAM alongside the default model (40.5 GiB combined, both
-  // stay warm — see the handoff doc's table), so switching to this one and
-  // back doesn't trigger the slow evict/reload cycle gpt-oss:120b does.
+  // The only local model that accepts image input (vision-language) — the
+  // Google fallback also supports vision, but this one is free/private and
+  // never called unless it's the preferred choice or both other chain
+  // entries fail. Coexists in VRAM alongside the default model (40.5 GiB
+  // combined, both stay warm — see the handoff doc's table), so switching
+  // to this one and back stays fast (no evict/reload cycle).
   {
     id: "local/qwen3-vl-30b",
     name: "Qwen3-VL 30B (vision)",
@@ -97,27 +106,30 @@ export const MODELS: ModelInfo[] = [
     badge: "Local",
     wireId: "qwen3-vl:30b",
   },
-  // Largest/most capable, but cannot be co-resident with either other
-  // model (77.8 GiB VRAM total; this alone is 60.9 GiB, and both other
-  // pairings with it exceed the limit — see the handoff doc's table).
-  // Selecting it evicts whatever was loaded; the next request waits for a
-  // full cold load of ~65 GB, which can take 60+ seconds.
+  // Commercial fallback — the chain's last resort (see FALLBACK_CHAIN
+  // below), used only when both local models have failed. Google's Gemini
+  // API, not the self-hosted agent-server: costs real money per token and
+  // needs internet + GOOGLE_GENERATIVE_AI_API_KEY, but doesn't depend on
+  // the Mac being awake or Tailscale Funnel being reachable — the one
+  // failure mode nothing local can protect against (see tasks.ts's
+  // withFallback/isInfraFailure comments). Flash-Lite specifically: cheap
+  // and fast enough to be a reasonable last-resort rather than a
+  // budget-buster, per Google's published pricing.
   {
-    id: "local/gpt-oss-120b",
-    name: "GPT-OSS 120B (largest, slow to switch to)",
-    provider: "local",
-    providerLabel: "Local",
-    providerColor: "#16a34a",
-    inputPricePer1M: 0,
-    outputPricePer1M: 0,
+    id: "google/gemini-2.5-flash-lite",
+    name: "Gemini 2.5 Flash-Lite (commercial fallback)",
+    provider: "google",
+    providerLabel: "Google",
+    providerColor: "#4285f4",
+    inputPricePer1M: 0.1,
+    outputPricePer1M: 0.4,
     description:
-      "Self-hosted agent-server via Tailscale Funnel — private, no external API, no per-token cost. The largest and most capable of the three, but can't share VRAM with the other two — selecting it evicts whatever else was loaded and the next request waits for a full cold load.",
-    contextWindow: "varies",
-    isFree: true,
-    supportsVision: false,
-    badge: "Local",
-    wireId: "gpt-oss:120b",
-    heavy: true,
+      "Google Gemini API — commercial, real per-token cost, requires internet and GOOGLE_GENERATIVE_AI_API_KEY. Only used as the fallback chain's last resort, when both local models have failed — doesn't depend on the Mac being awake or Funnel being reachable.",
+    contextWindow: "1M tokens",
+    isFree: false,
+    supportsVision: true,
+    badge: "Commercial",
+    wireId: "gemini-2.5-flash-lite",
   },
 ];
 
@@ -125,28 +137,64 @@ export const MODELS: ModelInfo[] = [
 //
 // The order tasks.ts tries models in when a call fails (rate limit, spend
 // cap, outage, whatever) — not just a config table but an actual runtime
-// fallback (see withFallback() in tasks.ts). All three chain entries run
-// through the same agent-server, so this doesn't protect against the Mac
-// being asleep or Funnel being down (every model fails together in that
-// case) — what it does protect against is one specific model erroring or
-// timing out (a cold-load timeout on gpt-oss:120b, a transient agent_loop
-// failure, etc.) while the others are fine. Ordered fastest/most-reliable
-// first: the default model, then the vision model (which stays warm
-// alongside it — see MODELS above), then the heavyweight model last since
-// falling through to it costs a slow VRAM swap. When a task explicitly
-// requests a specific model (e.g. the classroom composer's model picker),
-// chainFor() in tasks.ts puts that choice first and appends the rest of
-// this chain after it — so picking gpt-oss:120b still means "try gpt-oss,
-// then fall back to the other two if it fails," not "only ever use
-// gpt-oss."
+// fallback (see withFallback() in tasks.ts). Ordered fastest/most-reliable
+// first: the default local model, then the local vision model (which stays
+// warm alongside it — see MODELS above), then the commercial Google
+// fallback last. The first two entries share the same agent-server, so
+// they don't protect against the Mac being asleep or Funnel being down —
+// what they protect against is one specific local model erroring or
+// timing out while the other is fine. The third entry is different in
+// kind, not just order: it's the one thing in this chain that keeps
+// working when the Mac/Funnel itself is unreachable (see
+// isInfraFailure()'s "shared provider" early-exit in tasks.ts — Google is
+// a different ProviderId, so it's never skipped by that optimization),
+// at the cost of a real per-token bill instead of $0. When a task
+// explicitly requests a specific model (e.g. the classroom composer's
+// model picker), chainFor() in tasks.ts puts that choice first and appends
+// the rest of this chain after it — so picking the Gemini fallback
+// directly still means "try Gemini, then fall back to the local models if
+// it fails," not "only ever use Gemini."
 export const FALLBACK_CHAIN: ModelId[] = [
   "local/qwen3.6-35b-a3b",
   "local/qwen3-vl-30b",
-  "local/gpt-oss-120b",
+  "google/gemini-2.5-flash-lite",
 ];
 
 export const DEFAULT_MODEL_ID: ModelId =
   MODELS.find((m) => m.isDefault)?.id ?? FALLBACK_CHAIN[0];
+
+// --- LOCAL-ONLY CHAIN (PRIVACY BOUNDARY) ---
+//
+// FALLBACK_CHAIN with every non-local model stripped out. This is not a
+// performance tweak — it's a hard privacy boundary for diary content.
+//
+// The diary holds the most personal text in this app, and the explicit
+// decision (see lib/knowledge/distill.ts) is that raw entries are processed
+// ONLY by the self-hosted agent-server and never reach a commercial API,
+// even as a last-resort fallback. Passing `localOnly: true` through
+// withFallback() in tasks.ts makes that structural rather than a
+// convention someone could forget: the Google entry is removed from the
+// candidate list entirely, so there is no code path where a diary
+// extraction call can end up at Google, however many local models fail
+// first. The cost is real and accepted — when the Mac is asleep, diary
+// distillation fails and is retried later rather than silently succeeding
+// somewhere else.
+//
+// Knowledge SYNTHESIS (insights over already-distilled atoms) deliberately
+// does NOT use this chain: atoms are one abstraction step removed from raw
+// diary text, and availability matters more there.
+export const LOCAL_ONLY_CHAIN: ModelId[] = FALLBACK_CHAIN.filter(
+  (id) => MODELS.find((m) => m.id === id)?.provider === "local",
+);
+
+// --- EMBEDDINGS ---
+//
+// The embedding model on the same agent-server (see this file's header —
+// deliberately NOT in MODELS, since it's not a chat model and must never
+// appear in a picker). Used by lib/ai/embeddings.ts to vectorize knowledge
+// atoms for similarity matching. 768 dimensions — must stay in sync with
+// EMBEDDING_DIMENSIONS in db/schema.ts.
+export const EMBEDDING_WIRE_ID = "nomic-embed-text";
 
 // --- AGENTIC MODELS ---
 //

@@ -347,6 +347,17 @@ export function ClassroomComposer({
         <p className="-mt-2 text-sm text-warn">⚠️ {s.modelHeavyWarning}</p>
       )}
 
+      {/* Publishes with status "private" instead of "published" (see
+          publishClassroomArticle in classroom/actions.ts) — a private
+          article 404s for anyone who isn't logged in as the owner, same
+          as a draft. Can be flipped back to public later from the article
+          page's lock/unlock button or this same checkbox on the edit
+          form. */}
+      <label className="flex w-fit items-center gap-2 text-sm text-fg-secondary">
+        <input type="checkbox" name="private" className="accent-current" />
+        🔒 {s.privateCheckboxLabel}
+      </label>
+
       <textarea
         ref={bodyRef}
         name="body"

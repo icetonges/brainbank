@@ -2,11 +2,14 @@
 
 import { MODELS, DEFAULT_MODEL_ID, type ModelId, type ProviderId } from "@/lib/ai/models";
 
-// Only "local" is registered right now (see models.ts) — Google/Groq/
-// Anthropic entries were removed per explicit instruction. Adding a
-// provider back to models.ts/providers.ts means adding its id back here
-// too, or it won't show up in this dropdown even though it's registered.
-const PROVIDER_ORDER: ProviderId[] = ["local"];
+// "local" and "google" are registered right now (see models.ts) — Groq/
+// Anthropic entries are still removed per the original explicit
+// instruction. Google is back specifically as the fallback chain's
+// commercial last resort, listed after local so the two free/private
+// models are always offered first. Adding a provider back to
+// models.ts/providers.ts means adding its id back here too, or it won't
+// show up in this dropdown even though it's registered.
+const PROVIDER_ORDER: ProviderId[] = ["local", "google"];
 
 export function ModelPicker({
   value,

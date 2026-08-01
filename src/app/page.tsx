@@ -7,7 +7,7 @@ import { CLASSROOM_TABS } from "@/lib/classroom";
 import { loadClassroomToc, type TocSubcategory } from "@/lib/classroom/toc";
 import { getLang } from "@/lib/i18n-server";
 import { t, CLASSROOM_TAB_LABELS_ZH, type Lang } from "@/lib/i18n";
-import { desc, eq, and, isNotNull, isNull, count } from "drizzle-orm";
+import { desc, eq, ne, and, isNotNull, isNull, count } from "drizzle-orm";
 import { HeroVisual, PillarIcon } from "@/components/home-visuals";
 import { formatDate, formatDateTime } from "@/lib/date";
 import { sectionTone, NEUTRAL_TONE, type SectionTone } from "@/lib/classroom/section-tones";
@@ -81,6 +81,12 @@ async function loadHome(
       createdAt: a.createdAt,
     }));
 
+    // Diary entries are `notes` rows too (source_type "diary" — see
+    // schema.ts) but are deliberately excluded here: they're private
+    // journal writing with their own home at /diary, and listing them on
+    // the homepage alongside knowledge pages would both misrepresent what
+    // this list is and put personal entries one glance away.
+    const notDiary = ne(notes.sourceType, "diary");
     const recentNotes = await db
       .select({
         id: notes.id,
@@ -91,7 +97,11 @@ async function loadHome(
         updatedAt: notes.updatedAt,
       })
       .from(notes)
-      .where(visible ? and(isNull(notes.category), visible) : isNull(notes.category))
+      .where(
+        visible
+          ? and(isNull(notes.category), notDiary, visible)
+          : and(isNull(notes.category), notDiary),
+      )
       .orderBy(desc(notes.updatedAt))
       .limit(8);
 

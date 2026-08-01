@@ -18,6 +18,7 @@ import { t, CLASSROOM_TAB_LABELS_ZH } from "@/lib/i18n";
 import { Markdown } from "@/components/markdown";
 import { DeleteArticleButton } from "@/components/delete-article-button";
 import { PendingFormButton } from "@/components/pending-form-button";
+import { PrivacyToggleButton } from "@/components/privacy-toggle-button";
 import { ClassroomSideNav } from "@/components/classroom-side-nav";
 import { regenerateGuideAction, translateClassroomArticleAction } from "../actions";
 import { formatDateTime } from "@/lib/date";
@@ -179,6 +180,16 @@ export default async function ClassroomArticlePage({
               {subcategoryName}
             </span>
           )}
+          {/* Only the owner ever sees this page for a private article at
+              all (note.status !== "published" && !session -> notFound()
+              above), but the badge still matters here: without it,
+              nothing on the page itself distinguishes a locked article
+              from a normal published one. */}
+          {note.status === "private" && (
+            <span className="rounded-full bg-warn/15 px-2.5 py-0.5 text-xs font-semibold text-warn">
+              🔒 {s.private}
+            </span>
+          )}
         </div>
 
         <h1 className="text-3xl font-semibold text-fg">{displayTitle}</h1>
@@ -247,6 +258,12 @@ export default async function ClassroomArticlePage({
               className="rounded-md border border-accent/60 px-3 py-1.5 text-sm font-medium text-accent hover:bg-accent hover:text-accent-fg transition-colors disabled:opacity-60"
             />
           </form>
+          <PrivacyToggleButton
+            noteId={note.id}
+            slug={slug}
+            isPrivate={note.status === "private"}
+            lang={lang}
+          />
           <div className="ml-auto">
             <DeleteArticleButton noteId={note.id} title={note.title} />
           </div>

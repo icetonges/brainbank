@@ -38,8 +38,11 @@ export function subcategorySlug(input: string): string {
  * then be permanently unreachable at its own URL. */
 export const RESERVED_TOP_LEVEL_SLUGS = new Set([
   "api",
+  "assistant",
   "classroom",
+  "diary",
   "graph",
+  "llm",
   "login",
   "new",
   "notes",

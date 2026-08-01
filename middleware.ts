@@ -13,5 +13,10 @@ export const config = {
   // /llm is intentionally public — see the auth-removal comments on
   // src/app/llm/page.tsx, src/app/api/ai/health/route.ts, and the
   // context === "knowledge" branch of src/app/api/ai/assist/route.ts.
-  matcher: ["/new/:path*", "/admin/:path*"],
+  //
+  // /diary and /assistant are owner-only in full: unlike the classroom
+  // (public read, private edit), there is no anonymous view of either.
+  // Each page also checks the session itself and redirects — this matcher
+  // is the outer layer of that defense in depth, not the only one.
+  matcher: ["/new/:path*", "/admin/:path*", "/diary/:path*", "/assistant/:path*"],
 };

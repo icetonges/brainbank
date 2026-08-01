@@ -21,6 +21,7 @@ function ArticleRow({
   lang: string;
   dateLocale?: string;
 }) {
+  const s = t(lang === "zh" ? "zh" : "en").classroom;
   return (
     <li>
       <Link
@@ -31,9 +32,14 @@ function ArticleRow({
           {article.title}
         </span>
         <span className="flex shrink-0 items-center gap-2 text-xs text-fg-secondary">
-          {article.status !== "published" && (
+          {article.status === "private" && (
             <span className="rounded-full bg-warn/15 px-2 py-0.5 text-[10px] font-semibold text-warn">
-              {article.status}
+              🔒 {s.private}
+            </span>
+          )}
+          {article.status === "draft" && (
+            <span className="rounded-full bg-warn/15 px-2 py-0.5 text-[10px] font-semibold text-warn">
+              {s.draft}
             </span>
           )}
           {formatDateTime(article.createdAt, dateLocale)}
@@ -360,7 +366,8 @@ export default async function ClassroomPage({
                       </span>
                       <span className="text-xs text-fg-secondary">
                         {formatDateTime(a.createdAt, dateLocale)}
-                        {a.status !== "published" ? ` · ${a.status}` : ""}
+                        {a.status === "private" ? ` · 🔒 ${s.private}` : ""}
+                        {a.status === "draft" ? ` · ${s.draft}` : ""}
                       </span>
                     </Link>
                   </li>
