@@ -631,6 +631,46 @@ function structureCounts(text: string): {
   return { headings, listItems, tableRows };
 }
 
+/** Inline code spans, PascalCase/camelCase identifiers, and 2-4 word Title
+ * Case phrases — product names, class names, function names, and similar
+ * identifiers that a real translation has to carry over verbatim (the
+ * system prompt already asks for exactly that: inline code untouched,
+ * proper nouns not translated). Deliberately loose/overinclusive — this
+ * is a signal, not a strict parser. */
+function extractKeyTerms(text: string): string[] {
+  const terms = new Set<string>();
+  for (const m of text.matchAll(/`([^`]{2,40})`/g)) terms.add(m[1].trim());
+  for (const m of text.matchAll(/\b[A-Z][a-z0-9]*(?:[A-Z][a-zA-Z0-9]*)+\b/g)) terms.add(m[0]);
+  for (const m of text.matchAll(/\b[A-Z][a-zA-Z0-9]*(?:\s+[A-Z][a-zA-Z0-9]*){1,3}\b/g)) terms.add(m[0]);
+  return Array.from(terms);
+}
+
+/**
+ * Catches a different failure mode than every check below it: a response
+ * that's fluent, correctly formatted, and genuinely in the target
+ * language — but about a different topic than the source chunk entirely.
+ * Observed in production: a chunk from a Chinese article specifically
+ * about Claude Code's BashTool came back, in English, as a fluent,
+ * well-structured, entirely unrelated article about K12 cybersecurity
+ * curricula. Nothing above catches that — it's not empty, not a refusal,
+ * it's the right language, and hallucinated prose can easily mimic the
+ * same heading/list shape. But a genuine translation of a chunk that
+ * mentions "Claude Code" and "BashTool" repeatedly has no reason to drop
+ * those exact strings; a chunk that dropped nearly all of them has almost
+ * certainly stopped being about the source text at all. */
+function checkKeyTermsPreserved(original: string, translated: string): string | null {
+  const terms = extractKeyTerms(original);
+  // A couple of incidental matches isn't meaningful evidence either way —
+  // only judge a chunk with enough distinctive terms to say something.
+  if (terms.length < 2) return null;
+  const survived = terms.filter((term) => translated.includes(term));
+  const ratio = survived.length / terms.length;
+  if (ratio < 0.4) {
+    return `most of the source's specific terms/names are missing from the output (${survived.length}/${terms.length} survived — e.g. ${terms.slice(0, 5).join(", ")})`;
+  }
+  return null;
+}
+
 /**
  * Returns a short human-readable problem description if `translated`
  * doesn't look like a genuine translation of `original`, or null if it
@@ -649,6 +689,9 @@ function detectTranslationProblem(
   if (looksLikeRefusalOrMeta(trimmed)) {
     return "output looks like a refusal or clarifying question, not a translation";
   }
+
+  const termProblem = checkKeyTermsPreserved(original, trimmed);
+  if (termProblem) return termProblem;
 
   const originalProse = stripNonProseForChecks(original);
   const translatedProse = stripNonProseForChecks(trimmed);
