@@ -604,3 +604,57 @@ export const obsidianSyncRuns = pgTable("obsidian_sync_runs", {
   finishedAt: timestamp("finished_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
+
+// --- TRENDS ---
+//
+// The daily AI news/trends digest (Trends nav tab). Populated entirely by
+// an external process — scripts/fetch-trends.mjs, run once a day by
+// .github/workflows/fetch-trends.yml — not by any in-app action, which is
+// why there's no "use server" actions file alongside this like every other
+// feature: the app only ever reads these two tables.
+//
+// One trend_digests row per calendar day (an AI-written overview of that
+// day), with many trend_items rows under it (one per news article/paper/
+// repo pulled that day). A trend_item's url is globally unique so the
+// daily fetch can safely re-pull a feed's last N days and rely on ON
+// CONFLICT DO NOTHING to skip anything already stored, rather than tracking
+// per-feed cursors.
+export const trendCategoryEnum = pgEnum("trend_category", ["news", "paper", "repo"]);
+
+export const trendDigests = pgTable("trend_digests", {
+  id: serial("id").primaryKey(),
+  // "YYYY-MM-DD" (UTC) — a string key rather than a `date` column so it
+  // matches the same plain-string day-key the rest of the app already uses
+  // (e.g. diarySlugBase in app/diary/actions.ts), with no timezone parsing
+  // ambiguity at read time.
+  date: varchar("date", { length: 10 }).notNull().unique(),
+  // AI-written "here's what mattered today" overview across every item
+  // pulled that day. Empty until the fetch script's summarization step
+  // finishes — a partial day (items saved, overview not yet written) still
+  // renders, just without the top summary.
+  summaryMarkdown: text("summary_markdown").default("").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const trendItems = pgTable("trend_items", {
+  id: serial("id").primaryKey(),
+  digestId: integer("digest_id")
+    .notNull()
+    .references(() => trendDigests.id, { onDelete: "cascade" }),
+  category: trendCategoryEnum("category").notNull(),
+  // Human-readable feed name (e.g. "MIT Technology Review", "arXiv cs.CL",
+  // "GitHub Trending") rather than an enum — new sources are just a new
+  // string in fetch-trends.mjs, no migration needed.
+  source: varchar("source", { length: 120 }).notNull(),
+  title: text("title").notNull(),
+  url: text("url").notNull().unique(),
+  // Short AI-written one-liner — what/why this is worth a look. Empty if
+  // the summarization pass failed for this item; the raw title/link still
+  // renders either way (see runIngestionDirect-era "AI failure is never
+  // fatal" precedent elsewhere in this codebase).
+  summary: text("summary").default("").notNull(),
+  publishedAt: timestamp("published_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export type TrendCategory = (typeof trendCategoryEnum.enumValues)[number];

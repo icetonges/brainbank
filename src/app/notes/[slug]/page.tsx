@@ -1,27 +1,26 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
-import { notes, noteContent, noteTags, tags as tagsTable, media as mediaTable, ingestionJobs } from "@/lib/db/schema";
-import type { NoteStatus } from "@/lib/db/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { notes, noteContent, noteTags, tags as tagsTable } from "@/lib/db/schema";
+import { eq, and } from "drizzle-orm";
 import { notFound, redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { renderWithWikilinks } from "@/lib/notes/render-wikilinks";
-import { UploadWidget } from "@/components/upload-widget";
-import { MediaGallery } from "@/components/media-gallery";
-import { IngestStatusBanner } from "@/components/ingest-status-banner";
-import { DeleteNoteButton } from "@/components/delete-note-button";
 import { formatDate } from "@/lib/date";
-import {
-  translateNoteAction,
-  summarizeNoteAction,
-  suggestTagsAction,
-  updateNoteStatusAction,
-} from "./actions";
 
 export const dynamic = "force-dynamic";
 
-const STATUS_OPTIONS: NoteStatus[] = ["draft", "published", "private"];
-
+// Read-only viewer for any note that isn't a diary entry or a classroom
+// article. The old "Knowledge" capture feature that used to live here —
+// the +Knowledge nav button, /new (manual/URL/file ingestion), and this
+// page's edit/translate/delete/AI-assist tooling — has been removed along
+// with the knowledge pages it created.
+//
+// This page still has to exist, though: Obsidian-synced vault files (see
+// src/lib/obsidian/persist.ts) are stored the same way those knowledge
+// notes were (source_type set, category null) and still need somewhere to
+// render, and [[wikilinks]]/the graph/search all resolve a generic note
+// slug to this route. Diary and classroom notes redirect to their real
+// pages below in case a wikilink or stale link ever points here for one.
 export default async function NotePage({
   params,
   searchParams,
@@ -32,27 +31,13 @@ export default async function NotePage({
   const { slug } = await params;
   const { lang } = await searchParams;
   const language: "en" | "zh" = lang === "zh" ? "zh" : "en";
-  const otherLanguage: "en" | "zh" = language === "en" ? "zh" : "en";
 
   const session = await auth();
 
-  // Wrapped like the homepage/search pages: a transient DB hiccup (Neon
-  // cold start, connection reset, etc.) should degrade to a visible retry
-  // message, not an uncaught exception that takes down the whole page (see
-  // src/app/error.tsx for the last-resort net if something still slips
-  // through — but that shouldn't be the normal path for a query failure).
   let note: typeof notes.$inferSelect | undefined;
   let content: typeof noteContent.$inferSelect | undefined;
   let noteTagRows: { name: string }[] = [];
   let titleToSlug = new Map<string, string>();
-  let mediaRows: {
-    id: number;
-    kind: (typeof mediaTable.$inferSelect)["kind"];
-    url: string;
-    mimeType: string | null;
-    sizeBytes: number | null;
-  }[] = [];
-  let latestJob: typeof ingestionJobs.$inferSelect | undefined;
   let loadError = false;
 
   try {
@@ -64,12 +49,8 @@ export default async function NotePage({
 
   if (!loadError && !note) notFound();
 
-  // Diary entries are `notes` rows too (source_type "diary" — see the
-  // enum comment in schema.ts), but this page renders the
-  // what/how/why/other template, which is meaningless for one. Send them
-  // to their real home rather than showing an empty scaffold. Nothing
-  // links here for a diary entry; this catches a hand-typed or stale URL.
   if (note?.sourceType === "diary") redirect(`/diary/${slug}`);
+  if (note?.category) redirect(`/classroom/${slug}?lang=${language}`);
 
   if (loadError) {
     return (
@@ -81,8 +62,7 @@ export default async function NotePage({
   }
 
   // Public-read/private-edit model: anonymous visitors only ever see
-  // published notes. The owner (signed in) can see everything, including
-  // drafts still being ingested and notes marked private.
+  // published notes. The owner (signed in) can see everything.
   if (note!.status !== "published" && !session) notFound();
 
   try {
@@ -96,25 +76,9 @@ export default async function NotePage({
       .innerJoin(tagsTable, eq(noteTags.tagId, tagsTable.id))
       .where(eq(noteTags.noteId, note!.id));
 
-    // For resolving [[Wikilinks]] in the body text to real /notes/<slug> links.
+    // For resolving [[Wikilinks]] in the body text to real note links.
     const allNotes = await db.select({ title: notes.title, slug: notes.slug }).from(notes);
     titleToSlug = new Map(allNotes.map((n) => [n.title.toLowerCase(), n.slug]));
-
-    mediaRows = await db
-      .select({
-        id: mediaTable.id,
-        kind: mediaTable.kind,
-        url: mediaTable.url,
-        mimeType: mediaTable.mimeType,
-        sizeBytes: mediaTable.sizeBytes,
-      })
-      .from(mediaTable)
-      .where(eq(mediaTable.noteId, note!.id));
-
-    latestJob = await db.query.ingestionJobs.findFirst({
-      where: eq(ingestionJobs.noteId, note!.id),
-      orderBy: desc(ingestionJobs.createdAt),
-    });
   } catch (err) {
     console.error(`Failed to load content for note "${slug}" (lang=${language}):`, err);
     return (
@@ -126,36 +90,29 @@ export default async function NotePage({
   }
 
   const n = note!;
-  const translateAction = translateNoteAction.bind(null, n.id, slug, otherLanguage, undefined);
-  const summarizeAction = summarizeNoteAction.bind(null, n.id, slug, language, undefined);
-  const tagAction = suggestTagsAction.bind(null, n.id, slug, language, undefined);
+  const otherLanguage: "en" | "zh" = language === "en" ? "zh" : "en";
 
   return (
     <article className="flex flex-col gap-8">
       <header className="flex flex-col gap-3">
         <div className="flex items-start justify-between gap-4">
           <h1 className="text-3xl font-semibold text-fg">{n.title}</h1>
-          <div className="flex shrink-0 gap-1 rounded-md border border-border p-1 text-sm">
-            <Link
-              href={`/notes/${slug}?lang=en`}
-              className={`rounded px-2 py-1 ${language === "en" ? "bg-accent text-accent-fg" : "text-fg-secondary hover:text-accent"}`}
-            >
-              EN
-            </Link>
-            <Link
-              href={`/notes/${slug}?lang=zh`}
-              className={`rounded px-2 py-1 ${language === "zh" ? "bg-accent text-accent-fg" : "text-fg-secondary hover:text-accent"}`}
-            >
-              中文
-            </Link>
-          </div>
+          <Link
+            href={`/notes/${slug}?lang=${otherLanguage}`}
+            className="shrink-0 rounded-md border border-border px-3 py-1.5 text-sm text-fg-secondary hover:border-accent hover:text-accent transition-colors"
+          >
+            {otherLanguage === "zh" ? "中文" : "EN"}
+          </Link>
         </div>
-        <p className="text-sm text-fg-secondary">
-          {n.status} · {n.sourceType} ·{" "}
-          {formatDate(n.createdAt)}
-        </p>
+        <div className="flex flex-wrap items-center gap-2 text-xs text-fg-secondary">
+          <span>{n.status}</span>
+          <span aria-hidden="true">·</span>
+          <span>{n.sourceType}</span>
+          <span aria-hidden="true">·</span>
+          <span>{formatDate(n.updatedAt)}</span>
+        </div>
         {noteTagRows.length > 0 && (
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-1.5">
             {noteTagRows.map((t) => (
               <span
                 key={t.name}
@@ -168,153 +125,36 @@ export default async function NotePage({
         )}
       </header>
 
-      {latestJob && (latestJob.status === "queued" || latestJob.status === "running" || latestJob.status === "failed") && (
-        <IngestStatusBanner
-          noteId={n.id}
-          slug={slug}
-          initialStatus={latestJob.status}
-          initialStage={latestJob.stage}
-          initialError={latestJob.error}
-        />
-      )}
-
-      {session && (
-        <div className="flex flex-wrap items-center gap-2 border-y border-border py-3">
-          <form action={translateAction}>
-            <ActionButton>
-              {content
-                ? `Re-translate to ${otherLanguage === "zh" ? "中文" : "English"}`
-                : `Translate from ${otherLanguage === "zh" ? "中文" : "English"}`}
-            </ActionButton>
-          </form>
-          <form action={summarizeAction}>
-            <ActionButton disabled={!content}>Summarize</ActionButton>
-          </form>
-          <form action={tagAction}>
-            <ActionButton disabled={!content}>Suggest tags</ActionButton>
-          </form>
-          <Link
-            href={`/notes/${slug}/edit?lang=${language}`}
-            className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-fg hover:border-accent hover:text-accent transition-colors"
-          >
-            Edit
-          </Link>
-          <Link
-            href="/graph"
-            className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-fg-secondary hover:border-accent hover:text-accent transition-colors"
-          >
-            View in graph
-          </Link>
-
-          <div className="ml-auto flex items-center gap-2">
-            <StatusControl noteId={n.id} slug={slug} current={n.status} />
-            <DeleteNoteButton noteId={n.id} title={n.title} />
-          </div>
+      {content ? (
+        <div className="flex flex-col gap-6">
+          <Field label="What" text={content.what} titleToSlug={titleToSlug} />
+          <Field label="How" text={content.how} titleToSlug={titleToSlug} />
+          <Field label="Why" text={content.why} titleToSlug={titleToSlug} />
+          <Field label="Other" text={content.other} titleToSlug={titleToSlug} />
         </div>
-      )}
-
-      {!content && (
-        <div className="rounded-lg border border-border bg-bg-elevated p-5 text-fg-secondary">
-          No {language === "zh" ? "Chinese" : "English"} version yet.
-          {session
-            ? " Use “Translate” above to generate one from the other language."
-            : ""}
-        </div>
-      )}
-
-      {content?.summary && (
-        <p className="rounded-lg border border-accent/40 bg-bg-elevated p-4 text-fg-secondary italic">
-          {content.summary}
-        </p>
-      )}
-
-      <Layer title="What" body={content?.what} titleToSlug={titleToSlug} />
-      <Layer title="How" body={content?.how} titleToSlug={titleToSlug} />
-      <Layer title="Why" body={content?.why} titleToSlug={titleToSlug} />
-      <Layer title="Other" body={content?.other} titleToSlug={titleToSlug} />
-
-      <MediaGallery items={mediaRows} slug={slug} canEdit={Boolean(session)} />
-
-      {session && (
-        <div className="rounded-lg border border-dashed border-border p-4">
-          <UploadWidget noteId={n.id} slug={slug} />
-        </div>
+      ) : (
+        <p className="text-fg-secondary">No content in this language yet.</p>
       )}
     </article>
   );
 }
 
-function StatusControl({
-  noteId,
-  slug,
-  current,
-}: {
-  noteId: number;
-  slug: string;
-  current: NoteStatus;
-}) {
-  return (
-    <div className="flex items-center gap-1 rounded-md border border-border p-1 text-xs">
-      {STATUS_OPTIONS.map((status) => {
-        const action = updateNoteStatusAction.bind(null, noteId, slug, status);
-        const active = status === current;
-        return (
-          <form action={action} key={status}>
-            <button
-              type="submit"
-              disabled={active}
-              title={`Mark as ${status}`}
-              className={`rounded px-2 py-1 font-medium capitalize transition-colors ${
-                active
-                  ? "bg-accent text-accent-fg"
-                  : "text-fg-secondary hover:text-accent"
-              }`}
-            >
-              {status}
-            </button>
-          </form>
-        );
-      })}
-    </div>
-  );
-}
-
-function ActionButton({
-  children,
-  disabled,
-}: {
-  children: React.ReactNode;
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      type="submit"
-      disabled={disabled}
-      className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-fg hover:border-accent hover:text-accent disabled:opacity-40 disabled:hover:border-border disabled:hover:text-fg transition-colors"
-    >
-      {children}
-    </button>
-  );
-}
-
-function Layer({
-  title,
-  body,
+function Field({
+  label,
+  text,
   titleToSlug,
 }: {
-  title: string;
-  body?: string | null;
+  label: string;
+  text: string | null | undefined;
   titleToSlug: Map<string, string>;
 }) {
-  if (!body) return null;
+  if (!text?.trim()) return null;
   return (
-    <section className="rounded-lg border border-border bg-bg-elevated p-5">
-      <h2 className="text-sm font-semibold uppercase tracking-wide text-accent">
-        {title}
-      </h2>
-      <p className="mt-2 whitespace-pre-wrap text-fg">
-        {renderWithWikilinks(body, titleToSlug)}
+    <div className="flex flex-col gap-1.5">
+      <h2 className="text-sm font-semibold uppercase tracking-wide text-accent">{label}</h2>
+      <p className="whitespace-pre-wrap leading-relaxed text-fg">
+        {renderWithWikilinks(text, titleToSlug)}
       </p>
-    </section>
+    </div>
   );
 }

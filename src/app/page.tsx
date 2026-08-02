@@ -7,7 +7,7 @@ import { CLASSROOM_TABS } from "@/lib/classroom";
 import { loadClassroomToc, type TocSubcategory } from "@/lib/classroom/toc";
 import { getLang } from "@/lib/i18n-server";
 import { t, CLASSROOM_TAB_LABELS_ZH, type Lang } from "@/lib/i18n";
-import { desc, eq, ne, and, isNotNull, isNull, count } from "drizzle-orm";
+import { desc, eq, and, isNotNull, count } from "drizzle-orm";
 import { HeroVisual, PillarIcon } from "@/components/home-visuals";
 import { formatDate, formatDateTime } from "@/lib/date";
 import { sectionTone, NEUTRAL_TONE, type SectionTone } from "@/lib/classroom/section-tones";
@@ -22,7 +22,6 @@ interface HomeData {
   stats: { pages: number; articles: number; connections: number; topics: number };
   categoryCounts: Map<ClassroomCategory, number>;
   latestArticles: { slug: string; title: string; category: ClassroomCategory | null; createdAt: Date }[];
-  recentNotes: { id: number; slug: string; title: string; status: string; sourceType: string; updatedAt: Date }[];
   topTags: { name: string; uses: number }[];
   subcategoryToc: TocSubcategory[];
 }
@@ -81,30 +80,6 @@ async function loadHome(
       createdAt: a.createdAt,
     }));
 
-    // Diary entries are `notes` rows too (source_type "diary" — see
-    // schema.ts) but are deliberately excluded here: they're private
-    // journal writing with their own home at /diary, and listing them on
-    // the homepage alongside knowledge pages would both misrepresent what
-    // this list is and put personal entries one glance away.
-    const notDiary = ne(notes.sourceType, "diary");
-    const recentNotes = await db
-      .select({
-        id: notes.id,
-        slug: notes.slug,
-        title: notes.title,
-        status: notes.status,
-        sourceType: notes.sourceType,
-        updatedAt: notes.updatedAt,
-      })
-      .from(notes)
-      .where(
-        visible
-          ? and(isNull(notes.category), notDiary, visible)
-          : and(isNull(notes.category), notDiary),
-      )
-      .orderBy(desc(notes.updatedAt))
-      .limit(8);
-
     const topTags = await db
       .select({ name: tags.name, uses: count(noteTags.noteId) })
       .from(tags)
@@ -125,7 +100,6 @@ async function loadHome(
         stats: { pages: pageCount.n, articles, connections: edgeCount.n, topics: tagCount.n },
         categoryCounts,
         latestArticles,
-        recentNotes,
         topTags,
         subcategoryToc,
       },
@@ -311,87 +285,48 @@ export default async function Home({
         )}
       </section>
 
-      {/* ---- Latest classroom articles + recent knowledge ---- */}
-      <section className="grid gap-8 lg:grid-cols-2">
-        <div className="flex flex-col gap-4">
-          <div className="flex items-baseline justify-between gap-4">
-            <h2 className="text-xl font-semibold text-fg">{s.latestClassroom}</h2>
-            <Link href="/classroom" className="text-sm text-accent hover:underline">
-              {s.viewAll}
-            </Link>
-          </div>
-          {data && data.latestArticles.length > 0 ? (
-            <ul className="flex flex-col divide-y divide-border rounded-lg border border-border bg-bg-elevated">
-              {data.latestArticles.map((a) => (
-                <li key={a.slug} className="p-4">
-                  <Link
-                    href={`/classroom/${a.slug}?lang=${lang}`}
-                    className="font-medium text-fg hover:text-accent transition-colors"
-                  >
-                    {a.title}
-                  </Link>
-                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-fg-secondary">
-                    {a.category && (
-                      <span className="rounded-full border border-accent/50 px-2 py-0.5 text-accent">
-                        {tabLabel(
-                          a.category,
-                          CLASSROOM_TABS.find((tab) => tab.value === a.category)?.label ?? a.category,
-                        )}
-                      </span>
-                    )}
-                    <span>{formatDateTime(a.createdAt, dateLocale)}</span>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <EmptyPanel>
-              {s.noArticles}{" "}
-              {session && (
-                <Link href="/classroom/new" className="text-accent hover:underline">
-                  {s.publishFirst}
-                </Link>
-              )}
-            </EmptyPanel>
-          )}
+      {/* ---- Latest classroom articles ---- */}
+      <section className="flex flex-col gap-4">
+        <div className="flex items-baseline justify-between gap-4">
+          <h2 className="text-xl font-semibold text-fg">{s.latestClassroom}</h2>
+          <Link href="/classroom" className="text-sm text-accent hover:underline">
+            {s.viewAll}
+          </Link>
         </div>
-
-        <div className="flex flex-col gap-4">
-          <div className="flex items-baseline justify-between gap-4">
-            <h2 className="text-xl font-semibold text-fg">{s.recentPages}</h2>
+        {data && data.latestArticles.length > 0 ? (
+          <ul className="grid gap-3 sm:grid-cols-2">
+            {data.latestArticles.map((a) => (
+              <li key={a.slug} className="rounded-lg border border-border bg-bg-elevated p-4">
+                <Link
+                  href={`/classroom/${a.slug}?lang=${lang}`}
+                  className="font-medium text-fg hover:text-accent transition-colors"
+                >
+                  {a.title}
+                </Link>
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-fg-secondary">
+                  {a.category && (
+                    <span className="rounded-full border border-accent/50 px-2 py-0.5 text-accent">
+                      {tabLabel(
+                        a.category,
+                        CLASSROOM_TABS.find((tab) => tab.value === a.category)?.label ?? a.category,
+                      )}
+                    </span>
+                  )}
+                  <span>{formatDateTime(a.createdAt, dateLocale)}</span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <EmptyPanel>
+            {s.noArticles}{" "}
             {session && (
-              <Link href="/new" className="text-sm text-accent hover:underline">
-                {s.newKnowledgeLink}
+              <Link href="/classroom/new" className="text-accent hover:underline">
+                {s.publishFirst}
               </Link>
             )}
-          </div>
-          {data && data.recentNotes.length > 0 ? (
-            <ul className="flex flex-col divide-y divide-border rounded-lg border border-border bg-bg-elevated">
-              {data.recentNotes.map((n) => (
-                <li key={n.id} className="p-4">
-                  <Link
-                    href={`/notes/${n.slug}?lang=${lang}`}
-                    className="font-medium text-fg hover:text-accent transition-colors"
-                  >
-                    {n.title}
-                  </Link>
-                  <div className="mt-1 text-xs text-fg-secondary">
-                    {n.status} · {n.sourceType} · {formatDate(n.updatedAt, dateLocale)}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <EmptyPanel>
-              {s.noNotes}{" "}
-              {session && (
-                <Link href="/new" className="text-accent hover:underline">
-                  {s.createFirst}
-                </Link>
-              )}
-            </EmptyPanel>
-          )}
-        </div>
+          </EmptyPanel>
+        )}
       </section>
 
       {/* ---- Topic index ---- */}

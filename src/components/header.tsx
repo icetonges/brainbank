@@ -66,6 +66,16 @@ export async function Header() {
           >
             {s.llm}
           </Link>
+          {/* Public too — a daily-refreshed AI news/papers/repos digest,
+              not personal data. Populated by a GitHub Action
+              (.github/workflows/fetch-trends.yml), not by anything in the
+              app itself. */}
+          <Link
+            href="/trends"
+            className="rounded-md px-3 py-1.5 text-sm font-medium text-fg-secondary hover:text-accent transition-colors"
+          >
+            {s.trends}
+          </Link>
 
           {session ? (
             <>
@@ -97,12 +107,6 @@ export async function Header() {
                 className="rounded-md px-3 py-1.5 text-sm font-medium text-fg-secondary hover:text-accent transition-colors"
               >
                 {s.obsidian}
-              </Link>
-              <Link
-                href="/new"
-                className="rounded-md bg-accent px-3 py-1.5 text-sm font-semibold text-accent-fg hover:opacity-90 transition-opacity"
-              >
-                {s.newKnowledge}
               </Link>
               <form
                 action={async () => {

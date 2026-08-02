@@ -18,5 +18,5 @@ export const config = {
   // (public read, private edit), there is no anonymous view of either.
   // Each page also checks the session itself and redirects — this matcher
   // is the outer layer of that defense in depth, not the only one.
-  matcher: ["/new/:path*", "/admin/:path*", "/diary/:path*", "/assistant/:path*"],
+  matcher: ["/admin/:path*", "/diary/:path*", "/assistant/:path*"],
 };

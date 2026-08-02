@@ -1,0 +1,41 @@
+name: Fetch AI trends digest
+
+# Populates the Trends tab (trend_digests/trend_items tables) once a day —
+# see scripts/fetch-trends.ts's header comment for the full pipeline.
+# This is the ONLY thing that writes those tables; the app itself only
+# reads them.
+on:
+  schedule:
+    # 13:00 UTC daily (~9am US Eastern) — after most overnight US/EU news
+    # and arXiv's daily announcement mailing have gone out.
+    - cron: "0 13 * * *"
+  workflow_dispatch: {} # manual "run now" from the Actions tab
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - run: npm ci
+
+      - name: Fetch + summarize today's trends
+        run: npm run trends:fetch
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # Tried first (see fetch-trends.ts's pickModel()) — the local
+          # agent-server via its public Tailscale Funnel URL. Falls
+          # through to Gemini below if the Mac's asleep or Funnel's down,
+          # or if these two secrets simply aren't set.
+          LOCAL_LLM_FUNNEL_URL: ${{ secrets.LOCAL_LLM_FUNNEL_URL }}
+          LOCAL_LLM_SHARED_SECRET: ${{ secrets.LOCAL_LLM_SHARED_SECRET }}
+          GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY }}
+          # Auto-provided by Actions — just raises the GitHub Search API's
+          # rate limit for the trending-repos step, no setup needed.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
