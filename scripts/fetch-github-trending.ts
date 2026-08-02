@@ -29,6 +29,8 @@
 // (needs DATABASE_URL in the environment.)
 import { parseHTML } from "linkedom";
 import { and, eq } from "drizzle-orm";
+import { generateObject, type LanguageModel } from "ai";
+import { z } from "zod";
 import { db } from "../src/lib/db";
 import {
   githubTrendingRuns,
@@ -36,6 +38,7 @@ import {
   githubTrendingDevelopers,
   type TrendingCadence,
 } from "../src/lib/db/schema";
+import { pickModel } from "./lib/pick-model";
 
 const USER_AGENT = "Mozilla/5.0 (compatible; brainbank/1.0; +https://github.com/icetonges/brainbank)";
 
@@ -44,6 +47,7 @@ interface ScrapedRepo {
   fullName: string;
   url: string;
   description: string;
+  descriptionZh: string;
   language: string | null;
   stars: number;
   forks: number;
@@ -125,6 +129,9 @@ function scrapeRepos(html: string): ScrapedRepo[] {
         fullName,
         url: `https://github.com${href.replace(/\/$/, "")}`,
         description,
+        // Filled in afterward by translateDescriptions() in one batched
+        // call — left empty here since scraping never touches the model.
+        descriptionZh: "",
         language,
         stars: parseCount(numberLinks[0]),
         forks: parseCount(numberLinks[1]),
@@ -193,6 +200,44 @@ function scrapeDevelopers(html: string): ScrapedDeveloper[] {
   return developers;
 }
 
+const descriptionTranslationSchema = z.object({
+  translations: z
+    .array(
+      z.object({
+        rank: z.number().describe("Must exactly match one of the input ranks."),
+        zh: z.string().describe("The description translated into Simplified Chinese."),
+      }),
+    )
+    .describe("One entry per input repo, matched back up by rank."),
+});
+
+/** One AI call translates every repo's description for the whole run at
+ * once (rather than one call per repo) — descriptions are short and don't
+ * need trend_items' per-item quality gate, so batching is strictly a win:
+ * ~15-25x fewer round-trips per cadence. Repos with no description are
+ * skipped (nothing to translate) and simply keep descriptionZh === "". */
+async function translateDescriptions(model: LanguageModel, repos: ScrapedRepo[]): Promise<void> {
+  const translatable = repos.filter((r) => r.description.trim().length > 0);
+  if (translatable.length === 0) return;
+
+  const list = translatable.map((r) => `${r.rank}. ${r.description}`).join("\n");
+  const { object } = await generateObject({
+    model,
+    maxOutputTokens: 4000,
+    abortSignal: AbortSignal.timeout(60_000),
+    schema: descriptionTranslationSchema,
+    system:
+      "You translate a list of GitHub repository descriptions into Simplified Chinese, one line per input line. Preserve any inline code, product names, and emoji as-is — translate only the prose. Do not translate or explain the repo name; you are only given descriptions.",
+    prompt: list,
+  });
+
+  const byRank = new Map(object.translations.map((t) => [t.rank, t.zh.trim()]));
+  for (const repo of translatable) {
+    const zh = byRank.get(repo.rank);
+    if (zh) repo.descriptionZh = zh;
+  }
+}
+
 async function getOrCreateRun(cadence: TrendingCadence, date: string): Promise<number> {
   const [existing] = await db
     .select({ id: githubTrendingRuns.id })
@@ -247,6 +292,19 @@ async function main() {
   if (repos.length === 0 && developers.length === 0) {
     console.log("[github-trending] Nothing parsed at all — exiting without touching the DB.");
     return;
+  }
+
+  if (repos.length > 0) {
+    try {
+      const { model, label } = await pickModel("[github-trending]");
+      await translateDescriptions(model, repos);
+      console.log(`[github-trending] Translated repo descriptions to Chinese via ${label}.`);
+    } catch (err) {
+      // Non-fatal by design (same precedent as trend_items.summary
+      // failures elsewhere in this codebase) — English-only descriptions
+      // still render fine, just without the zh field filled in.
+      console.error("[github-trending] Description translation failed, continuing without it:", err);
+    }
   }
 
   const runId = await getOrCreateRun(cadence, today);

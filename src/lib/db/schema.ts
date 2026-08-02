@@ -633,6 +633,23 @@ export const trendDigests = pgTable("trend_digests", {
   // finishes — a partial day (items saved, overview not yet written) still
   // renders, just without the top summary.
   summaryMarkdown: text("summary_markdown").default("").notNull(),
+  // The three enrichment fields beyond a plain overview: `insight` is one
+  // non-obvious takeaway/pattern across the day's items (not just a
+  // restatement), `actionItems` are concrete things worth doing this week,
+  // `watchList` is what's worth keeping an eye on but isn't actionable yet.
+  // All written in the same generateObject call as the overview (see
+  // writeDailyOverview in fetch-trends.ts) — one AI round-trip, not four.
+  insight: text("insight").default("").notNull(),
+  actionItems: jsonb("action_items").$type<string[]>().default([]).notNull(),
+  watchList: jsonb("watch_list").$type<string[]>().default([]).notNull(),
+  // Chinese renditions of the four fields above — same "AI writes both
+  // languages in one call" approach as trendItems.summaryZh below, so
+  // /trends?lang=zh has real translated content instead of falling back to
+  // English prose inside an otherwise-Chinese UI.
+  summaryMarkdownZh: text("summary_markdown_zh").default("").notNull(),
+  insightZh: text("insight_zh").default("").notNull(),
+  actionItemsZh: jsonb("action_items_zh").$type<string[]>().default([]).notNull(),
+  watchListZh: jsonb("watch_list_zh").$type<string[]>().default([]).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -653,6 +670,11 @@ export const trendItems = pgTable("trend_items", {
   // renders either way (see runIngestionDirect-era "AI failure is never
   // fatal" precedent elsewhere in this codebase).
   summary: text("summary").default("").notNull(),
+  // Chinese rendition of `summary` — the item's own title/source/url are
+  // NOT translated (a headline is the actual source's real title, not our
+  // content to rewrite; the URL obviously can't be), only the AI-written
+  // summary is, generated in the same call as `summary` itself.
+  summaryZh: text("summary_zh").default("").notNull(),
   publishedAt: timestamp("published_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
@@ -715,6 +737,13 @@ export const githubTrendingRepos = pgTable(
     fullName: varchar("full_name", { length: 255 }).notNull(),
     url: text("url").notNull(),
     description: text("description").default("").notNull(),
+    // Batch-translated (one AI call per run covers every repo's
+    // description at once — see translateDescriptions in
+    // fetch-github-trending.ts) rather than per-repo, since these are short
+    // and don't need the per-item quality gate trend_items' summaries get.
+    // fullName/url/language/stars/forks are never translated — they're
+    // identifiers and data, not prose.
+    descriptionZh: text("description_zh").default("").notNull(),
     language: varchar("language", { length: 100 }),
     stars: integer("stars").default(0).notNull(),
     forks: integer("forks").default(0).notNull(),

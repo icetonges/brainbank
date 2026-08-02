@@ -28,6 +28,19 @@ function formatDigestDate(dateKey: string, locale?: string): string {
   });
 }
 
+// Falls back to the English field when the Chinese one is empty — covers
+// both older digests written before bilingual generation existed and any
+// single day where the translation half of the AI call happened to fail
+// (see fetch-trends.ts's writeDailyOverview/summarizeItemBilingual: the
+// English field is never allowed to be empty if generation succeeded at
+// all, only the zh half can silently come back blank).
+function pick(isZh: boolean, en: string, zh: string): string {
+  return isZh && zh ? zh : en;
+}
+function pickList(isZh: boolean, en: string[], zh: string[]): string[] {
+  return isZh && zh.length > 0 ? zh : en;
+}
+
 export default async function TrendsPage({
   searchParams,
 }: {
@@ -43,6 +56,7 @@ export default async function TrendsPage({
     paper: s.categoryPaper,
     repo: s.categoryRepo,
   };
+  const isZh = lang === "zh";
 
   if (!isDatabaseConfigured) {
     return (
@@ -109,9 +123,64 @@ export default async function TrendsPage({
           <section key={digest.id} className="flex flex-col gap-4 border-b border-border pb-8 last:border-b-0">
             <h2 className="text-lg font-semibold text-fg">{formatDigestDate(digest.date, dateLocale)}</h2>
             {digest.summaryMarkdown && (
-              <p className="max-w-3xl leading-relaxed text-fg-secondary">{digest.summaryMarkdown}</p>
+              <p className="max-w-3xl leading-relaxed text-fg-secondary">
+                {pick(isZh, digest.summaryMarkdown, digest.summaryMarkdownZh)}
+              </p>
             )}
-            <div className="grid gap-4 md:grid-cols-3">
+
+            {digest.insight && (
+              <div className="max-w-3xl rounded-lg border border-accent/30 bg-accent/5 p-3">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-accent">
+                  {s.insightLabel}
+                </h3>
+                <p className="mt-1 text-sm leading-relaxed text-fg-secondary">
+                  {pick(isZh, digest.insight, digest.insightZh)}
+                </p>
+              </div>
+            )}
+
+            {(digest.actionItems.length > 0 || digest.watchList.length > 0) && (
+              <div className="grid max-w-3xl gap-4 sm:grid-cols-2">
+                {digest.actionItems.length > 0 && (
+                  <div className="flex flex-col gap-1.5">
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-accent">
+                      {s.actionItemsLabel}
+                    </h3>
+                    <ul className="flex flex-col gap-1 text-sm text-fg-secondary">
+                      {pickList(isZh, digest.actionItems, digest.actionItemsZh).map((it, i) => (
+                        <li key={i} className="flex gap-2">
+                          <span className="text-accent">→</span>
+                          <span>{it}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {digest.watchList.length > 0 && (
+                  <div className="flex flex-col gap-1.5">
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-accent">
+                      {s.watchListLabel}
+                    </h3>
+                    <ul className="flex flex-col gap-1 text-sm text-fg-secondary">
+                      {pickList(isZh, digest.watchList, digest.watchListZh).map((it, i) => (
+                        <li key={i} className="flex gap-2">
+                          <span className="text-accent">•</span>
+                          <span>{it}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+            {/* Full-width per category rather than a fixed 3-column split —
+                a fixed split meant a day with only "News" populated (the
+                common case; see the AI News/arXiv reliability notes on
+                fetch-trends.ts) rendered as one narrow column using a third
+                of the page. Each category's own item list is instead a
+                responsive card grid, so News alone spans the full width in
+                up to 3 columns left-to-right. */}
+            <div className="flex flex-col gap-6">
               {CATEGORY_ORDER.map((category) => {
                 const categoryItems = items.filter((i) => i.category === category);
                 if (categoryItems.length === 0) return null;
@@ -120,9 +189,12 @@ export default async function TrendsPage({
                     <h3 className="text-xs font-semibold uppercase tracking-wide text-accent">
                       {categoryLabel[category]}
                     </h3>
-                    <ul className="flex flex-col gap-3">
+                    <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                       {categoryItems.map((item) => (
-                        <li key={item.id} className="rounded-lg border border-border bg-bg-elevated p-3">
+                        <li
+                          key={item.id}
+                          className="flex flex-col rounded-lg border border-border bg-bg-elevated p-3"
+                        >
                           <a
                             href={item.url}
                             target="_blank"
@@ -133,7 +205,9 @@ export default async function TrendsPage({
                           </a>
                           <div className="mt-1 text-xs text-fg-secondary">{item.source}</div>
                           {item.summary && (
-                            <p className="mt-1.5 text-xs leading-relaxed text-fg-secondary">{item.summary}</p>
+                            <p className="mt-1.5 text-xs leading-relaxed text-fg-secondary">
+                              {pick(isZh, item.summary, item.summaryZh)}
+                            </p>
                           )}
                         </li>
                       ))}
