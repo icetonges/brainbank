@@ -88,7 +88,11 @@ async function fetchHtml(url: string): Promise<string> {
 // structure itself is older/more load-bearing than the tag choice.
 function scrapeRepos(html: string): ScrapedRepo[] {
   const { document } = parseHTML(html);
-  let rows = [...document.querySelectorAll("article")];
+  // Typed as Element[] (not the querySelectorAll("article") overload's
+  // inferred HTMLElement[]) since the .Box-row fallback below returns the
+  // untagged Element[] — Vercel's `next build` type-checks this file too and
+  // HTMLElement[] isn't assignable from Element[].
+  let rows: Element[] = [...document.querySelectorAll("article")];
   if (rows.length === 0) rows = [...document.querySelectorAll(".Box-row")];
 
   const repos: ScrapedRepo[] = [];
@@ -140,7 +144,7 @@ function scrapeRepos(html: string): ScrapedRepo[] {
 // GitHub's real routing shape, not a style hook.
 function scrapeDevelopers(html: string): ScrapedDeveloper[] {
   const { document } = parseHTML(html);
-  let rows = [...document.querySelectorAll("article")];
+  let rows: Element[] = [...document.querySelectorAll("article")];
   if (rows.length === 0) rows = [...document.querySelectorAll(".Box-row")];
 
   const developers: ScrapedDeveloper[] = [];

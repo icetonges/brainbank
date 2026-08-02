@@ -4,6 +4,7 @@ import type { TrendCategory } from "@/lib/db/schema";
 import { desc, inArray } from "drizzle-orm";
 import { getLang } from "@/lib/i18n-server";
 import { t } from "@/lib/i18n";
+import { GithubTrendingSection } from "@/components/github-trending-section";
 
 export const dynamic = "force-dynamic";
 
@@ -144,6 +145,13 @@ export default async function TrendsPage({
           </section>
         );
       })}
+
+      {/* Independent data source from the digests above (its own
+          github_trending_runs/repos/developers tables, populated by the
+          fetch-github-trending-{daily,weekly,monthly}.yml workflows) —
+          rendered here as a subsection rather than its own nav entry/route,
+          since both answer "what's happening in AI right now". */}
+      <GithubTrendingSection lang={lang} />
     </div>
   );
 }

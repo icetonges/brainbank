@@ -6,19 +6,22 @@ import {
   type TrendingCadence,
 } from "@/lib/db/schema";
 import { desc, eq } from "drizzle-orm";
-import { getLang } from "@/lib/i18n-server";
-import { t } from "@/lib/i18n";
+import { t, type Lang } from "@/lib/i18n";
 
-export const dynamic = "force-dynamic";
-
-// One section per cadence, each showing only its latest run — stacked
-// server-rendered sections (no client-side tabs), same simple pattern as
-// /trends. A cadence with no run yet just renders its empty state rather
-// than blocking the other two.
+// Rendered as a subsection of /trends (see src/app/trends/page.tsx) rather
+// than its own route — it used to be a standalone /github-trending page,
+// merged in on request since both are "what's happening in AI right now"
+// digests and didn't need separate nav entries.
 const CADENCE_ORDER: TrendingCadence[] = ["daily", "weekly", "monthly"];
 
 type Repo = typeof githubTrendingRepos.$inferSelect;
 type Developer = typeof githubTrendingDevelopers.$inferSelect;
+
+interface RunData {
+  date: string;
+  repos: Repo[];
+  developers: Developer[];
+}
 
 function formatSnapshotDate(dateKey: string, locale?: string): string {
   const [year, month, day] = dateKey.split("-").map(Number);
@@ -27,12 +30,6 @@ function formatSnapshotDate(dateKey: string, locale?: string): string {
     day: "numeric",
     year: "numeric",
   });
-}
-
-interface RunData {
-  date: string;
-  repos: Repo[];
-  developers: Developer[];
 }
 
 async function loadLatestRun(cadence: TrendingCadence): Promise<RunData | null> {
@@ -60,13 +57,7 @@ async function loadLatestRun(cadence: TrendingCadence): Promise<RunData | null> 
   return { date: run.date, repos, developers };
 }
 
-export default async function GithubTrendingPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ lang?: string }>;
-}) {
-  const { lang: langParam } = await searchParams;
-  const lang = await getLang(langParam);
+export async function GithubTrendingSection({ lang }: { lang: Lang }) {
   const s = t(lang).githubTrending;
   const dateLocale = lang === "zh" ? "zh-CN" : undefined;
 
@@ -78,9 +69,12 @@ export default async function GithubTrendingPage({
 
   if (!isDatabaseConfigured) {
     return (
-      <div className="rounded-lg border border-border bg-bg-elevated p-5 text-fg-secondary">
-        <p className="font-medium text-fg">{s.dbNotConfigured}</p>
-        <p className="mt-1 text-sm">{s.dbNotConfiguredHint}</p>
+      <div id="github-trending" className="flex flex-col gap-4">
+        <h2 className="text-xl font-semibold text-fg">{s.title}</h2>
+        <div className="rounded-lg border border-border bg-bg-elevated p-5 text-fg-secondary">
+          <p className="font-medium text-fg">{s.dbNotConfigured}</p>
+          <p className="mt-1 text-sm">{s.dbNotConfiguredHint}</p>
+        </div>
       </div>
     );
   }
@@ -101,10 +95,10 @@ export default async function GithubTrendingPage({
   }
 
   return (
-    <div className="flex w-full flex-col gap-10">
+    <div id="github-trending" className="flex flex-col gap-8">
       <div>
-        <h1 className="text-2xl font-semibold text-fg">{s.title}</h1>
-        <p className="mt-1 max-w-3xl text-fg-secondary">{s.description}</p>
+        <h2 className="text-xl font-semibold text-fg">{s.title}</h2>
+        <p className="mt-1 max-w-3xl text-sm text-fg-secondary">{s.description}</p>
       </div>
 
       {loadError && (
@@ -124,7 +118,7 @@ export default async function GithubTrendingPage({
               className="flex flex-col gap-5 border-b border-border pb-8 last:border-b-0"
             >
               <div className="flex items-baseline justify-between gap-4">
-                <h2 className="text-lg font-semibold text-fg">{tabLabel[cadence]}</h2>
+                <h3 className="text-base font-semibold text-fg">{tabLabel[cadence]}</h3>
                 {run && (
                   <span className="text-xs text-fg-secondary">
                     {s.snapshotFrom} {formatSnapshotDate(run.date, dateLocale)}
@@ -140,9 +134,9 @@ export default async function GithubTrendingPage({
                 <>
                   {run!.repos.length > 0 && (
                     <div className="flex flex-col gap-2">
-                      <h3 className="text-xs font-semibold uppercase tracking-wide text-accent">
+                      <h4 className="text-xs font-semibold uppercase tracking-wide text-accent">
                         {s.sectionRepositories}
-                      </h3>
+                      </h4>
                       <ul className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
                         {run!.repos.map((repo) => (
                           <li
@@ -193,9 +187,9 @@ export default async function GithubTrendingPage({
 
                   {run!.developers.length > 0 && (
                     <div className="flex flex-col gap-2">
-                      <h3 className="text-xs font-semibold uppercase tracking-wide text-accent">
+                      <h4 className="text-xs font-semibold uppercase tracking-wide text-accent">
                         {s.sectionDevelopers}
-                      </h3>
+                      </h4>
                       <ul className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
                         {run!.developers.map((dev) => (
                           <li

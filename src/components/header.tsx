@@ -70,20 +70,15 @@ export async function Header() {
               not personal data. Populated by a GitHub Action
               (.github/workflows/fetch-trends.yml), not by anything in the
               app itself. */}
+          {/* Also includes a GitHub Trending subsection (its own three
+              GitHub Actions: fetch-github-trending-{daily,weekly,monthly}.yml)
+              — merged in rather than a separate nav entry, since both
+              answer "what's happening in AI right now". */}
           <Link
             href="/trends"
             className="rounded-md px-3 py-1.5 text-sm font-medium text-fg-secondary hover:text-accent transition-colors"
           >
             {s.trends}
-          </Link>
-          {/* Public too — same rationale as /trends above. Populated by
-              three GitHub Actions (.github/workflows/fetch-github-trending-
-              {daily,weekly,monthly}.yml), not by anything in the app itself. */}
-          <Link
-            href="/github-trending"
-            className="rounded-md px-3 py-1.5 text-sm font-medium text-fg-secondary hover:text-accent transition-colors"
-          >
-            {s.githubTrending}
           </Link>
 
           {session ? (
