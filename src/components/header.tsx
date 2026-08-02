@@ -76,6 +76,15 @@ export async function Header() {
           >
             {s.trends}
           </Link>
+          {/* Public too — same rationale as /trends above. Populated by
+              three GitHub Actions (.github/workflows/fetch-github-trending-
+              {daily,weekly,monthly}.yml), not by anything in the app itself. */}
+          <Link
+            href="/github-trending"
+            className="rounded-md px-3 py-1.5 text-sm font-medium text-fg-secondary hover:text-accent transition-colors"
+          >
+            {s.githubTrending}
+          </Link>
 
           {session ? (
             <>

@@ -658,3 +658,76 @@ export const trendItems = pgTable("trend_items", {
 });
 
 export type TrendCategory = (typeof trendCategoryEnum.enumValues)[number];
+
+// --- GITHUB TRENDING ---
+//
+// A separate feature from trend_items' "repo" category above (that one is a
+// continuously-growing, de-duped-by-URL feed). This is a snapshot: three
+// independent cadences (daily/weekly/monthly), each re-querying GitHub's
+// Search API for AI-topic repos created within its own lookback window
+// (1/7/30 days) and ranked by stars — see scripts/fetch-github-trending.ts
+// and the three .github/workflows/fetch-github-trending-*.yml files. The
+// same repo can legitimately reappear across cadences (a repo trending
+// today is still "this week's" trending repo), so unlike trend_items there
+// is no cross-run URL uniqueness — one row per (run, repo).
+export const trendingCadenceEnum = pgEnum("trending_cadence", [
+  "daily",
+  "weekly",
+  "monthly",
+]);
+
+export type TrendingCadence = (typeof trendingCadenceEnum.enumValues)[number];
+
+// The topic-group(s) a repo matched on this run — lets the page split
+// "general AI/LLM" from "agent harness / knowledge graph / knowledge
+// management" instead of one undifferentiated list. A repo can match both
+// (stored as multiple array entries), e.g. an agentic RAG-over-knowledge-
+// graph project.
+export const trendingTopicGroupEnum = pgEnum("trending_topic_group", [
+  "general", // llm, large-language-models, machine-learning, artificial-intelligence
+  "harness-knowledge", // agent, ai-agent, agentic, llm-agent, coding-agent, knowledge-graph, knowledge-management, rag
+]);
+
+export type TrendingTopicGroup = (typeof trendingTopicGroupEnum.enumValues)[number];
+
+export const githubTrendingRuns = pgTable(
+  "github_trending_runs",
+  {
+    id: serial("id").primaryKey(),
+    cadence: trendingCadenceEnum("cadence").notNull(),
+    // "YYYY-MM-DD" (UTC) the run happened — same plain-string day-key
+    // convention as trend_digests.date. Unique per cadence so a re-run on
+    // the same day (e.g. a manual workflow_dispatch) updates in place
+    // rather than piling up duplicate runs; see getOrCreateRun() in the
+    // fetch script, which deletes and re-inserts that run's repos.
+    date: varchar("date", { length: 10 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [unique().on(t.cadence, t.date)],
+);
+
+export const githubTrendingRepos = pgTable(
+  "github_trending_repos",
+  {
+    id: serial("id").primaryKey(),
+    runId: integer("run_id")
+      .notNull()
+      .references(() => githubTrendingRuns.id, { onDelete: "cascade" }),
+    fullName: varchar("full_name", { length: 255 }).notNull(),
+    url: text("url").notNull(),
+    description: text("description").default("").notNull(),
+    stars: integer("stars").default(0).notNull(),
+    language: varchar("language", { length: 100 }),
+    // Which GitHub topics on the repo itself matched the query (e.g.
+    // ["llm", "agent"]) — shown on the card so it's clear why a repo
+    // surfaced, not just that it did.
+    matchedTopics: jsonb("matched_topics").$type<string[]>().default([]).notNull(),
+    topicGroups: jsonb("topic_groups").$type<TrendingTopicGroup[]>().default([]).notNull(),
+    repoCreatedAt: timestamp("repo_created_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index("github_trending_repos_run_idx").on(t.runId),
+    unique().on(t.runId, t.url),
+  ],
+);

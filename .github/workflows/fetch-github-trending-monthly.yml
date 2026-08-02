@@ -1,0 +1,30 @@
+name: Fetch GitHub trending AI repos (monthly)
+
+# Populates the github_trending_runs/github_trending_repos tables for the
+# "monthly" cadence — see scripts/fetch-github-trending.ts's header comment.
+on:
+  schedule:
+    # 14:30 UTC on the 1st of every month.
+    - cron: "30 14 1 * *"
+  workflow_dispatch: {} # manual "run now" from the Actions tab
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - run: npm ci
+
+      - name: Fetch this month's trending AI repos
+        run: npm run github-trending:fetch
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          TRENDING_CADENCE: monthly
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
