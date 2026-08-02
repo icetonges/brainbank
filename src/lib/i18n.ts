@@ -111,7 +111,7 @@ const en = {
     // composer
     newTitle: "New AI Classroom article",
     newDescription:
-      "One box for everything — write or paste content, links, YouTube videos, images, and documents (pdf, docx, xlsx, csv, pptx, txt, md, json), in any shape. URLs and files are ingested automatically — main content in, noise out. On Save, AI rewrites it into a clean, publication-ready article (structure, headings, callouts — your images and facts intact) and adds a learning map, hands-on steps, and the top 3 sources.",
+      "One box for everything — write or paste content, links, YouTube videos, images, and documents (pdf, docx, xlsx, csv, pptx, txt, md, json), in any shape. URLs and files are ingested automatically — main content in, noise out. Your content is saved exactly as written; on Save, AI only adds a title if left blank, plus a learning map, hands-on steps, and the top 3 sources.",
     topicPlaceholder: "Topic (leave blank — AI will name it from the content)",
     sourceUrlPlaceholder: "Source URL (optional)",
     sourceLink: "Source",
@@ -131,7 +131,7 @@ const en = {
     moreArticles: "More in this subcategory",
     uncategorized: "Uncategorized",
     bodyPlaceholder:
-      "Drop everything here — text, markdown, files, links… No formatting needed; a messy paste is fine.\nPaste one or more URLs alone and each page's main content is fetched with the ads and navigation stripped; YouTube links pull the transcript. Attach, paste, or drag in documents (pdf, docx, xlsx, csv, pptx, txt, md, json) and their content is extracted right here. Images upload and appear as markdown; math ($x^2$), code blocks, and ```mermaid diagrams render automatically.\n\nClick Save and AI will restructure it all into a polished article — headings, sections, callouts, key takeaways, with every image, link, and fact kept — plus a learning map, step-by-step hands-on instructions, the top 3 sources, and tags for the right AI Classroom subtab.",
+      "Drop everything here — text, markdown, files, links… No formatting needed; a messy paste is fine.\nPaste one or more URLs alone and each page's main content is fetched with the ads and navigation stripped; YouTube links pull the transcript. Attach, paste, or drag in documents (pdf, docx, xlsx, csv, pptx, txt, md, json) and their content is extracted right here. Images upload and appear as markdown; math ($x^2$), code blocks, and ```mermaid diagrams render automatically.\n\nClick Save and this stays exactly as written — AI doesn't touch it. AI only adds a learning map, step-by-step hands-on instructions, the top 3 sources, and tags for the right AI Classroom subtab.",
     modelLabel: "AI model",
     modelHeavyWarning:
       "Heavyweight — can't stay loaded alongside the other models. Selecting it evicts whatever's currently loaded, so the next run may take 60+ seconds to start.",
@@ -426,7 +426,7 @@ const zh: typeof en = {
     translatedModelPrefix: "使用",
     newTitle: "新建 AI 课堂文章",
     newDescription:
-      "一个输入框搞定一切——撰写或粘贴任意格式的内容、链接、YouTube 视频、图片和文档（pdf、docx、xlsx、csv、pptx、txt、md、json）。网址和文件会自动摄取——只留正文、去除杂讯。保存后 AI 会把它重写成结构清晰、可直接发布的文章（标题、分节、要点——图片和事实原样保留），并生成学习地图、动手步骤和三大推荐资源。",
+      "一个输入框搞定一切——撰写或粘贴任意格式的内容、链接、YouTube 视频、图片和文档（pdf、docx、xlsx、csv、pptx、txt、md、json）。网址和文件会自动摄取——只留正文、去除杂讯。你的内容会原样保存；保存后 AI 仅在标题留空时补充标题，并生成学习地图、动手步骤和三大推荐资源。",
     topicPlaceholder: "主题（留空则由 AI 根据内容自动命名）",
     sourceUrlPlaceholder: "来源网址（可选）",
     sourceLink: "来源",
@@ -445,7 +445,7 @@ const zh: typeof en = {
     moreArticles: "该子分类下的更多文章",
     uncategorized: "未分类",
     bodyPlaceholder:
-      "把所有内容放进来——文字、Markdown、文件、链接……无需排版，随意粘贴即可。\n单独粘贴一个或多个网址，会自动抓取每个页面的正文内容（去除广告和导航栏）；YouTube 链接会提取字幕。添加、粘贴或拖入文档（pdf、docx、xlsx、csv、pptx、txt、md、json），内容会直接提取到这里。图片自动上传并以 Markdown 插入；数学公式（$x^2$）、代码块和 ```mermaid 图表自动渲染。\n\n点击保存后，AI 会把内容重新整理成排版精美的文章——分节标题、要点列表、核心提要，所有图片、链接和事实原样保留——并生成学习地图、分步动手指南、三大推荐资源，以及对应 AI 课堂子栏目的标签。",
+      "把所有内容放进来——文字、Markdown、文件、链接……无需排版，随意粘贴即可。\n单独粘贴一个或多个网址，会自动抓取每个页面的正文内容（去除广告和导航栏）；YouTube 链接会提取字幕。添加、粘贴或拖入文档（pdf、docx、xlsx、csv、pptx、txt、md、json），内容会直接提取到这里。图片自动上传并以 Markdown 插入；数学公式（$x^2$）、代码块和 ```mermaid 图表自动渲染。\n\n点击保存后，这里的内容将原样保留，AI 不会修改——AI 仅会生成学习地图、分步动手指南、三大推荐资源，以及对应 AI 课堂子栏目的标签。",
     modelLabel: "AI 模型",
     modelHeavyWarning:
       "重量级模型——无法与其他模型同时驻留显存。选择它会先卸载当前已加载的模型，因此下一次运行可能需要等待 60 秒以上。",

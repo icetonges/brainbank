@@ -16,7 +16,6 @@ import { isClassroomCategory } from "@/lib/classroom";
 import { slugify, subcategorySlug, RESERVED_TOP_LEVEL_SLUGS } from "@/lib/slug";
 import {
   publishAssist,
-  formatArticleContent,
   translateText,
   translateTextWithMeta,
   type PublishAssistResult,
@@ -270,7 +269,7 @@ export async function publishClassroomArticle(formData: FormData) {
   // as /api/ai/assist/route.ts's modelId check. An unrecognized value
   // (only reachable by hand-crafting the POST — the <select> only ever
   // submits a real MODELS id) falls back to undefined, which publishAssist
-  // /formatArticleContent already treat as "use the task's default."
+  // already treats as "use the task's default."
   const rawModelId = String(formData.get("modelId") ?? "");
   const modelId: ModelId | undefined = MODELS.some((m) => m.id === rawModelId)
     ? (rawModelId as ModelId)
@@ -303,32 +302,20 @@ export async function publishClassroomArticle(formData: FormData) {
     ? rawCategory
     : undefined;
 
-  // Two AI passes over the raw content:
-  //  - publishAssist: everything the article *page* needs (topic, subtab,
-  //    tags, summary, learning guide, resources)
-  //  - formatArticleContent: rewrites the raw paste itself into a clean,
-  //    publication-ready markdown article (structure, headings, callouts)
-  //    regardless of what shape it arrived in
-  // Either failing degrades gracefully — the article still publishes with
-  // whichever pieces succeeded (the original body if formatting failed,
-  // no guide if assist failed).
-  //
-  // Sequential, not Promise.allSettled — both local models (models.ts)
-  // run through the same single Mac, which generates one response at a
-  // time regardless of which model is asked, so firing both calls at once
-  // doesn't actually parallelize the work; it just queues the second
-  // behind the first while its own abortSignal timeout (TASK_TIMEOUT_MS,
-  // tasks.ts) keeps counting from dispatch time rather than when it
-  // actually starts. Still built as PromiseSettledResult-shaped values so
-  // the graceful-degradation logic below is unchanged.
+  // One AI pass over the raw content: publishAssist generates everything
+  // the article *page* needs around the content (topic when left blank,
+  // subtab, tags, summary, learning guide, resources) — it never touches
+  // the content itself. The main box is exactly what was typed/pasted
+  // (or extracted from a URL/file client-side, which is plain code, not
+  // AI — see extract-actions.ts) and is stored byte-for-byte as finalBody
+  // below. This used to also run formatArticleContent to rewrite the body
+  // into a "polished" structure, but that meant the model was silently
+  // paraphrasing/altering the owner's actual words and facts (most
+  // visible on Chinese input) — removed outright rather than degraded,
+  // since there's no "mostly faithful rewrite" middle ground worth
+  // keeping for a step whose entire job was rewriting.
   const assistResult: PromiseSettledResult<PublishAssistResult> = await publishAssist(
     { topic, category, content: body },
-    modelId,
-  )
-    .then((value) => ({ status: "fulfilled" as const, value }))
-    .catch((reason) => ({ status: "rejected" as const, reason }));
-  const formattedResult: PromiseSettledResult<string> = await formatArticleContent(
-    { topic, content: body },
     modelId,
   )
     .then((value) => ({ status: "fulfilled" as const, value }))
@@ -338,24 +325,12 @@ export async function publishClassroomArticle(formData: FormData) {
   if (assistResult.status === "rejected") {
     console.error("publishAssist failed, publishing without a guide:", assistResult.reason);
   }
-  // A formatter result that lost most of the content is worse than the raw
-  // paste — only adopt it if it kept a sane share of the original length.
-  let finalBody = body;
-  if (formattedResult.status === "fulfilled") {
-    const formatted = formattedResult.value;
-    if (formatted.length >= Math.min(body.length * 0.5, body.length - 200)) {
-      finalBody = formatted;
-    } else {
-      console.error(
-        `formatArticleContent output suspiciously short (${formatted.length} vs ${body.length} chars), keeping original body`,
-      );
-    }
-  } else {
-    console.error("formatArticleContent failed, keeping original body:", formattedResult.reason);
-  }
+  const finalBody = body;
 
+  // A typed topic is authoritative, same rule as the diary's title — AI
+  // only names the article when the author left the field blank.
   const finalTopic =
-    (assist?.topic || topic || body.split(/\r?\n/).find(Boolean)?.slice(0, 80) || "Untitled").slice(0, 500);
+    (topic || assist?.topic || body.split(/\r?\n/).find(Boolean)?.slice(0, 80) || "Untitled").slice(0, 500);
   const finalCategory: ClassroomCategory = assist?.category ?? category ?? "ai";
   // The author states the language explicitly (composer's required <select
   // name="language">) rather than it being auto-detected — the article

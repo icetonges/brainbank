@@ -14,8 +14,9 @@ import type { ExtractedSource } from "@/lib/ingest/types";
 // The composer's "drop anything in the box" server side: turn URLs and
 // uploaded documents into markdown the body field can hold. Extraction is
 // plain code (Readability strips ads/nav/chrome from webpages; the file
-// parsers read only document content) — the AI formatting pass at Save
-// (formatArticleContent) then restructures whatever lands here.
+// parsers read only document content) — whatever lands here is exactly
+// what gets saved as the article body; publishClassroomArticle
+// (classroom/actions.ts) no longer runs an AI pass over it.
 
 const MAX_URLS = 8;
 

@@ -82,7 +82,7 @@ export function ClassroomComposer({
   // exists — created lazily on the first upload so a plain text article
   // never leaves an empty draft behind.
   const [draft, setDraft] = useState<{ noteId: number; slug: string } | null>(null);
-  // Which model publishAssist/formatArticleContent should prefer for this
+  // Which model publishAssist should prefer for this
   // article — see publishClassroomArticle in classroom/actions.ts, which
   // reads this from the "modelId" field below and passes it through as
   // their optional modelId override. Falling back to it if it fails is
@@ -321,7 +321,7 @@ export function ClassroomComposer({
             sectionNewPlaceholder: s.sectionNewPlaceholder,
           }}
         />
-        {/* Which model publishAssist/formatArticleContent tries first —
+        {/* Which model publishAssist tries first —
             see publishClassroomArticle in classroom/actions.ts. A hidden
             input carries the value through the native <form action>
             submit (FormData), same pattern as SaveButton's useFormStatus
