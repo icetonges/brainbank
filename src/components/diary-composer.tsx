@@ -76,6 +76,109 @@ export function DiaryComposer({
     el.focus();
   }
 
+  /** Wraps the selection in `before`/`after` (e.g. **bold**). With no
+   *  selection, inserts `placeholder` pre-selected so typing overwrites it. */
+  function wrapSelection(
+    el: HTMLTextAreaElement | null,
+    before: string,
+    after: string,
+    placeholder: string,
+  ) {
+    if (!el) return;
+    const { selectionStart: start, selectionEnd: end, value } = el;
+    const hadSelection = start !== end;
+    const selected = hadSelection ? value.slice(start, end) : placeholder;
+    const snippet = `${before}${selected}${after}`;
+    el.value = value.slice(0, start) + snippet + value.slice(end);
+    el.focus();
+    if (hadSelection) {
+      el.setSelectionRange(start, start + snippet.length);
+    } else {
+      el.setSelectionRange(start + before.length, start + before.length + placeholder.length);
+    }
+  }
+
+  /** Expands the selection to whole lines, for prefix-based markdown
+   *  (headings, quotes, lists) that has to start at the beginning of a line. */
+  function lineBounds(el: HTMLTextAreaElement) {
+    const { selectionStart: start, selectionEnd: end, value } = el;
+    const lineStart = value.lastIndexOf("\n", start - 1) + 1;
+    const nextBreak = value.indexOf("\n", end);
+    const lineEnd = nextBreak === -1 ? value.length : nextBreak;
+    return { lineStart, lineEnd, value };
+  }
+
+  /** Toggles a literal prefix (e.g. "## ", "> ") on every non-blank line
+   *  touched by the selection. Removes it if every touched line already has it. */
+  function toggleLinePrefix(el: HTMLTextAreaElement | null, prefix: string) {
+    if (!el) return;
+    const { lineStart, lineEnd, value } = lineBounds(el);
+    const lines = value.slice(lineStart, lineEnd).split("\n");
+    const allPrefixed = lines.every((line) => line.trim() === "" || line.startsWith(prefix));
+    const newLines = lines.map((line) =>
+      line.trim() === "" ? line : allPrefixed ? line.slice(prefix.length) : prefix + line,
+    );
+    const newBlock = newLines.join("\n");
+    el.value = value.slice(0, lineStart) + newBlock + value.slice(lineEnd);
+    el.focus();
+    el.setSelectionRange(lineStart, lineStart + newBlock.length);
+  }
+
+  /** Numbers every non-blank line touched by the selection ("1. ", "2. ", …),
+   *  or strips existing numbering if the whole block is already numbered. */
+  function toggleOrderedList(el: HTMLTextAreaElement | null) {
+    if (!el) return;
+    const { lineStart, lineEnd, value } = lineBounds(el);
+    const lines = value.slice(lineStart, lineEnd).split("\n");
+    const pattern = /^\d+\.\s/;
+    const allOrdered = lines.every((line) => line.trim() === "" || pattern.test(line));
+    let n = 1;
+    const newLines = lines.map((line) => {
+      if (line.trim() === "") return line;
+      return allOrdered ? line.replace(pattern, "") : `${n++}. ${line}`;
+    });
+    const newBlock = newLines.join("\n");
+    el.value = value.slice(0, lineStart) + newBlock + value.slice(lineEnd);
+    el.focus();
+    el.setSelectionRange(lineStart, lineStart + newBlock.length);
+  }
+
+  function insertDivider(el: HTMLTextAreaElement | null) {
+    if (!el) return;
+    const { selectionStart: start, selectionEnd: end, value } = el;
+    const leadingNl = start > 0 && value[start - 1] !== "\n" ? "\n\n" : "";
+    const trailingNl = end < value.length && value[end] !== "\n" ? "\n\n" : "\n";
+    const snippet = `${leadingNl}---${trailingNl}`;
+    el.value = value.slice(0, start) + snippet + value.slice(end);
+    const pos = start + snippet.length;
+    el.focus();
+    el.setSelectionRange(pos, pos);
+  }
+
+  function insertCodeBlock(el: HTMLTextAreaElement | null) {
+    if (!el) return;
+    const { selectionStart: start, selectionEnd: end, value } = el;
+    const selected = value.slice(start, end);
+    const body = selected || "code";
+    const leadingNl = start > 0 && value[start - 1] !== "\n" ? "\n" : "";
+    const snippet = "```" + `\n${body}\n` + "```\n";
+    el.value = value.slice(0, start) + leadingNl + snippet + value.slice(end);
+    el.focus();
+    const codeStart = start + leadingNl.length + 4;
+    el.setSelectionRange(codeStart, codeStart + body.length);
+  }
+
+  function insertLink(el: HTMLTextAreaElement | null) {
+    if (!el) return;
+    const { selectionStart: start, selectionEnd: end, value } = el;
+    const text = value.slice(start, end) || "link text";
+    const snippet = `[${text}](url)`;
+    el.value = value.slice(0, start) + snippet + value.slice(end);
+    el.focus();
+    const urlStart = start + text.length + 3;
+    el.setSelectionRange(urlStart, urlStart + 3);
+  }
+
   async function ensureDraft() {
     if (draft) return draft;
     const created = await createDiaryDraft();
@@ -182,6 +285,27 @@ export function DiaryComposer({
         </select>
       </div>
 
+      {/* Formatting toolbar — inserts markdown syntax at the cursor rather
+          than rendering WYSIWYG, so the body stays a plain textarea (and
+          plain `body` form field) underneath. */}
+      <div className="flex flex-wrap gap-1 rounded-t-xl border border-b-0 border-border bg-bg-elevated px-2 py-1.5">
+        <ToolbarButton label="B" title={s.toolbarBold} className="font-bold" onClick={() => wrapSelection(bodyRef.current, "**", "**", "bold text")} />
+        <ToolbarButton label="I" title={s.toolbarItalic} className="italic" onClick={() => wrapSelection(bodyRef.current, "_", "_", "italic text")} />
+        <ToolbarDivider />
+        <ToolbarButton label="H2" title={s.toolbarH2} onClick={() => toggleLinePrefix(bodyRef.current, "## ")} />
+        <ToolbarButton label="H3" title={s.toolbarH3} onClick={() => toggleLinePrefix(bodyRef.current, "### ")} />
+        <ToolbarDivider />
+        <ToolbarButton label="―" title={s.toolbarDivider} onClick={() => insertDivider(bodyRef.current)} />
+        <ToolbarButton label="{ }" title={s.toolbarCode} onClick={() => insertCodeBlock(bodyRef.current)} />
+        <ToolbarDivider />
+        <ToolbarButton label="≡" title={s.toolbarBulletList} onClick={() => toggleLinePrefix(bodyRef.current, "- ")} />
+        <ToolbarButton label="1." title={s.toolbarNumberedList} onClick={() => toggleOrderedList(bodyRef.current)} />
+        <ToolbarButton label="″" title={s.toolbarQuote} onClick={() => toggleLinePrefix(bodyRef.current, "> ")} />
+        <ToolbarButton label="☐" title={s.toolbarChecklist} onClick={() => toggleLinePrefix(bodyRef.current, "- [ ] ")} />
+        <ToolbarDivider />
+        <ToolbarButton label="🔗" title={s.toolbarLink} onClick={() => insertLink(bodyRef.current)} />
+        <ToolbarButton label="🖼" title={s.addImage} onClick={() => fileInputRef.current?.click()} />
+      </div>
       <textarea
         ref={bodyRef}
         name="body"
@@ -197,7 +321,7 @@ export function DiaryComposer({
           handleFiles(files, bodyRef.current);
         }}
         onPaste={pasteHandler(() => bodyRef.current)}
-        className="min-h-[42vh] flex-1 resize-y rounded-xl border border-border bg-bg-elevated p-5 font-serif text-[1.0625rem] leading-relaxed text-fg outline-none placeholder:text-fg-secondary/60 focus:border-accent"
+        className="min-h-[42vh] flex-1 resize-y rounded-b-xl border border-border bg-bg-elevated p-5 font-serif text-[1.0625rem] leading-relaxed text-fg outline-none placeholder:text-fg-secondary/60 focus:border-accent"
       />
 
       {/* Scratch pad — collapsed by default so the main box stays the
@@ -337,4 +461,32 @@ function SaveButton({ lang }: { lang: Lang }) {
       {pending ? s.saving : s.save}
     </button>
   );
+}
+
+function ToolbarButton({
+  label,
+  title,
+  onClick,
+  className = "",
+}: {
+  label: string;
+  title: string;
+  onClick: () => void;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      onClick={onClick}
+      className={`flex h-7 min-w-[1.75rem] items-center justify-center rounded-md px-1.5 text-sm text-fg-secondary hover:bg-bg hover:text-accent transition-colors ${className}`}
+    >
+      {label}
+    </button>
+  );
+}
+
+function ToolbarDivider() {
+  return <div className="mx-0.5 my-1 w-px bg-border" aria-hidden />;
 }
