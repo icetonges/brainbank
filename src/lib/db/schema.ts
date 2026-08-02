@@ -661,15 +661,21 @@ export type TrendCategory = (typeof trendCategoryEnum.enumValues)[number];
 
 // --- GITHUB TRENDING ---
 //
-// A separate feature from trend_items' "repo" category above (that one is a
-// continuously-growing, de-duped-by-URL feed). This is a snapshot: three
-// independent cadences (daily/weekly/monthly), each re-querying GitHub's
-// Search API for AI-topic repos created within its own lookback window
-// (1/7/30 days) and ranked by stars — see scripts/fetch-github-trending.ts
-// and the three .github/workflows/fetch-github-trending-*.yml files. The
-// same repo can legitimately reappear across cadences (a repo trending
-// today is still "this week's" trending repo), so unlike trend_items there
-// is no cross-run URL uniqueness — one row per (run, repo).
+// A snapshot of the REAL github.com/trending page (repositories AND
+// developers), not an approximation — an earlier version of this feature
+// tried to fake "trending" via the Search API (recently-created repos
+// ranked by stars), which can't represent developer trending at all since
+// there's no API for that. This scrapes the actual page instead — see
+// scripts/fetch-github-trending.ts for the parser and its fragility caveats
+// (GitHub's markup isn't a stable contract; the script degrades to "0
+// parsed" rather than throwing if the page structure changes, and logs a
+// warning so that's diagnosable from Action run logs rather than silently
+// going stale).
+//
+// Three independent cadences (daily/weekly/monthly), matching GitHub's own
+// ?since= options on the trending page. Each run captures BOTH the repo
+// list and the developer list for its cadence in one pass — see the three
+// .github/workflows/fetch-github-trending-*.yml files.
 export const trendingCadenceEnum = pgEnum("trending_cadence", [
   "daily",
   "weekly",
@@ -677,18 +683,6 @@ export const trendingCadenceEnum = pgEnum("trending_cadence", [
 ]);
 
 export type TrendingCadence = (typeof trendingCadenceEnum.enumValues)[number];
-
-// The topic-group(s) a repo matched on this run — lets the page split
-// "general AI/LLM" from "agent harness / knowledge graph / knowledge
-// management" instead of one undifferentiated list. A repo can match both
-// (stored as multiple array entries), e.g. an agentic RAG-over-knowledge-
-// graph project.
-export const trendingTopicGroupEnum = pgEnum("trending_topic_group", [
-  "general", // llm, large-language-models, machine-learning, artificial-intelligence
-  "harness-knowledge", // agent, ai-agent, agentic, llm-agent, coding-agent, knowledge-graph, knowledge-management, rag
-]);
-
-export type TrendingTopicGroup = (typeof trendingTopicGroupEnum.enumValues)[number];
 
 export const githubTrendingRuns = pgTable(
   "github_trending_runs",
@@ -699,7 +693,7 @@ export const githubTrendingRuns = pgTable(
     // convention as trend_digests.date. Unique per cadence so a re-run on
     // the same day (e.g. a manual workflow_dispatch) updates in place
     // rather than piling up duplicate runs; see getOrCreateRun() in the
-    // fetch script, which deletes and re-inserts that run's repos.
+    // fetch script, which deletes and re-inserts that run's rows.
     date: varchar("date", { length: 10 }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -713,21 +707,52 @@ export const githubTrendingRepos = pgTable(
     runId: integer("run_id")
       .notNull()
       .references(() => githubTrendingRuns.id, { onDelete: "cascade" }),
+    // Position on GitHub's own trending page (1-based) — preserved rather
+    // than re-derived from stars, since the page's ordering isn't purely
+    // stars-in-period (ties, etc.) and "same order GitHub showed" is the
+    // point of scraping the real page instead of the Search API.
+    rank: integer("rank").notNull(),
     fullName: varchar("full_name", { length: 255 }).notNull(),
     url: text("url").notNull(),
     description: text("description").default("").notNull(),
-    stars: integer("stars").default(0).notNull(),
     language: varchar("language", { length: 100 }),
-    // Which GitHub topics on the repo itself matched the query (e.g.
-    // ["llm", "agent"]) — shown on the card so it's clear why a repo
-    // surfaced, not just that it did.
-    matchedTopics: jsonb("matched_topics").$type<string[]>().default([]).notNull(),
-    topicGroups: jsonb("topic_groups").$type<TrendingTopicGroup[]>().default([]).notNull(),
-    repoCreatedAt: timestamp("repo_created_at", { withTimezone: true }),
+    stars: integer("stars").default(0).notNull(),
+    forks: integer("forks").default(0).notNull(),
+    // Stars gained within the run's own cadence window (GitHub's "N stars
+    // today" / "this week" / "this month" line) — the actual trending
+    // signal, as opposed to `stars`' all-time total.
+    starsInPeriod: integer("stars_in_period").default(0).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [
     index("github_trending_repos_run_idx").on(t.runId),
     unique().on(t.runId, t.url),
+  ],
+);
+
+export const githubTrendingDevelopers = pgTable(
+  "github_trending_developers",
+  {
+    id: serial("id").primaryKey(),
+    runId: integer("run_id")
+      .notNull()
+      .references(() => githubTrendingRuns.id, { onDelete: "cascade" }),
+    rank: integer("rank").notNull(),
+    username: varchar("username", { length: 255 }).notNull(),
+    displayName: varchar("display_name", { length: 255 }).default("").notNull(),
+    profileUrl: text("profile_url").notNull(),
+    avatarUrl: text("avatar_url").default("").notNull(),
+    // The "popular repo" GitHub credits each trending developer with —
+    // absent for some entries (org accounts, or GitHub not attributing one
+    // that day), hence nullable rather than empty-string like the text
+    // fields above.
+    popularRepoName: varchar("popular_repo_name", { length: 255 }),
+    popularRepoUrl: text("popular_repo_url"),
+    popularRepoDescription: text("popular_repo_description"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index("github_trending_developers_run_idx").on(t.runId),
+    unique().on(t.runId, t.username),
   ],
 );

@@ -1,90 +1,64 @@
-// GitHub AI-repo "trending" snapshot — run on three independent cadences by
+// GitHub Trending snapshot — the REAL https://github.com/trending page
+// (repositories) and https://github.com/trending/developers, scraped once
+// per cadence (daily/weekly/monthly) by
 // .github/workflows/fetch-github-trending-{daily,weekly,monthly}.yml, each
 // setting TRENDING_CADENCE before calling this script.
 //
-// This is deliberately a separate feature from the "repo" category inside
-// scripts/fetch-trends.ts / the Trends tab: that one is a continuously
-// growing, de-duped-by-URL feed. This one is a snapshot — each run
-// re-queries GitHub's Search API for AI-topic repos created within its own
-// cadence window (daily=1 day, weekly=7 days, monthly=30 days), ranked by
-// stars, same "recently created + starred, as a trending proxy" approach as
-// the original script (GitHub has no official trending API). The same repo
-// can legitimately show up again next run — it's not trying to be an
-// append-only archive, so there's no cross-run de-duplication.
+// Why scraping instead of the Search API: GitHub has no "trending" API at
+// all, and no API for "trending developers" specifically — this was
+// previously approximated via Search (recently-created repos ranked by
+// stars), which can't represent developer trending and isn't what GitHub
+// itself would call trending. This pulls the actual page instead.
 //
-// Two topic groups are queried separately so the page can tell "general
-// AI/LLM" apart from "agent harness / knowledge graph / knowledge
-// management" repos rather than lumping everything into one undifferentiated
-// list — see schema.ts's trendingTopicGroupEnum comment.
+// Fragility trade-off, on purpose: scraping HTML means this can silently
+// break if GitHub changes the page's markup. The parser below leans on
+// selectors/URL-shape that have been stable for years (the owner/repo vs.
+// single-username path shape in particular is GitHub's actual routing
+// contract, not a styling class, so it's about as durable as scraping gets)
+// and degrades to "0 parsed" + a loud console warning rather than throwing,
+// so a future breakage shows up as an empty run in the Action log instead
+// of a silent one.
 //
-// No AI summarization step here on purpose (unlike fetch-trends.ts) —
-// GitHub already supplies a repo description, and skipping the local-LLM/
-// Gemini chain means this feature doesn't depend on the owner's Mac being
-// awake to produce useful output.
+// Same cadence-window semantics as GitHub's own page: `since=daily` means
+// "today", `since=weekly` means "this week", `since=monthly` means "this
+// month" — passed straight through since our TrendingCadence values already
+// match GitHub's own query param values.
 //
 // Run locally with:
 //   TRENDING_CADENCE=daily npx tsx scripts/fetch-github-trending.ts
-// (needs DATABASE_URL in the environment; GITHUB_TOKEN is optional locally
-// but raises the Search API's rate limit, same as fetch-trends.ts.)
+// (needs DATABASE_URL in the environment.)
+import { parseHTML } from "linkedom";
 import { and, eq } from "drizzle-orm";
 import { db } from "../src/lib/db";
 import {
   githubTrendingRuns,
   githubTrendingRepos,
+  githubTrendingDevelopers,
   type TrendingCadence,
-  type TrendingTopicGroup,
 } from "../src/lib/db/schema";
 
-const CADENCE_DAYS: Record<TrendingCadence, number> = {
-  daily: 1,
-  weekly: 7,
-  monthly: 30,
-};
+const USER_AGENT = "Mozilla/5.0 (compatible; brainbank/1.0; +https://github.com/icetonges/brainbank)";
 
-// Capped per topic group (not per final list) — a repo matching both groups
-// counts against both caps but only produces one merged row, so the final
-// list is at most 2x this, not exactly this.
-const MAX_REPOS_PER_GROUP = 15;
-
-const TOPIC_GROUPS: { group: TrendingTopicGroup; topics: string[] }[] = [
-  {
-    group: "general",
-    topics: ["llm", "large-language-models", "machine-learning", "artificial-intelligence"],
-  },
-  {
-    group: "harness-knowledge",
-    topics: [
-      "agent",
-      "ai-agent",
-      "agentic",
-      "llm-agent",
-      "coding-agent",
-      "knowledge-graph",
-      "knowledge-management",
-      "rag",
-    ],
-  },
-];
-
-interface RawRepo {
-  full_name: string;
-  html_url: string;
-  description: string | null;
-  stargazers_count: number;
-  language: string | null;
-  topics?: string[];
-  created_at: string;
-}
-
-interface MergedRepo {
+interface ScrapedRepo {
+  rank: number;
   fullName: string;
   url: string;
   description: string;
-  stars: number;
   language: string | null;
-  matchedTopics: Set<string>;
-  topicGroups: Set<TrendingTopicGroup>;
-  repoCreatedAt: Date | undefined;
+  stars: number;
+  forks: number;
+  starsInPeriod: number;
+}
+
+interface ScrapedDeveloper {
+  rank: number;
+  username: string;
+  displayName: string;
+  profileUrl: string;
+  avatarUrl: string;
+  popularRepoName: string | null;
+  popularRepoUrl: string | null;
+  popularRepoDescription: string | null;
 }
 
 function parseCadence(): TrendingCadence {
@@ -95,57 +69,124 @@ function parseCadence(): TrendingCadence {
   );
 }
 
-async function fetchTopicGroup(
-  group: TrendingTopicGroup,
-  topics: string[],
-  sinceDate: string,
-): Promise<RawRepo[]> {
-  const topicClause = topics.map((t) => `topic:${t}`).join(" OR ");
-  const q = `(${topicClause}) created:>${sinceDate}`;
-  const res = await fetch(
-    `https://api.github.com/search/repositories?q=${encodeURIComponent(q)}&sort=stars&order=desc&per_page=${MAX_REPOS_PER_GROUP}`,
-    {
-      headers: {
-        Accept: "application/vnd.github+json",
-        "User-Agent": "brainbank-trends-bot/1.0",
-        ...(process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {}),
-      },
-    },
-  );
-  if (!res.ok) throw new Error(`HTTP ${res.status} for topic group "${group}"`);
-  const data = (await res.json()) as { items?: RawRepo[] };
-  return data.items ?? [];
+function parseCount(text: string | null | undefined): number {
+  if (!text) return 0;
+  const digits = text.replace(/[^\d]/g, "");
+  return digits ? parseInt(digits, 10) : 0;
 }
 
-function mergeRepos(
-  results: { group: TrendingTopicGroup; topics: string[]; repos: RawRepo[] }[],
-): MergedRepo[] {
-  const byFullName = new Map<string, MergedRepo>();
+async function fetchHtml(url: string): Promise<string> {
+  const res = await fetch(url, {
+    headers: { "User-Agent": USER_AGENT, Accept: "text/html" },
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
+  return res.text();
+}
 
-  for (const { group, topics, repos } of results) {
-    for (const repo of repos) {
-      const repoTopics = repo.topics ?? [];
-      const matched = repoTopics.filter((t) => topics.includes(t));
-      const existing = byFullName.get(repo.full_name);
-      if (existing) {
-        existing.topicGroups.add(group);
-        for (const m of matched) existing.matchedTopics.add(m);
-        continue;
-      }
-      byFullName.set(repo.full_name, {
-        fullName: repo.full_name,
-        url: repo.html_url,
-        description: repo.description ?? "",
-        stars: repo.stargazers_count,
-        language: repo.language,
-        matchedTopics: new Set(matched),
-        topicGroups: new Set([group]),
-        repoCreatedAt: repo.created_at ? new Date(repo.created_at) : undefined,
+// Each trending repo row is wrapped in an <article> — falls back to
+// .Box-row if GitHub ever drops that wrapper, since the row-per-item
+// structure itself is older/more load-bearing than the tag choice.
+function scrapeRepos(html: string): ScrapedRepo[] {
+  const { document } = parseHTML(html);
+  let rows = [...document.querySelectorAll("article")];
+  if (rows.length === 0) rows = [...document.querySelectorAll(".Box-row")];
+
+  const repos: ScrapedRepo[] = [];
+
+  for (const row of rows) {
+    try {
+      const heading = row.querySelector("h2 a[href]");
+      const href = heading?.getAttribute("href")?.trim();
+      // Must look like /owner/repo — this is what actually distinguishes a
+      // repo row from anything else on the page, independent of CSS classes.
+      if (!href || !/^\/[^/]+\/[^/]+\/?$/.test(href)) continue;
+
+      const fullName = href.replace(/^\/|\/$/g, "");
+      const description =
+        row.querySelector("p")?.textContent?.replace(/\s+/g, " ").trim() ?? "";
+      const language =
+        row.querySelector('[itemprop="programmingLanguage"]')?.textContent?.trim() || null;
+
+      // The stars/forks counters are just the two numeric-text links in the
+      // row, in that order — robust to class renames.
+      const numberLinks = [...row.querySelectorAll("a")]
+        .map((a) => a.textContent?.replace(/\s+/g, " ").trim() ?? "")
+        .filter((text) => /^[\d,]+$/.test(text));
+
+      const rowText = row.textContent?.replace(/\s+/g, " ") ?? "";
+      const periodMatch = rowText.match(/([\d,]+)\s+stars?\s+(today|this week|this month)/i);
+
+      repos.push({
+        rank: repos.length + 1,
+        fullName,
+        url: `https://github.com${href.replace(/\/$/, "")}`,
+        description,
+        language,
+        stars: parseCount(numberLinks[0]),
+        forks: parseCount(numberLinks[1]),
+        starsInPeriod: periodMatch ? parseCount(periodMatch[1]) : 0,
       });
+    } catch (err) {
+      console.warn("[github-trending] Skipped one repo row that failed to parse:", err);
     }
   }
 
-  return [...byFullName.values()].sort((a, b) => b.stars - a.stars);
+  return repos;
+}
+
+// The developers page has no owner/repo-shaped link to key off of for the
+// row itself — instead each row's *profile* link is a bare /username path
+// (exactly one segment), which is just as durable a signal since it's
+// GitHub's real routing shape, not a style hook.
+function scrapeDevelopers(html: string): ScrapedDeveloper[] {
+  const { document } = parseHTML(html);
+  let rows = [...document.querySelectorAll("article")];
+  if (rows.length === 0) rows = [...document.querySelectorAll(".Box-row")];
+
+  const developers: ScrapedDeveloper[] = [];
+
+  for (const row of rows) {
+    try {
+      const links = [...row.querySelectorAll("a[href]")];
+      const profileLink = links.find((a) => {
+        const href = a.getAttribute("href");
+        return href && /^\/[^/]+\/?$/.test(href);
+      });
+      const profileHref = profileLink?.getAttribute("href");
+      if (!profileHref) continue;
+
+      const username = profileHref.replace(/^\/|\/$/g, "");
+      if (!username) continue;
+
+      const avatarUrl = row.querySelector("img")?.getAttribute("src") ?? "";
+      const displayName =
+        row.querySelector("h1")?.textContent?.replace(/\s+/g, " ").trim() || username;
+
+      const repoLink = links.find((a) => {
+        const href = a.getAttribute("href");
+        return href && /^\/[^/]+\/[^/]+\/?$/.test(href);
+      });
+      const repoHref = repoLink?.getAttribute("href") ?? null;
+      const repoArticle = repoLink?.closest("article") ?? null;
+      const popularRepoDescription =
+        repoArticle?.querySelector("p, div")?.textContent?.replace(/\s+/g, " ").trim() || null;
+
+      developers.push({
+        rank: developers.length + 1,
+        username,
+        displayName,
+        profileUrl: `https://github.com/${username}`,
+        avatarUrl,
+        popularRepoName: repoHref ? repoHref.replace(/^\/|\/$/g, "") : null,
+        popularRepoUrl: repoHref ? `https://github.com${repoHref.replace(/\/$/, "")}` : null,
+        popularRepoDescription,
+      });
+    } catch (err) {
+      console.warn("[github-trending] Skipped one developer row that failed to parse:", err);
+    }
+  }
+
+  return developers;
 }
 
 async function getOrCreateRun(cadence: TrendingCadence, date: string): Promise<number> {
@@ -155,8 +196,9 @@ async function getOrCreateRun(cadence: TrendingCadence, date: string): Promise<n
     .where(and(eq(githubTrendingRuns.cadence, cadence), eq(githubTrendingRuns.date, date)));
   if (existing) {
     // Re-running the same day (e.g. a manual workflow_dispatch) replaces
-    // that day's repos rather than piling up duplicates.
+    // that day's rows rather than piling up duplicates.
     await db.delete(githubTrendingRepos).where(eq(githubTrendingRepos.runId, existing.id));
+    await db.delete(githubTrendingDevelopers).where(eq(githubTrendingDevelopers.runId, existing.id));
     return existing.id;
   }
   const [created] = await db.insert(githubTrendingRuns).values({ cadence, date }).returning();
@@ -165,52 +207,65 @@ async function getOrCreateRun(cadence: TrendingCadence, date: string): Promise<n
 
 async function main() {
   const cadence = parseCadence();
-  const days = CADENCE_DAYS[cadence];
-  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const today = new Date().toISOString().slice(0, 10);
 
-  console.log(`[github-trending] cadence=${cadence} window=created:>${since}`);
+  console.log(`[github-trending] cadence=${cadence}`);
 
-  const results: { group: TrendingTopicGroup; topics: string[]; repos: RawRepo[] }[] = [];
-  for (const { group, topics } of TOPIC_GROUPS) {
-    try {
-      const repos = await fetchTopicGroup(group, topics, since);
-      console.log(`[github-trending] "${group}" — ${repos.length} repo(s).`);
-      results.push({ group, topics, repos });
-    } catch (err) {
-      console.error(`[github-trending] Failed to fetch topic group "${group}":`, err);
+  let repos: ScrapedRepo[] = [];
+  let developers: ScrapedDeveloper[] = [];
+
+  try {
+    const html = await fetchHtml(`https://github.com/trending?since=${cadence}`);
+    repos = scrapeRepos(html);
+    console.log(`[github-trending] Parsed ${repos.length} repo(s).`);
+    if (repos.length === 0) {
+      console.warn(
+        "[github-trending] 0 repos parsed from a 200 response — GitHub's markup may have changed. Leaving previous data as-is for this cadence.",
+      );
     }
+  } catch (err) {
+    console.error("[github-trending] Failed to fetch trending repos:", err);
   }
 
-  const merged = mergeRepos(results);
-  console.log(`[github-trending] ${merged.length} unique repo(s) after merging topic groups.`);
+  try {
+    const html = await fetchHtml(`https://github.com/trending/developers?since=${cadence}`);
+    developers = scrapeDevelopers(html);
+    console.log(`[github-trending] Parsed ${developers.length} developer(s).`);
+    if (developers.length === 0) {
+      console.warn(
+        "[github-trending] 0 developers parsed from a 200 response — GitHub's markup may have changed. Leaving previous data as-is for this cadence.",
+      );
+    }
+  } catch (err) {
+    console.error("[github-trending] Failed to fetch trending developers:", err);
+  }
 
-  if (merged.length === 0) {
-    console.log("[github-trending] Nothing found this window — leaving the previous run's data as-is.");
+  if (repos.length === 0 && developers.length === 0) {
+    console.log("[github-trending] Nothing parsed at all — exiting without touching the DB.");
     return;
   }
 
   const runId = await getOrCreateRun(cadence, today);
 
-  const inserted = await db
-    .insert(githubTrendingRepos)
-    .values(
-      merged.map((r) => ({
-        runId,
-        fullName: r.fullName,
-        url: r.url,
-        description: r.description,
-        stars: r.stars,
-        language: r.language,
-        matchedTopics: [...r.matchedTopics],
-        topicGroups: [...r.topicGroups],
-        repoCreatedAt: r.repoCreatedAt,
-      })),
-    )
-    .onConflictDoNothing({ target: [githubTrendingRepos.runId, githubTrendingRepos.url] })
-    .returning({ id: githubTrendingRepos.id });
+  if (repos.length > 0) {
+    const insertedRepos = await db
+      .insert(githubTrendingRepos)
+      .values(repos.map((r) => ({ runId, ...r })))
+      .onConflictDoNothing({ target: [githubTrendingRepos.runId, githubTrendingRepos.url] })
+      .returning({ id: githubTrendingRepos.id });
+    console.log(`[github-trending] Inserted ${insertedRepos.length} repo row(s).`);
+  }
 
-  console.log(`[github-trending] Inserted ${inserted.length} repo(s) for ${cadence} run ${today}.`);
+  if (developers.length > 0) {
+    const insertedDevs = await db
+      .insert(githubTrendingDevelopers)
+      .values(developers.map((d) => ({ runId, ...d })))
+      .onConflictDoNothing({
+        target: [githubTrendingDevelopers.runId, githubTrendingDevelopers.username],
+      })
+      .returning({ id: githubTrendingDevelopers.id });
+    console.log(`[github-trending] Inserted ${insertedDevs.length} developer row(s).`);
+  }
 }
 
 main()
