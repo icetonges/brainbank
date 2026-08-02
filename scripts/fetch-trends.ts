@@ -3,9 +3,25 @@
 // header comment on the trend_digests/trend_items tables in
 // src/lib/db/schema.ts for why there's no in-app action for this).
 //
-// Pulls a handful of RSS feeds (news + arXiv papers) plus GitHub's repo
-// search API (as a "trending AI repos" proxy — GitHub has no official
-// trending feed), de-dupes against what's already stored by URL, writes a
+// Sources are deliberately lab/tool-specific rather than general tech
+// journalism — an earlier version pulled MIT Technology Review's and
+// artificialintelligence-news.com's general feeds, which mostly surfaced
+// unrelated stories (drug policy, chip-industry layoffs, etc.) with only
+// incidental AI content. RSS_SOURCES below is each vendor's own official
+// blog feed (verified reachable — see the fetch-trends git history for
+// what was checked); ATOM_SOURCES is GitHub's native releases.atom for
+// products that ship via GitHub Releases (Claude Code, Codex CLI) rather
+// than a blog post per version. DeepSeek and Moonshot/Kimi have no
+// official RSS feed and don't tag GitHub Releases (checked directly —
+// deepseek-ai/DeepSeek-V3 has exactly one archival release, MoonshotAI/
+// Kimi-K2 has none), so they're not pullable as a first-party feed the
+// way the others are; LM Studio's blog (which covers running DeepSeek/
+// Kimi/Claude-compatible models) is the closest reliable proxy for that
+// coverage until/unless one of them publishes something pullable.
+//
+// Pulls these feeds (news + arXiv papers) plus GitHub's repo search API
+// (as a "trending AI repos" proxy — GitHub has no official trending
+// feed), de-dupes against what's already stored by URL, writes a
 // one-sentence bilingual (EN+ZH) AI summary per new item plus one
 // structured bilingual overview (summary/insight/action items/watch list)
 // per day, and upserts everything into Neon.
@@ -53,9 +69,18 @@ interface NormalizedItem {
 }
 
 const RSS_SOURCES: { url: string; source: string; category: TrendCategory }[] = [
-  { url: "https://www.technologyreview.com/feed/", source: "MIT Technology Review", category: "news" },
-  { url: "https://www.artificialintelligence-news.com/feed/", source: "AI News", category: "news" },
+  { url: "https://openai.com/news/rss.xml", source: "OpenAI", category: "news" },
+  { url: "https://huggingface.co/blog/feed.xml", source: "Hugging Face", category: "news" },
+  { url: "https://lmstudio.ai/rss.xml", source: "LM Studio", category: "news" },
   { url: "https://rss.arxiv.org/rss/cs.CL", source: "arXiv cs.CL", category: "paper" },
+];
+
+// GitHub's native releases.atom — first-party, always valid for any public
+// repo, no auth needed. Used for products that ship via tagged GitHub
+// Releases (with real release notes) rather than a blog post per version.
+const ATOM_SOURCES: { url: string; display: string; source: string; category: TrendCategory }[] = [
+  { url: "https://github.com/anthropics/claude-code/releases.atom", display: "Claude Code", source: "Anthropic", category: "news" },
+  { url: "https://github.com/openai/codex/releases.atom", display: "Codex CLI", source: "OpenAI", category: "news" },
 ];
 
 // --- tiny RSS parser (no dependency — RSS 2.0 <item> blocks are regular
@@ -110,6 +135,57 @@ async function fetchRssSource(feed: (typeof RSS_SOURCES)[number]): Promise<Norma
       url: item.link,
       description: item.description ?? "",
       publishedAt: item.pubDate ? new Date(item.pubDate) : undefined,
+    }));
+}
+
+// --- tiny Atom parser (same rationale as parseRss above — GitHub's
+// releases.atom <entry> blocks are regular enough not to need a real XML
+// parser) ---
+
+interface AtomEntry {
+  title: string;
+  link: string;
+  updated?: string;
+  content?: string;
+}
+
+function parseAtom(xml: string): AtomEntry[] {
+  const entries: AtomEntry[] = [];
+  const blocks = xml.match(/<entry\b[\s\S]*?<\/entry>/gi) ?? [];
+  for (const block of blocks) {
+    const title = decodeEntities(block.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? "");
+    // Prefer the alternate/HTML link — releases.atom entries can carry
+    // multiple <link> elements (alternate + self); fall back to the first
+    // href present if no rel="alternate" is found.
+    const link =
+      block.match(/<link\b[^>]*\brel=["']alternate["'][^>]*\bhref=["']([^"']+)["']/i)?.[1] ??
+      block.match(/<link\b[^>]*\bhref=["']([^"']+)["']/i)?.[1] ??
+      "";
+    const updated = block.match(/<updated>([\s\S]*?)<\/updated>/i)?.[1]?.trim();
+    const content = decodeEntities(block.match(/<content[^>]*>([\s\S]*?)<\/content>/i)?.[1] ?? "")
+      .replace(/<[^>]+>/g, "")
+      .trim()
+      .slice(0, 500);
+    if (title && link) entries.push({ title, link: link.trim(), updated, content });
+  }
+  return entries;
+}
+
+async function fetchAtomSource(feed: (typeof ATOM_SOURCES)[number]): Promise<NormalizedItem[]> {
+  const res = await fetch(feed.url, {
+    headers: { "User-Agent": "brainbank-trends-bot/1.0 (+daily AI digest)" },
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const xml = await res.text();
+  return parseAtom(xml)
+    .slice(0, MAX_ITEMS_PER_FEED)
+    .map((entry) => ({
+      source: feed.source,
+      category: feed.category,
+      title: `${feed.display} ${entry.title}`.slice(0, 500),
+      url: entry.link,
+      description: entry.content ?? "",
+      publishedAt: entry.updated ? new Date(entry.updated) : undefined,
     }));
 }
 
@@ -272,13 +348,23 @@ async function main() {
     }
   }
 
+  for (const feed of ATOM_SOURCES) {
+    try {
+      candidates.push(...(await fetchAtomSource(feed)));
+    } catch (err) {
+      console.error(`[trends] Failed to fetch ${feed.display} releases:`, err);
+    }
+  }
+
   try {
     candidates.push(...(await fetchGithubTrending()));
   } catch (err) {
     console.error("[trends] Failed to fetch GitHub trending:", err);
   }
 
-  console.log(`[trends] Fetched ${candidates.length} candidate item(s) from ${RSS_SOURCES.length + 1} source(s).`);
+  console.log(
+    `[trends] Fetched ${candidates.length} candidate item(s) from ${RSS_SOURCES.length + ATOM_SOURCES.length + 1} source(s).`,
+  );
   if (candidates.length === 0) {
     console.log("[trends] Nothing fetched — exiting without touching the DB.");
     return;
