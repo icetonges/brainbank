@@ -28,3 +28,8 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           TRENDING_CADENCE: weekly
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # See fetch-github-trending-daily.yml's comment on these three —
+          # required by translateDescriptions()'s pickModel() call.
+          LOCAL_LLM_FUNNEL_URL: ${{ secrets.LOCAL_LLM_FUNNEL_URL }}
+          LOCAL_LLM_SHARED_SECRET: ${{ secrets.LOCAL_LLM_SHARED_SECRET }}
+          GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY }}

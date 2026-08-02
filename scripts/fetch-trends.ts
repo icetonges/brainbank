@@ -19,7 +19,7 @@
 // Uses relative imports (not the app's "@/..." aliases) on purpose: this
 // script runs standalone via tsx, outside Next.js's module resolution, and
 // relative paths don't depend on tsx also picking up tsconfig "paths".
-import { eq, inArray } from "drizzle-orm";
+import { desc, eq, inArray, or } from "drizzle-orm";
 import { generateObject, type LanguageModel } from "ai";
 import { z } from "zod";
 import { db } from "../src/lib/db";
@@ -28,6 +28,18 @@ import { pickModel } from "./lib/pick-model";
 
 const MAX_ITEMS_PER_FEED = 12;
 const MAX_GITHUB_REPOS = 10;
+// Bounds how many older rows get (re)summarized per run when backfilling —
+// see backfillMissingSummaries below. Keeps a single run's AI-call budget
+// predictable regardless of how large the backlog is; a big backlog just
+// clears over several days' runs instead of one run.
+const BACKFILL_BATCH_SIZE = 20;
+// How many of the most recently-inserted items feed the daily
+// overview/insight/action-items/watch-list — a rolling window rather than
+// strictly "items inserted today", since most days now fetch zero brand-new
+// items (the sources are largely re-serving already-captured articles) and
+// a "today only" overview would then simply never get written. See
+// writeDailyOverview's call site in main().
+const OVERVIEW_WINDOW_SIZE = 60;
 
 interface NormalizedItem {
   source: string;
@@ -158,6 +170,44 @@ async function summarizeItemBilingual(
   };
 }
 
+/** Fills in `summary`/`summaryZh` for older rows that predate this field
+ * (or predate the bilingual version of it) — without this, any item
+ * inserted before summarizeItemBilingual existed stays permanently blank,
+ * since main() only ever summarizes items at insert time. Self-heals a
+ * backlog gradually (BACKFILL_BATCH_SIZE rows/run) rather than requiring a
+ * one-off migration script. */
+async function backfillMissingSummaries(model: LanguageModel): Promise<void> {
+  const rows = await db
+    .select({
+      id: trendItems.id,
+      category: trendItems.category,
+      source: trendItems.source,
+      title: trendItems.title,
+      url: trendItems.url,
+    })
+    .from(trendItems)
+    .where(or(eq(trendItems.summary, ""), eq(trendItems.summaryZh, "")))
+    .limit(BACKFILL_BATCH_SIZE);
+
+  if (rows.length === 0) return;
+  console.log(`[trends] Backfilling summaries for ${rows.length} older item(s) missing one.`);
+
+  for (const row of rows) {
+    const summary = await summarizeItemBilingual(model, {
+      source: row.source,
+      category: row.category,
+      title: row.title,
+      url: row.url,
+    }).catch((err) => {
+      console.error(`[trends] Backfill summary failed for ${row.url}:`, err);
+      return null;
+    });
+    if (!summary) continue;
+    await db.update(trendItems).set({ summary: summary.en, summaryZh: summary.zh }).where(eq(trendItems.id, row.id));
+  }
+  console.log("[trends] Backfill pass done.");
+}
+
 const dailyOverviewSchema = z.object({
   overviewEn: z
     .string()
@@ -240,49 +290,63 @@ async function main() {
   const fresh = candidates.filter((c) => !existingUrls.has(c.url));
 
   console.log(`[trends] ${fresh.length} new item(s) after de-duping against ${existingUrls.size} already-stored URL(s).`);
-  if (fresh.length === 0) {
-    console.log("[trends] Nothing new today.");
+
+  const { model, label } = await pickModel("[trends]");
+  // getOrCreateDigest() up front regardless of fresh.length — a day with
+  // zero brand-new items still gets its overview/insight refreshed below
+  // from the rolling recent-items window, which is the whole point of this
+  // no-longer-being-gated-on-"fresh" design (see OVERVIEW_WINDOW_SIZE's
+  // comment).
+  const digestId = await getOrCreateDigest(today);
+
+  if (fresh.length > 0) {
+    for (const item of fresh) {
+      const summary = await summarizeItemBilingual(model, item).catch((err) => {
+        console.error(`[trends] Summary failed for ${item.url}:`, err);
+        return { en: "", zh: "" };
+      });
+      item.summary = summary.en;
+      item.summaryZh = summary.zh;
+    }
+
+    const inserted = await db
+      .insert(trendItems)
+      .values(
+        fresh.map((item) => ({
+          digestId,
+          category: item.category,
+          source: item.source,
+          title: item.title,
+          url: item.url,
+          summary: item.summary ?? "",
+          summaryZh: item.summaryZh ?? "",
+          publishedAt: item.publishedAt,
+        })),
+      )
+      .onConflictDoNothing({ target: trendItems.url })
+      .returning({ id: trendItems.id });
+
+    console.log(`[trends] Inserted ${inserted.length} item(s) for ${today} (summarized via ${label}).`);
+  } else {
+    console.log("[trends] Nothing new today — still refreshing the overview from recent items below.");
+  }
+
+  await backfillMissingSummaries(model).catch((err) => {
+    console.error("[trends] Backfill pass failed:", err);
+  });
+
+  const recentItems = await db
+    .select({ category: trendItems.category, title: trendItems.title, source: trendItems.source, summary: trendItems.summary })
+    .from(trendItems)
+    .orderBy(desc(trendItems.createdAt))
+    .limit(OVERVIEW_WINDOW_SIZE);
+
+  if (recentItems.length === 0) {
+    console.log("[trends] No items in the database yet — nothing to write an overview from.");
     return;
   }
 
-  const { model, label } = await pickModel("[trends]");
-
-  for (const item of fresh) {
-    const summary = await summarizeItemBilingual(model, item).catch((err) => {
-      console.error(`[trends] Summary failed for ${item.url}:`, err);
-      return { en: "", zh: "" };
-    });
-    item.summary = summary.en;
-    item.summaryZh = summary.zh;
-  }
-
-  const digestId = await getOrCreateDigest(today);
-
-  const inserted = await db
-    .insert(trendItems)
-    .values(
-      fresh.map((item) => ({
-        digestId,
-        category: item.category,
-        source: item.source,
-        title: item.title,
-        url: item.url,
-        summary: item.summary ?? "",
-        summaryZh: item.summaryZh ?? "",
-        publishedAt: item.publishedAt,
-      })),
-    )
-    .onConflictDoNothing({ target: trendItems.url })
-    .returning({ id: trendItems.id });
-
-  console.log(`[trends] Inserted ${inserted.length} item(s) for ${today} (summarized via ${label}).`);
-
-  const allTodayItems = await db
-    .select({ category: trendItems.category, title: trendItems.title, source: trendItems.source, summary: trendItems.summary })
-    .from(trendItems)
-    .where(eq(trendItems.digestId, digestId));
-
-  const overview = await writeDailyOverview(model, today, allTodayItems).catch((err) => {
+  const overview = await writeDailyOverview(model, today, recentItems).catch((err) => {
     console.error("[trends] Daily overview failed:", err);
     return null;
   });

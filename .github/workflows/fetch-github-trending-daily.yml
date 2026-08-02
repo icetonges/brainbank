@@ -33,3 +33,11 @@ jobs:
           # Auto-provided by Actions — raises the Search API's rate limit,
           # no setup needed.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Needed for translateDescriptions()'s pickModel() call (added
+          # when Chinese description translation was added) — without
+          # these, pickModel() throws immediately and the run silently
+          # continues with every descriptionZh left blank. Same vars
+          # fetch-trends.yml already sets.
+          LOCAL_LLM_FUNNEL_URL: ${{ secrets.LOCAL_LLM_FUNNEL_URL }}
+          LOCAL_LLM_SHARED_SECRET: ${{ secrets.LOCAL_LLM_SHARED_SECRET }}
+          GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY }}
