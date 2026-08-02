@@ -47,6 +47,16 @@ export async function Header() {
           >
             {s.classroom}
           </Link>
+          {/* +Article sits right next to Classroom — it's the "create"
+              action for that section, so the two read as a pair. */}
+          {session && (
+            <Link
+              href="/classroom/new"
+              className="rounded-md bg-accent px-3 py-1.5 text-sm font-semibold text-accent-fg hover:opacity-90 transition-opacity"
+            >
+              {s.newArticle}
+            </Link>
+          )}
           {/* Public regardless of session — see the auth-removal comments
               on src/app/llm/page.tsx for why this one differs from the
               other signed-in-only links below. */}
@@ -61,10 +71,12 @@ export async function Header() {
             <>
               {/* Owner-only and never rendered for anonymous visitors —
                   the diary and its assistant have no public view at all
-                  (middleware.ts also matches both routes). */}
+                  (middleware.ts also matches both routes). Styled as an
+                  accent chip like the +Article/+Knowledge actions since
+                  it's the other "personal" entry point in the nav. */}
               <Link
                 href="/diary"
-                className="rounded-md px-3 py-1.5 text-sm font-medium text-fg-secondary hover:text-accent transition-colors"
+                className="rounded-md bg-accent px-3 py-1.5 text-sm font-semibold text-accent-fg hover:opacity-90 transition-opacity"
               >
                 {s.diary}
               </Link>
@@ -73,12 +85,6 @@ export async function Header() {
                 className="rounded-md px-3 py-1.5 text-sm font-medium text-fg-secondary hover:text-accent transition-colors"
               >
                 {s.assistant}
-              </Link>
-              <Link
-                href="/classroom/new"
-                className="rounded-md bg-accent px-3 py-1.5 text-sm font-semibold text-accent-fg hover:opacity-90 transition-opacity"
-              >
-                {s.newArticle}
               </Link>
               <Link
                 href="/graph"

@@ -1,12 +1,12 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 import TurndownService from "turndown";
 import { signAndUploadFile } from "@/lib/upload-client";
 import { mediaKindFromMimeType } from "@/lib/storage/media-kind";
 import { attachMediaAction } from "@/app/notes/[slug]/actions";
-import { createDiaryDraft, saveDiaryEntry } from "@/app/diary/actions";
+import { createDiaryDraft, saveDiaryDraft, saveDiaryEntry } from "@/app/diary/actions";
 import { LIFE_AREAS } from "@/lib/knowledge/taxonomy";
 import { t, type Lang } from "@/lib/i18n";
 
@@ -53,7 +53,11 @@ export function DiaryComposer({
   const s = t(lang).diary;
   const bodyRef = useRef<HTMLTextAreaElement>(null);
   const scratchRef = useRef<HTMLTextAreaElement>(null);
+  const titleRef = useRef<HTMLInputElement>(null);
+  const occurredAtRef = useRef<HTMLInputElement>(null);
+  const languageRef = useRef<HTMLSelectElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [draft, setDraft] = useState<{ noteId: number; slug: string } | null>(null);
   const [uploadPct, setUploadPct] = useState<number | null>(null);
@@ -62,6 +66,7 @@ export function DiaryComposer({
   const [energy, setEnergy] = useState<number>(0);
   const [pickedTags, setPickedTags] = useState<string[]>([]);
   const [showScratch, setShowScratch] = useState(false);
+  const [draftStatus, setDraftStatus] = useState<"idle" | "saving" | "saved">("idle");
 
   function insertAtCursor(
     el: HTMLTextAreaElement | null,
@@ -186,6 +191,56 @@ export function DiaryComposer({
     return created;
   }
 
+  /** Writes the current fields to the draft note. Silent on failure — an
+   *  autosave hiccup shouldn't interrupt writing; the explicit Save button
+   *  (saveDiaryEntry) remains the source of truth and will retry the write. */
+  async function autosaveDraft() {
+    const body = bodyRef.current?.value ?? "";
+    const scratch = scratchRef.current?.value ?? "";
+    if (!body.trim() && !scratch.trim()) return;
+
+    setDraftStatus("saving");
+    try {
+      const entry = await ensureDraft();
+      await saveDiaryDraft({
+        noteId: entry.noteId,
+        title: titleRef.current?.value ?? "",
+        body,
+        scratch,
+        occurredAt: occurredAtRef.current?.value ?? "",
+        language: languageRef.current?.value ?? lang,
+        mood,
+        energy,
+        tags: pickedTags,
+      });
+      setDraftStatus("saved");
+    } catch {
+      setDraftStatus("idle");
+    }
+  }
+
+  /** Debounces autosave to 5s after the last change — every field edit
+   *  (typing, mood/energy/tag clicks) restarts the timer. */
+  function scheduleAutosave() {
+    setDraftStatus("idle");
+    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    autosaveTimerRef.current = setTimeout(autosaveDraft, 5000);
+  }
+
+  // Mood/energy/tags are controlled React state (button clicks, not input
+  // events), so they need their own trigger — text fields schedule via
+  // onChange instead.
+  useEffect(() => {
+    scheduleAutosave();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mood, energy, pickedTags]);
+
+  useEffect(() => {
+    return () => {
+      if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    };
+  }, []);
+
   async function handleImage(file: File, target: HTMLTextAreaElement | null) {
     setError(null);
     setUploadPct(0);
@@ -253,7 +308,13 @@ export function DiaryComposer({
   }
 
   return (
-    <form action={saveDiaryEntry} className="flex flex-col gap-4">
+    <form
+      action={saveDiaryEntry}
+      onSubmit={() => {
+        if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+      }}
+      className="flex flex-col gap-4"
+    >
       {draft && <input type="hidden" name="noteId" value={draft.noteId} />}
       <input type="hidden" name="mood" value={mood} />
       <input type="hidden" name="energy" value={energy || ""} />
@@ -263,21 +324,27 @@ export function DiaryComposer({
           entry from its content after save. */}
       <div className="flex flex-col gap-3 sm:flex-row">
         <input
+          ref={titleRef}
           type="text"
           name="title"
           placeholder={s.titlePlaceholder}
+          onChange={scheduleAutosave}
           className="flex-[2] rounded-lg border border-border bg-bg-elevated px-4 py-2.5 text-lg text-fg outline-none placeholder:text-fg-secondary/70 focus:border-accent"
         />
         <input
+          ref={occurredAtRef}
           type="datetime-local"
           name="occurredAt"
           defaultValue={localDateTimeValue(new Date(defaultOccurredAt))}
+          onChange={scheduleAutosave}
           className="rounded-lg border border-border bg-bg-elevated px-3 py-2.5 text-sm text-fg outline-none focus:border-accent"
         />
         <select
+          ref={languageRef}
           name="language"
           defaultValue={lang}
           aria-label={s.language}
+          onChange={scheduleAutosave}
           className="rounded-lg border border-border bg-bg-elevated px-3 py-2.5 text-sm text-fg outline-none focus:border-accent"
         >
           <option value="en">EN</option>
@@ -321,6 +388,7 @@ export function DiaryComposer({
           handleFiles(files, bodyRef.current);
         }}
         onPaste={pasteHandler(() => bodyRef.current)}
+        onChange={scheduleAutosave}
         className="min-h-[42vh] flex-1 resize-y rounded-b-xl border border-border bg-bg-elevated p-5 font-serif text-[1.0625rem] leading-relaxed text-fg outline-none placeholder:text-fg-secondary/60 focus:border-accent"
       />
 
@@ -352,6 +420,7 @@ export function DiaryComposer({
               handleFiles(files, scratchRef.current);
             }}
             onPaste={pasteHandler(() => scratchRef.current)}
+            onChange={scheduleAutosave}
             className="min-h-[18vh] w-full resize-y rounded-b-xl border-t border-border bg-bg p-4 font-mono text-sm leading-relaxed text-fg outline-none placeholder:text-fg-secondary/60 focus:border-accent"
           />
         )}
@@ -442,7 +511,9 @@ export function DiaryComposer({
           />
         </label>
 
-        <span className="text-xs text-fg-secondary">{s.autoHint}</span>
+        <span className="text-xs text-fg-secondary">
+          {draftStatus === "saving" ? s.draftSaving : draftStatus === "saved" ? s.draftSaved : s.autoHint}
+        </span>
         {error && <p className="text-sm text-danger">{error}</p>}
       </div>
     </form>

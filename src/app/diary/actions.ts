@@ -98,6 +98,59 @@ export async function createDiaryDraft(): Promise<{ noteId: number; slug: string
   return { noteId: note.id, slug: note.slug };
 }
 
+/**
+ * Silent autosave for the composer — called on a 5-second debounce while
+ * the user writes so a closed tab or crash never loses unsaved work. Unlike
+ * saveDiaryEntry this skips AI titling/tagging, wikilinking, and
+ * distillation entirely; those only make sense on an explicit Save.
+ */
+export async function saveDiaryDraft(input: {
+  noteId: number;
+  title: string;
+  body: string;
+  scratch: string;
+  occurredAt: string;
+  language: string;
+  mood: string;
+  energy: number;
+  tags: string[];
+}): Promise<void> {
+  await requireOwner();
+
+  const note = await db.query.notes.findFirst({ where: eq(notes.id, input.noteId) });
+  if (!note) return; // draft was deleted (or never created) — nothing to save into
+
+  const occurredAt = parseOccurredAt(input.occurredAt);
+  const mood = parseMood(input.mood);
+  const energy =
+    Number.isInteger(input.energy) && input.energy >= 1 && input.energy <= 5 ? input.energy : null;
+  const primaryLanguage: "en" | "zh" = input.language === "zh" ? "zh" : "en";
+  const title = (input.title.trim() || note.title).slice(0, 500);
+
+  await db
+    .update(notes)
+    .set({ title, primaryLanguage, updatedAt: new Date() })
+    .where(eq(notes.id, input.noteId));
+
+  const existing = await db.query.noteContent.findFirst({
+    where: and(eq(noteContent.noteId, input.noteId), eq(noteContent.language, primaryLanguage)),
+  });
+  if (existing) {
+    await db.update(noteContent).set({ bodyMarkdown: input.body }).where(eq(noteContent.id, existing.id));
+  } else {
+    await db
+      .insert(noteContent)
+      .values({ noteId: input.noteId, language: primaryLanguage, bodyMarkdown: input.body });
+  }
+
+  await db
+    .update(diaryEntries)
+    .set({ occurredAt, mood, energy, scratch: input.scratch })
+    .where(eq(diaryEntries.noteId, input.noteId));
+
+  if (input.tags.length > 0) await replaceTags(input.noteId, input.tags);
+}
+
 function parseOccurredAt(raw: string): Date {
   // <input type="datetime-local"> submits "YYYY-MM-DDTHH:mm" with no zone;
   // new Date() reads that as local time, which is what the writer means.
