@@ -667,17 +667,31 @@ function structureCounts(text: string): {
   return { headings, listItems, tableRows };
 }
 
-/** Inline code spans, PascalCase/camelCase identifiers, and 2-4 word Title
- * Case phrases — product names, class names, function names, and similar
+/** Inline code spans and PascalCase/acronym-style identifiers (each capital
+ * letter counts as its own "hump", so this also catches all-caps acronyms
+ * like "SVM" or "NN") — product names, class names, acronyms, and similar
  * identifiers that a real translation has to carry over verbatim (the
  * system prompt already asks for exactly that: inline code untouched,
  * proper nouns not translated). Deliberately loose/overinclusive — this
- * is a signal, not a strict parser. */
-function extractKeyTerms(text: string): string[] {
+ * is a signal, not a strict parser.
+ *
+ * Multi-word Title Case phrases ("Claude Code", "BashTool's API") are only
+ * included when target === "en", i.e. the source is Chinese and an English
+ * phrase embedded in it is anomalous enough to be a reliable "this should
+ * survive verbatim" signal. When the source is English (target === "zh"),
+ * the exact same shape matches ordinary capitalized headers and generic
+ * technical terms ("Naive Bayes", "Best Use Cases", "Supervised Learning
+ * Algorithms") that a correct translation is supposed to render in Chinese.
+ * Including them there produced false positives that rejected genuine zh
+ * translations from every model in the fallback chain (article 186, an ML
+ * algorithms cheat sheet, 2026-08-03) — see checkKeyTermsPreserved. */
+function extractKeyTerms(text: string, target: "en" | "zh"): string[] {
   const terms = new Set<string>();
   for (const m of text.matchAll(/`([^`]{2,40})`/g)) terms.add(m[1].trim());
   for (const m of text.matchAll(/\b[A-Z][a-z0-9]*(?:[A-Z][a-zA-Z0-9]*)+\b/g)) terms.add(m[0]);
-  for (const m of text.matchAll(/\b[A-Z][a-zA-Z0-9]*(?:\s+[A-Z][a-zA-Z0-9]*){1,3}\b/g)) terms.add(m[0]);
+  if (target === "en") {
+    for (const m of text.matchAll(/\b[A-Z][a-zA-Z0-9]*(?:\s+[A-Z][a-zA-Z0-9]*){1,3}\b/g)) terms.add(m[0]);
+  }
   return Array.from(terms);
 }
 
@@ -694,8 +708,12 @@ function extractKeyTerms(text: string): string[] {
  * mentions "Claude Code" and "BashTool" repeatedly has no reason to drop
  * those exact strings; a chunk that dropped nearly all of them has almost
  * certainly stopped being about the source text at all. */
-function checkKeyTermsPreserved(original: string, translated: string): string | null {
-  const terms = extractKeyTerms(original);
+function checkKeyTermsPreserved(
+  original: string,
+  translated: string,
+  target: "en" | "zh",
+): string | null {
+  const terms = extractKeyTerms(original, target);
   // A couple of incidental matches isn't meaningful evidence either way —
   // only judge a chunk with enough distinctive terms to say something.
   if (terms.length < 2) return null;
@@ -726,7 +744,7 @@ function detectTranslationProblem(
     return "output looks like a refusal or clarifying question, not a translation";
   }
 
-  const termProblem = checkKeyTermsPreserved(original, trimmed);
+  const termProblem = checkKeyTermsPreserved(original, trimmed, target);
   if (termProblem) return termProblem;
 
   const originalProse = stripNonProseForChecks(original);
