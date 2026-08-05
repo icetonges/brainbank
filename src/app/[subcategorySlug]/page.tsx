@@ -167,21 +167,25 @@ export default async function SubcategoryLandingPage({
             </nav>
           )}
 
-          {/* Grid rather than one full-width column per section — mirrors
-              the /classroom overview grid (sm:grid-cols-2 lg:grid-cols-3),
-              so a subcategory with a handful of short sections (like this
-              one) reads as side-by-side boxes instead of a long, mostly-
-              empty scroll. A section with a lot of articles just grows
-              taller in its own cell; the grid doesn't try to balance
-              heights across columns. */}
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {/* CSS multi-column (masonry-style) rather than CSS grid. Grid's
+              row-major auto-placement forces every item in the same
+              implicit row to share that row's height — so a 1-article
+              section sitting in a row next to a 14-article section leaves a
+              huge dead gap in its own column before the next row starts.
+              `columns-*` instead flows sections straight down each column
+              and lets a short section be immediately followed by the next
+              one in that same column, so columns pack tightly regardless of
+              how uneven the sections' lengths are. `break-inside-avoid` on
+              each card stops a single section from being split across two
+              columns. */}
+          <div className="columns-1 gap-4 sm:columns-2 lg:columns-3">
             {sectionsWithArticles.map((sec, i) => {
               const tone = sectionTone(i);
               return (
                 <section
                   key={sec.id}
                   id={`section-${sec.id}`}
-                  className={`scroll-mt-20 flex flex-col overflow-hidden rounded-xl border border-border border-l-4 ${tone.bar}`}
+                  className={`mb-4 flex scroll-mt-20 flex-col overflow-hidden rounded-xl border border-border border-l-4 ${tone.bar} break-inside-avoid`}
                 >
                   <div
                     className={`flex items-center gap-2 ${tone.tint} px-4 py-2 text-sm font-semibold ${tone.text}`}
@@ -211,7 +215,7 @@ export default async function SubcategoryLandingPage({
             })}
 
             {unsectioned.length > 0 && (
-              <section className="flex flex-col overflow-hidden rounded-xl border border-border">
+              <section className="mb-4 flex flex-col overflow-hidden rounded-xl border border-border break-inside-avoid">
                 {sectionsWithArticles.length > 0 && (
                   <div className="flex items-center gap-2 bg-bg px-4 py-2 text-sm font-semibold text-fg-secondary">
                     <span className="h-1.5 w-1.5 rounded-full bg-fg-secondary/60" aria-hidden />
