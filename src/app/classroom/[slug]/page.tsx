@@ -12,7 +12,7 @@ import {
 import { eq } from "drizzle-orm";
 import { auth } from "@/auth";
 import { CLASSROOM_TAB_LABELS } from "@/lib/classroom";
-import { loadClassroomToc } from "@/lib/classroom/toc";
+import { loadClassroomToc, findAdjacentArticles } from "@/lib/classroom/toc";
 import { getLang } from "@/lib/i18n-server";
 import { t, CLASSROOM_TAB_LABELS_ZH } from "@/lib/i18n";
 import { Markdown } from "@/components/markdown";
@@ -113,6 +113,11 @@ export default async function ClassroomArticlePage({
   // nav — uncapped (unlike the homepage's preview) since the point is to
   // actually be able to jump to anything from here.
   const toc = await loadClassroomToc(Boolean(session), lang);
+
+  // Previous/next within the article's own section (or its subcategory's
+  // unsectioned bucket) — see findAdjacentArticles's comment for why this
+  // is scoped rather than flattened across the whole classroom.
+  const adjacent = findAdjacentArticles(toc, note.subcategoryId, note.sectionId, slug);
 
   // Content in the requested language, falling back to whatever exists
   // (with a "not translated yet" hint + translate button for the owner).
@@ -334,6 +339,47 @@ export default async function ClassroomArticlePage({
           </div>
         )
       )}
+
+      {(adjacent.prev || adjacent.next) && (
+        <nav
+          aria-label={adjacent.groupName ?? undefined}
+          className="flex items-stretch gap-4 border-t border-border pt-6"
+        >
+          {adjacent.prev ? (
+            <Link
+              href={`/classroom/${adjacent.prev.slug}?lang=${lang}`}
+              className="group flex min-w-0 flex-1 flex-col gap-1 rounded-lg border border-border p-4 text-left transition-colors hover:border-accent"
+            >
+              <span className="flex items-center gap-1.5 text-xs font-medium text-fg-secondary">
+                <ChevronIcon direction="left" />
+                {s.prevArticle}
+              </span>
+              <span className="truncate font-medium text-fg group-hover:text-accent">
+                {adjacent.prev.title}
+              </span>
+            </Link>
+          ) : (
+            <div className="flex-1" />
+          )}
+
+          {adjacent.next ? (
+            <Link
+              href={`/classroom/${adjacent.next.slug}?lang=${lang}`}
+              className="group flex min-w-0 flex-1 flex-col items-end gap-1 rounded-lg border border-border p-4 text-right transition-colors hover:border-accent"
+            >
+              <span className="flex items-center gap-1.5 text-xs font-medium text-fg-secondary">
+                {s.nextArticle}
+                <ChevronIcon direction="right" />
+              </span>
+              <span className="truncate font-medium text-fg group-hover:text-accent">
+                {adjacent.next.title}
+              </span>
+            </Link>
+          ) : (
+            <div className="flex-1" />
+          )}
+        </nav>
+      )}
       </article>
     </div>
   );
@@ -429,6 +475,14 @@ function BookIcon() {
     <svg {...iconProps()}>
       <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
       <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+    </svg>
+  );
+}
+
+function ChevronIcon({ direction }: { direction: "left" | "right" }) {
+  return (
+    <svg {...iconProps("h-3.5 w-3.5 shrink-0")}>
+      <path d={direction === "left" ? "M15 18l-6-6 6-6" : "M9 18l6-6-6-6"} />
     </svg>
   );
 }

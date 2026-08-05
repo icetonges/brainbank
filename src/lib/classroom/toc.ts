@@ -136,3 +136,54 @@ export async function loadClassroomToc(
     })
     .filter((sc) => sc.sections.length > 0 || sc.unsectioned.length > 0);
 }
+
+export interface AdjacentArticles {
+  prev: TocArticle | null;
+  next: TocArticle | null;
+  /** Section name (or subcategory name, for unsectioned articles) the
+   * current article was found in — lets the caller label the nav row
+   * ("More in Agentic AI") without a second lookup. Null if the current
+   * article couldn't be located in `toc` at all (e.g. it's unpublished
+   * and the toc was loaded for a signed-out viewer). */
+  groupName: string | null;
+}
+
+/**
+ * Finds the previous/next article immediately before/after `slug` within
+ * its own section (classroom_sections row, if any) or — for articles with
+ * no section — within its subcategory's unsectioned bucket. Deliberately
+ * scoped to that one group rather than the whole flattened TOC: the
+ * classroom spans many unrelated subcategories, so "next article" should
+ * mean "next in this course/section", not an arbitrary jump into a
+ * different subcategory that happens to sort next alphabetically.
+ *
+ * Relies on `toc` having been loaded without `maxPerGroup` (the article
+ * page's side-nav call already does this) — a capped group would silently
+ * make the true first/last article in a section look like it has no
+ * next/prev.
+ */
+export function findAdjacentArticles(
+  toc: TocSubcategory[],
+  subcategoryId: number | null,
+  sectionId: number | null,
+  slug: string,
+): AdjacentArticles {
+  const none: AdjacentArticles = { prev: null, next: null, groupName: null };
+  if (!subcategoryId) return none;
+
+  const sub = toc.find((s) => s.id === subcategoryId);
+  if (!sub) return none;
+
+  const group = sectionId ? sub.sections.find((s) => s.id === sectionId)?.articles : sub.unsectioned;
+  const groupName = sectionId ? sub.sections.find((s) => s.id === sectionId)?.name ?? null : sub.name;
+  if (!group) return none;
+
+  const idx = group.findIndex((a) => a.slug === slug);
+  if (idx === -1) return { prev: null, next: null, groupName };
+
+  return {
+    prev: idx > 0 ? group[idx - 1] : null,
+    next: idx < group.length - 1 ? group[idx + 1] : null,
+    groupName,
+  };
+}

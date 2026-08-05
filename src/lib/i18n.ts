@@ -108,6 +108,8 @@ const en = {
     translating: "Translating…",
     translatedPrefix: "AI-translated on",
     translatedModelPrefix: "by",
+    prevArticle: "Previous",
+    nextArticle: "Next",
     // composer
     newTitle: "New AI Classroom article",
     newDescription:
@@ -445,6 +447,8 @@ const zh: typeof en = {
     translating: "翻译中…",
     translatedPrefix: "AI 翻译于",
     translatedModelPrefix: "使用",
+    prevArticle: "上一篇",
+    nextArticle: "下一篇",
     newTitle: "新建 AI 课堂文章",
     newDescription:
       "一个输入框搞定一切——撰写或粘贴任意格式的内容、链接、YouTube 视频、图片和文档（pdf、docx、xlsx、csv、pptx、txt、md、json）。网址和文件会自动摄取——只留正文、去除杂讯。你的内容会原样保存；保存后 AI 仅在标题留空时补充标题，并生成学习地图、动手步骤和三大推荐资源。",
