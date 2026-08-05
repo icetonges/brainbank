@@ -6,6 +6,9 @@
     "src/app/api/ai/**": {
       "maxDuration": 500
     },
+    "src/app/api/admin/**": {
+      "maxDuration": 500
+    },
     "src/app/diary/**": {
       "maxDuration": 300
     },
