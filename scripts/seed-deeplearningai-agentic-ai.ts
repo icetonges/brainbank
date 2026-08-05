@@ -1,9 +1,10 @@
 // Seeds the "DeepLearningAI" classroom subcategory with an "Agentic AI"
-// section of 48 bilingual (EN + ZH) knowledge-base pages, organized around
-// Andrew Ng's four agentic design patterns (Reflection, Tool Use, Planning,
-// Multi-Agent Collaboration) — see scripts/seed-data/module-00-foundations.ts
-// for the sourcing note (original content, not transcribed from any paid
-// course; DeepLearning.AI's public course structure is the organizing map).
+// section of 40 bilingual (EN + ZH) knowledge-base pages: Study Plan, then
+// 1.1-5.7, then Glossary, then Capstone — a byte-for-byte copy (English
+// side) of the 40 files in the user's Agentic_AI_Technical_Study_Guide/
+// folder, plus a full Chinese translation of each. See
+// src/lib/seed-data/deeplearningai-agentic-ai/all-pages.ts for how the
+// data was generated.
 //
 // Why a standalone script instead of going through the composer UI
 // (src/app/classroom/actions.ts's publishClassroomArticle): that action
@@ -190,7 +191,10 @@ async function upsertLearningGuide(noteId: number, page: SeedPage) {
 
 async function upsertPage(page: SeedPage, subcategoryId: number, sectionId: number) {
   const slug = pageSlug(page);
-  const title = `${String(page.order).padStart(2, "0")} - ${page.titleEn}`;
+  // titleEn already carries the study guide's own numbering (e.g. "1.1
+  // Course Overview", or a plain title for Study Plan/Glossary/Capstone) —
+  // don't add another "NN - " prefix on top of it.
+  const title = page.titleEn;
 
   const existing = await db.query.notes.findFirst({ where: eq(notes.slug, slug) });
 
@@ -237,7 +241,7 @@ async function upsertPage(page: SeedPage, subcategoryId: number, sectionId: numb
   // button. That keeps the article page from showing a "Translated by
   // <model>" badge that would misdescribe how this text was produced.
   await upsertNoteContent(noteId, "zh", {
-    title: `${String(page.order).padStart(2, "0")} - ${page.titleZh}`,
+    title: page.titleZh,
     bodyMarkdown: page.bodyZh,
     summary: page.summaryZh,
   });

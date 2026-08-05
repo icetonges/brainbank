@@ -1,26 +1,14 @@
-import type { SeedPage } from "./types";
-import { module00Foundations } from "./module-00-foundations";
-import { module01Reflection } from "./module-01-reflection";
-import { module02ToolUse } from "./module-02-tool-use";
-import { module03Planning } from "./module-03-planning";
-import { module04MultiAgent } from "./module-04-multi-agent";
-import { module05Memory } from "./module-05-memory";
-import { module06Frameworks } from "./module-06-frameworks";
-import { module07EvalSafety } from "./module-07-eval-safety";
-
 export type { SeedPage, GuideResource, ClassroomCategory } from "./types";
 
-// All 48 pages for DeepLearningAI > Agentic AI, in display order (1-48).
-// Organized into 8 modules mirroring Andrew Ng's four agentic design
-// patterns (Reflection, Tool Use, Planning, Multi-Agent Collaboration) —
-// see module-00-foundations.ts's header comment for the sourcing note.
-export const ALL_PAGES: SeedPage[] = [
-  ...module00Foundations, // 1-6:   Foundations
-  ...module01Reflection, // 7-11:  Reflection
-  ...module02ToolUse, // 12-18: Tool Use
-  ...module03Planning, // 19-25: Planning
-  ...module04MultiAgent, // 26-32: Multi-Agent Collaboration
-  ...module05Memory, // 33-37: Memory Systems
-  ...module06Frameworks, // 38-42: Frameworks & Tooling
-  ...module07EvalSafety, // 43-48: Evaluation, Safety & Production
-];
+// All 40 pages for DeepLearningAI > Agentic AI, in display order (1-40):
+// Study Plan, then 1.1-5.7 (the study guide's own module/section numbers,
+// preserved as-is in each page's title), then Glossary, then Capstone.
+//
+// bodyEn on every page is a byte-for-byte copy of the corresponding file
+// in the user's Agentic_AI_Technical_Study_Guide/ folder (Study Plan,
+// 01-introduction-to-agentic-workflows/*.md ... 05-highly-autonomous-patterns/*.md,
+// Glossary, Capstone) — see all-pages.ts's header comment for how it was
+// generated. This replaces the earlier, self-authored module-00..07
+// content (left in place below, unused, since files can't be deleted from
+// this workspace) which did not match those source files.
+export { ALL_PAGES } from "./all-pages";

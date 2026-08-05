@@ -1,6 +1,9 @@
 // One-time admin endpoint: seeds the "DeepLearningAI" classroom subcategory
-// with an "Agentic AI" section of 48 bilingual (EN + ZH) pages. This is the
-// same data and the same upsert logic as scripts/seed-deeplearningai-agentic-ai.ts
+// with an "Agentic AI" section of 40 bilingual (EN + ZH) pages — Study
+// Plan, 1.1-5.7, Glossary, Capstone, each an English byte-for-byte copy of
+// the corresponding Agentic_AI_Technical_Study_Guide/ source file plus a
+// full Chinese translation. This is the same data and the same upsert
+// logic as scripts/seed-deeplearningai-agentic-ai.ts
 // (that standalone script hits Neon directly over HTTP from wherever it's
 // run, which can fail on machines with restrictive local networking —
 // firewalls, VPNs, IPv6 DNS quirks, etc.). Running the same logic as a
@@ -19,8 +22,8 @@
 // than duplicating them, so it's safe to re-run after fixing a typo in the
 // seed data and redeploying.
 //
-// Supports optional ?from=N&to=M query params (1-48, inclusive) to seed a
-// subset of pages per request — useful if a single request against all 48
+// Supports optional ?from=N&to=M query params (1-40, inclusive) to seed a
+// subset of pages per request — useful if a single request against all 40
 // pages ever runs long enough to worry about the function's time limit;
 // see maxDuration below and vercel.json's matching entry for this route.
 import { auth } from "@/auth";
@@ -145,7 +148,9 @@ async function upsertLearningGuide(noteId: number, page: SeedPage) {
 
 async function upsertPage(page: SeedPage, subcategoryId: number, sectionId: number) {
   const slug = pageSlug(page);
-  const title = `${String(page.order).padStart(2, "0")} - ${page.titleEn}`;
+  // titleEn already carries the study guide's own numbering (e.g. "1.1
+  // Course Overview") — don't add another "NN - " prefix on top of it.
+  const title = page.titleEn;
 
   const existing = await db.query.notes.findFirst({ where: eq(notes.slug, slug) });
 
@@ -185,7 +190,7 @@ async function upsertPage(page: SeedPage, subcategoryId: number, sectionId: numb
 
   await upsertNoteContent(noteId, "en", { bodyMarkdown: page.bodyEn, summary: page.summaryEn });
   await upsertNoteContent(noteId, "zh", {
-    title: `${String(page.order).padStart(2, "0")} - ${page.titleZh}`,
+    title: page.titleZh,
     bodyMarkdown: page.bodyZh,
     summary: page.summaryZh,
   });
@@ -206,7 +211,7 @@ export async function GET(req: Request) {
 
   const url = new URL(req.url);
   const fromParam = Number(url.searchParams.get("from") ?? "1");
-  const toParam = Number(url.searchParams.get("to") ?? "48");
+  const toParam = Number(url.searchParams.get("to") ?? String(ALL_PAGES.length));
   const from = Number.isFinite(fromParam) ? Math.max(1, Math.floor(fromParam)) : 1;
   const to = Number.isFinite(toParam) ? Math.min(ALL_PAGES.length, Math.floor(toParam)) : ALL_PAGES.length;
 
