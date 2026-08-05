@@ -47,10 +47,17 @@ export async function GET() {
     });
   }
 
-  const toDelete = await db.query.notes.findMany({
+  // LIKE only supports "%"/"_" wildcards, not word boundaries, so
+  // "dlai-agentic-ai-%" would also match the unrelated
+  // "dlai-agentic-ai-lab-*" slugs from the separate "Agentic AI Lab"
+  // section (see seed-deeplearningai-agentic-ai-lab.ts) — filter those
+  // back out in JS rather than trying to encode a boundary in SQL.
+  const LAB_SLUG_PREFIX = "dlai-agentic-ai-lab-";
+  const candidates = await db.query.notes.findMany({
     where: like(notes.slug, `${SLUG_PREFIX}%`),
     columns: { id: true, slug: true, title: true },
   });
+  const toDelete = candidates.filter((row) => !row.slug.startsWith(LAB_SLUG_PREFIX));
 
   for (const row of toDelete) {
     await db.delete(notes).where(eq(notes.id, row.id));
