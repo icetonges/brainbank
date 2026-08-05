@@ -253,7 +253,13 @@ export default async function Home({
                 </Link>
                 <div className="flex flex-col gap-3 bg-bg-elevated p-3">
                   {sc.sections.map((sec, i) => (
-                    <SectionBox key={sec.id} name={sec.name} count={sec.total} tone={sectionTone(i)}>
+                    <SectionBox
+                      key={sec.id}
+                      name={sec.name}
+                      count={sec.total}
+                      tone={sectionTone(i)}
+                      href={`/${sc.slug}?lang=${lang}#section-${sec.id}`}
+                    >
                       {sec.articles.map((a) => (
                         <ArticleRow key={a.slug} slug={a.slug} title={a.title} createdAt={a.createdAt} lang={lang} dateLocale={dateLocale} />
                       ))}
@@ -388,24 +394,42 @@ function SectionBox({
   name,
   count,
   tone,
+  href,
   children,
 }: {
   name: string;
   count: number;
   tone: SectionTone;
+  /** Anchor link to this section's card on its subcategory landing page
+   * (see [subcategorySlug]/page.tsx's `id={`section-${sec.id}`}`). Omitted
+   * for the catch-all "more articles" box, which has no real section id to
+   * link to. */
+  href?: string;
   children: React.ReactNode;
 }) {
+  const header = (
+    <>
+      <h4 className={`flex min-w-0 items-center gap-1.5 truncate text-xs font-semibold uppercase tracking-wide ${tone.text}`}>
+        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tone.dot}`} aria-hidden="true" />
+        <span className="truncate">{name}</span>
+      </h4>
+      <span className={`shrink-0 rounded-full bg-bg-elevated px-2 py-0.5 text-[11px] font-semibold ${tone.text}`}>
+        {count}
+      </span>
+    </>
+  );
   return (
     <div className={`overflow-hidden rounded-lg border border-l-4 border-border ${tone.bar}`}>
-      <div className={`flex items-center justify-between gap-2 px-3 py-2 ${tone.tint}`}>
-        <h4 className={`flex min-w-0 items-center gap-1.5 truncate text-xs font-semibold uppercase tracking-wide ${tone.text}`}>
-          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tone.dot}`} aria-hidden="true" />
-          <span className="truncate">{name}</span>
-        </h4>
-        <span className={`shrink-0 rounded-full bg-bg-elevated px-2 py-0.5 text-[11px] font-semibold ${tone.text}`}>
-          {count}
-        </span>
-      </div>
+      {href ? (
+        <Link
+          href={href}
+          className={`group/sec flex items-center justify-between gap-2 px-3 py-2 transition-colors hover:brightness-125 ${tone.tint}`}
+        >
+          {header}
+        </Link>
+      ) : (
+        <div className={`flex items-center justify-between gap-2 px-3 py-2 ${tone.tint}`}>{header}</div>
+      )}
       <ul className="flex flex-col divide-y divide-border">{children}</ul>
     </div>
   );

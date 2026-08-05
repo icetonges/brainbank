@@ -44,10 +44,13 @@ export function ClassroomSideNav({
               const tone = sectionTone(i);
               return (
                 <div key={sec.id} className="flex flex-col gap-0.5">
-                  <p className={`flex items-center gap-1.5 truncate px-2 text-xs font-medium uppercase tracking-wide ${tone.text}`}>
+                  <Link
+                    href={`/${sc.slug}?lang=${lang}#section-${sec.id}`}
+                    className={`group/sec flex items-center gap-1.5 truncate px-2 text-xs font-medium uppercase tracking-wide transition-colors hover:text-accent ${tone.text}`}
+                  >
                     <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tone.dot}`} aria-hidden="true" />
-                    <span className="truncate">{sec.name}</span>
-                  </p>
+                    <span className="truncate group-hover/sec:underline">{sec.name}</span>
+                  </Link>
                   {sec.articles.map((a) => (
                     <ArticleLink key={a.slug} slug={a.slug} title={a.title} currentSlug={currentSlug} lang={lang} />
                   ))}

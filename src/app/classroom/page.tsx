@@ -312,15 +312,16 @@ export default async function ClassroomPage({
                         key={sec.id}
                         className={`overflow-hidden rounded-xl border border-border border-l-4 ${tone.bar}`}
                       >
-                        <h3
-                          className={`flex items-center gap-2 ${tone.tint} px-4 py-2 text-sm font-semibold ${tone.text}`}
+                        <Link
+                          href={`/${group.slug}?lang=${lang}#section-${sec.id}`}
+                          className={`group/sec flex items-center gap-2 ${tone.tint} px-4 py-2 text-sm font-semibold ${tone.text} transition-colors hover:brightness-125`}
                         >
                           <span className={`h-1.5 w-1.5 rounded-full ${tone.dot}`} aria-hidden />
-                          {sec.name}
+                          <span className="truncate group-hover/sec:underline">{sec.name}</span>
                           <span className="ml-auto text-xs font-normal opacity-80">
                             {sec.articles.length}
                           </span>
-                        </h3>
+                        </Link>
                         <ul className="flex flex-col divide-y divide-border">
                           {sec.articles.map((a) => (
                             <ArticleRow key={a.slug} article={a} lang={lang} dateLocale={dateLocale} />
