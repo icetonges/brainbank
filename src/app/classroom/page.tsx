@@ -265,12 +265,17 @@ export default async function ClassroomPage({
         </div>
       ) : (
         <div className="flex flex-col gap-6">
-          {/* Grid rather than one full-width column per subcategory — with
-              several subcategories on screen at once, a single column
-              meant a lot of scrolling to see more than one or two of them.
-              Only the subcategory cards are grid items; "uncategorized"
-              below stays a full-width block of its own. */}
-          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          {/* CSS multi-column (masonry-style) rather than CSS grid. With
+              several subcategories on screen at once, a single column meant
+              a lot of scrolling to see more than one or two of them — but
+              grid-cols-3 stretches every row to the tallest card in it, so
+              a subcategory with just a couple articles ends up with a
+              large dead gap under it whenever it shares a row with a much
+              bigger one (e.g. DeepLearningAI). Columns give each card its
+              own independent height instead. Only the subcategory cards
+              flow into columns; "uncategorized" below stays a full-width
+              block of its own. */}
+          <div className="columns-1 gap-6 sm:columns-2 lg:columns-3">
           {subcategoryGroups.map((group) => {
             const total =
               group.sections.reduce((n, sec) => n + sec.articles.length, 0) + group.unsectioned.length;
@@ -282,7 +287,7 @@ export default async function ClassroomPage({
                  without reading a word. */
               <section
                 key={group.id}
-                className="flex flex-col overflow-hidden rounded-2xl border border-border bg-bg-elevated shadow-sm"
+                className="mb-6 flex break-inside-avoid flex-col overflow-hidden rounded-2xl border border-border bg-bg-elevated shadow-sm"
               >
                 <Link
                   href={`/${group.slug}?lang=${lang}`}

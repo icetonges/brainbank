@@ -227,9 +227,19 @@ export default async function Home({
           </Link>
         </div>
         {data && data.subcategoryToc.length > 0 ? (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          // CSS multi-column (masonry-style) rather than CSS grid — see the
+          // matching fix on [subcategorySlug]/page.tsx for the full
+          // rationale. With grid-cols-3, a short subcategory (e.g. 1
+          // article) sharing a row with a much longer one (e.g. 47
+          // articles) leaves a large dead gap under the short card. Columns
+          // instead give each card its own independent column height, so a
+          // short card's box just ends where its content ends.
+          <div className="columns-1 gap-4 sm:columns-2 lg:columns-3">
             {data.subcategoryToc.map((sc) => (
-              <div key={sc.id} className="overflow-hidden rounded-xl border border-border">
+              <div
+                key={sc.id}
+                className="mb-4 break-inside-avoid overflow-hidden rounded-xl border border-border"
+              >
                 <Link
                   href={`/${sc.slug}`}
                   className="flex items-center justify-between gap-2 bg-bg px-4 py-3 hover:bg-bg/80 transition-colors"
