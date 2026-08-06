@@ -39,7 +39,19 @@ function hastText(node: HastNode | undefined): string {
  * the app's theme tokens. Tailwind v4 without the typography plugin, so
  * each element gets its styles here instead of a `prose` class.
  */
-export function Markdown({ children }: { children: string }) {
+export function Markdown({
+  children,
+  indentParagraphs = false,
+}: {
+  children: string;
+  /** First-line-indents every paragraph (book/manuscript style) instead of
+   *  relying on blank-line spacing alone to signal "new paragraph" — the
+   *  convention long-form reading and journaling apps use so a wall of
+   *  prose doesn't read as one undifferentiated block. Off by default so
+   *  it doesn't change existing renderings (classroom articles, chat) that
+   *  weren't asking for it. */
+  indentParagraphs?: boolean;
+}) {
   return (
     // Serif body (the Claude.ai long-form reading style — see the font
     // pairing note in layout.tsx) with sans-serif headings for contrast;
@@ -64,7 +76,7 @@ export function Markdown({ children }: { children: string }) {
           h3: (p) => (
             <h4 className="mt-4 font-sans text-base font-semibold text-fg first:mt-0" {...dom(p)} />
           ),
-          p: (p) => <p {...dom(p)} />,
+          p: (p) => <p className={indentParagraphs ? "indent-8" : undefined} {...dom(p)} />,
           strong: (p) => <strong className="font-semibold text-fg" {...dom(p)} />,
           em: (p) => <em className="italic" {...dom(p)} />,
           a: (p) => (

@@ -166,7 +166,7 @@ export default async function DiaryEntryPage({
 
       {content?.bodyMarkdown ? (
         <section className="rounded-xl border border-border bg-bg-elevated p-6">
-          <Markdown>{content.bodyMarkdown}</Markdown>
+          <Markdown indentParagraphs>{content.bodyMarkdown}</Markdown>
         </section>
       ) : (
         <p className="text-fg-secondary">{s.noBody}</p>

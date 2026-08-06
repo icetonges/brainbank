@@ -9,6 +9,7 @@ import { attachMediaAction } from "@/app/notes/[slug]/actions";
 import { createDiaryDraft, saveDiaryDraft, saveDiaryEntry } from "@/app/diary/actions";
 import { LIFE_AREAS } from "@/lib/knowledge/taxonomy";
 import { t, type Lang } from "@/lib/i18n";
+import { Markdown } from "@/components/markdown";
 
 const turndown = new TurndownService({
   headingStyle: "atx",
@@ -67,6 +68,11 @@ export function DiaryComposer({
   const [pickedTags, setPickedTags] = useState<string[]>([]);
   const [showScratch, setShowScratch] = useState(false);
   const [draftStatus, setDraftStatus] = useState<"idle" | "saving" | "saved">("idle");
+  // Mirrors bodyRef's value into React state so the word count and the
+  // Preview tab can read it — the textarea itself stays uncontrolled
+  // (see insertAtCursor etc.) so typing doesn't fight cursor position.
+  const [bodyText, setBodyText] = useState("");
+  const [bodyMode, setBodyMode] = useState<"write" | "preview">("write");
 
   function insertAtCursor(
     el: HTMLTextAreaElement | null,
@@ -184,6 +190,123 @@ export function DiaryComposer({
     el.setSelectionRange(urlStart, urlStart + 3);
   }
 
+  /** Every helper above mutates `el.value` directly (uncontrolled, to keep
+   *  cursor placement fast and simple) — none of that goes through React's
+   *  onChange, so the word count, the live preview, and autosave would all
+   *  go stale after a toolbar click, a keyboard shortcut, an image insert,
+   *  or a rich paste. Call this after any of them touch the body field. */
+  function notifyEdited(el: HTMLTextAreaElement | null) {
+    if (el && el === bodyRef.current) setBodyText(el.value);
+    scheduleAutosave();
+  }
+
+  const AUTO_PAIRS: Record<string, string> = { "(": ")", "[": "]", '"': '"', "'": "'" };
+  const AUTO_CLOSERS = new Set(Object.values(AUTO_PAIRS));
+
+  /** Everything a plain markdown textarea is missing next to a real editor:
+   *  ⌘/Ctrl+B/I/K for the two most-reached-for marks and links, Enter that
+   *  continues (or, on an empty item, exits) a bullet/numbered/checklist
+   *  line, and auto-closing "() [] "" ''" so half-typed pairs don't linger
+   *  unclosed in a diary entry nobody proofreads. */
+  function handleBodyKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    const el = e.currentTarget;
+    const mod = e.metaKey || e.ctrlKey;
+
+    if (mod && !e.shiftKey && !e.altKey) {
+      const key = e.key.toLowerCase();
+      if (key === "b") {
+        e.preventDefault();
+        wrapSelection(el, "**", "**", "bold text");
+        notifyEdited(el);
+        return;
+      }
+      if (key === "i") {
+        e.preventDefault();
+        wrapSelection(el, "_", "_", "italic text");
+        notifyEdited(el);
+        return;
+      }
+      if (key === "k") {
+        e.preventDefault();
+        insertLink(el);
+        notifyEdited(el);
+        return;
+      }
+    }
+
+    if (e.key === "Enter" && !e.shiftKey && !mod) {
+      const { selectionStart: pos, value } = el;
+      const lineStart = value.lastIndexOf("\n", pos - 1) + 1;
+      const nextBreak = value.indexOf("\n", pos);
+      const lineEnd = nextBreak === -1 ? value.length : nextBreak;
+      const line = value.slice(lineStart, lineEnd);
+
+      const checklist = line.match(/^(\s*)([-*+])\s\[[ xX]\]\s/);
+      const bullet = !checklist ? line.match(/^(\s*)([-*+])\s/) : null;
+      const ordered = !checklist && !bullet ? line.match(/^(\s*)(\d+)([.)])\s/) : null;
+      const match = checklist ?? bullet ?? ordered;
+
+      if (match) {
+        e.preventDefault();
+        const isEmptyItem = line.slice(match[0].length).trim() === "";
+        if (isEmptyItem) {
+          // Second Enter on a blank list line exits the list instead of
+          // piling up empty bullets forever — same as GitHub/Notion/Typora.
+          el.value = value.slice(0, lineStart) + value.slice(lineEnd);
+          el.setSelectionRange(lineStart, lineStart);
+        } else {
+          const indent = match[1];
+          const prefix = checklist
+            ? `${indent}${checklist[2]} [ ] `
+            : bullet
+              ? `${indent}${bullet[2]} `
+              : `${indent}${Number(ordered![2]) + 1}${ordered![3]} `;
+          const insertion = `\n${prefix}`;
+          el.value = value.slice(0, pos) + insertion + value.slice(pos);
+          const newPos = pos + insertion.length;
+          el.setSelectionRange(newPos, newPos);
+        }
+        el.focus();
+        notifyEdited(el);
+        return;
+      }
+    }
+
+    if (!mod && !e.altKey && (e.key in AUTO_PAIRS || AUTO_CLOSERS.has(e.key))) {
+      const { selectionStart: start, selectionEnd: end, value } = el;
+      const hasSelection = start !== end;
+
+      if (hasSelection && e.key in AUTO_PAIRS) {
+        e.preventDefault();
+        const close = AUTO_PAIRS[e.key];
+        const selected = value.slice(start, end);
+        el.value = value.slice(0, start) + e.key + selected + close + value.slice(end);
+        el.setSelectionRange(start + 1, start + 1 + selected.length);
+        el.focus();
+        notifyEdited(el);
+        return;
+      }
+
+      // Typing a closer right where one we already auto-inserted is
+      // sitting — step over it instead of doubling up, e.g. `(text|)` + ")".
+      if (!hasSelection && AUTO_CLOSERS.has(e.key) && value[start] === e.key) {
+        e.preventDefault();
+        el.setSelectionRange(start + 1, start + 1);
+        return;
+      }
+
+      if (!hasSelection && e.key in AUTO_PAIRS) {
+        e.preventDefault();
+        const close = AUTO_PAIRS[e.key];
+        el.value = value.slice(0, start) + e.key + close + value.slice(start);
+        el.setSelectionRange(start + 1, start + 1);
+        el.focus();
+        notifyEdited(el);
+        return;
+      }
+    }
+  }
+
   async function ensureDraft() {
     if (draft) return draft;
     const created = await createDiaryDraft();
@@ -261,6 +384,7 @@ export function DiaryComposer({
         mimeType: file.type || "application/octet-stream",
       });
       insertAtCursor(target, `\n![${file.name}](${url})\n`, insertStart, insertEnd);
+      notifyEdited(target);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Image upload failed");
     } finally {
@@ -297,6 +421,7 @@ export function DiaryComposer({
         const start = el?.selectionStart ?? el?.value.length ?? 0;
         const end = el?.selectionEnd ?? start;
         insertAtCursor(el, turndown.turndown(html).trim(), start, end);
+        notifyEdited(el);
       }
     };
   }
@@ -306,6 +431,17 @@ export function DiaryComposer({
       prev.includes(slug) ? prev.filter((t) => t !== slug) : [...prev, slug],
     );
   }
+
+  // Word/reading-time counter — counts CJK characters instead of
+  // whitespace-split words once they outnumber them, since Chinese/Japanese
+  // prose has no spaces between words and a word count of "3" for three
+  // paragraphs would be useless.
+  const trimmedBody = bodyText.trim();
+  const wordCount = trimmedBody ? trimmedBody.split(/\s+/).length : 0;
+  const cjkCharCount = (trimmedBody.match(/[一-鿿぀-ヿ가-힯]/g) ?? []).length;
+  const isCjkHeavy = cjkCharCount > wordCount;
+  const bodyCount = isCjkHeavy ? cjkCharCount : wordCount;
+  const readingMinutes = bodyCount > 0 ? Math.max(1, Math.round(bodyCount / (isCjkHeavy ? 300 : 200))) : 0;
 
   return (
     <form
@@ -352,26 +488,41 @@ export function DiaryComposer({
         </select>
       </div>
 
-      {/* Formatting toolbar — inserts markdown syntax at the cursor rather
-          than rendering WYSIWYG, so the body stays a plain textarea (and
-          plain `body` form field) underneath. */}
-      <div className="flex flex-wrap gap-1 rounded-t-xl border border-b-0 border-border bg-bg-elevated px-2 py-1.5">
-        <ToolbarButton label="B" title={s.toolbarBold} className="font-bold" onClick={() => wrapSelection(bodyRef.current, "**", "**", "bold text")} />
-        <ToolbarButton label="I" title={s.toolbarItalic} className="italic" onClick={() => wrapSelection(bodyRef.current, "_", "_", "italic text")} />
-        <ToolbarDivider />
-        <ToolbarButton label="H2" title={s.toolbarH2} onClick={() => toggleLinePrefix(bodyRef.current, "## ")} />
-        <ToolbarButton label="H3" title={s.toolbarH3} onClick={() => toggleLinePrefix(bodyRef.current, "### ")} />
-        <ToolbarDivider />
-        <ToolbarButton label="―" title={s.toolbarDivider} onClick={() => insertDivider(bodyRef.current)} />
-        <ToolbarButton label="{ }" title={s.toolbarCode} onClick={() => insertCodeBlock(bodyRef.current)} />
-        <ToolbarDivider />
-        <ToolbarButton label="≡" title={s.toolbarBulletList} onClick={() => toggleLinePrefix(bodyRef.current, "- ")} />
-        <ToolbarButton label="1." title={s.toolbarNumberedList} onClick={() => toggleOrderedList(bodyRef.current)} />
-        <ToolbarButton label="″" title={s.toolbarQuote} onClick={() => toggleLinePrefix(bodyRef.current, "> ")} />
-        <ToolbarButton label="☐" title={s.toolbarChecklist} onClick={() => toggleLinePrefix(bodyRef.current, "- [ ] ")} />
-        <ToolbarDivider />
-        <ToolbarButton label="🔗" title={s.toolbarLink} onClick={() => insertLink(bodyRef.current)} />
-        <ToolbarButton label="🖼" title={s.addImage} onClick={() => fileInputRef.current?.click()} />
+      {/* Write/Preview tabs + formatting toolbar — the toolbar inserts
+          markdown syntax at the cursor rather than rendering WYSIWYG, so
+          the body stays a plain textarea (and plain `body` form field)
+          underneath; Preview renders that markdown for real, first-line
+          paragraph indents and all, so "is this a new paragraph" is never
+          a guess. */}
+      <div className="flex flex-wrap items-center justify-between gap-1 rounded-t-xl border border-b-0 border-border bg-bg-elevated px-2 py-1.5">
+        <div className="flex gap-1">
+          <TabButton active={bodyMode === "write"} onClick={() => setBodyMode("write")}>
+            {s.tabWrite}
+          </TabButton>
+          <TabButton active={bodyMode === "preview"} onClick={() => setBodyMode("preview")}>
+            {s.tabPreview}
+          </TabButton>
+        </div>
+        {bodyMode === "write" && (
+          <div className="flex flex-wrap gap-1">
+            <ToolbarButton label="B" title={`${s.toolbarBold} (Ctrl/⌘+B)`} className="font-bold" onClick={() => { wrapSelection(bodyRef.current, "**", "**", "bold text"); notifyEdited(bodyRef.current); }} />
+            <ToolbarButton label="I" title={`${s.toolbarItalic} (Ctrl/⌘+I)`} className="italic" onClick={() => { wrapSelection(bodyRef.current, "_", "_", "italic text"); notifyEdited(bodyRef.current); }} />
+            <ToolbarDivider />
+            <ToolbarButton label="H2" title={s.toolbarH2} onClick={() => { toggleLinePrefix(bodyRef.current, "## "); notifyEdited(bodyRef.current); }} />
+            <ToolbarButton label="H3" title={s.toolbarH3} onClick={() => { toggleLinePrefix(bodyRef.current, "### "); notifyEdited(bodyRef.current); }} />
+            <ToolbarDivider />
+            <ToolbarButton label="―" title={s.toolbarDivider} onClick={() => { insertDivider(bodyRef.current); notifyEdited(bodyRef.current); }} />
+            <ToolbarButton label="{ }" title={s.toolbarCode} onClick={() => { insertCodeBlock(bodyRef.current); notifyEdited(bodyRef.current); }} />
+            <ToolbarDivider />
+            <ToolbarButton label="≡" title={s.toolbarBulletList} onClick={() => { toggleLinePrefix(bodyRef.current, "- "); notifyEdited(bodyRef.current); }} />
+            <ToolbarButton label="1." title={s.toolbarNumberedList} onClick={() => { toggleOrderedList(bodyRef.current); notifyEdited(bodyRef.current); }} />
+            <ToolbarButton label="″" title={s.toolbarQuote} onClick={() => { toggleLinePrefix(bodyRef.current, "> "); notifyEdited(bodyRef.current); }} />
+            <ToolbarButton label="☐" title={s.toolbarChecklist} onClick={() => { toggleLinePrefix(bodyRef.current, "- [ ] "); notifyEdited(bodyRef.current); }} />
+            <ToolbarDivider />
+            <ToolbarButton label="🔗" title={`${s.toolbarLink} (Ctrl/⌘+K)`} onClick={() => { insertLink(bodyRef.current); notifyEdited(bodyRef.current); }} />
+            <ToolbarButton label="🖼" title={s.addImage} onClick={() => fileInputRef.current?.click()} />
+          </div>
+        )}
       </div>
       <textarea
         ref={bodyRef}
@@ -388,9 +539,22 @@ export function DiaryComposer({
           handleFiles(files, bodyRef.current);
         }}
         onPaste={pasteHandler(() => bodyRef.current)}
-        onChange={scheduleAutosave}
-        className="min-h-[42vh] flex-1 resize-y rounded-b-xl border border-border bg-bg-elevated p-5 font-serif text-[1.0625rem] leading-relaxed text-fg outline-none placeholder:text-fg-secondary/60 focus:border-accent"
+        onKeyDown={handleBodyKeyDown}
+        onChange={(e) => {
+          setBodyText(e.target.value);
+          scheduleAutosave();
+        }}
+        className={`min-h-[42vh] flex-1 resize-y rounded-b-xl border border-border bg-bg-elevated p-5 font-serif text-[1.0625rem] leading-relaxed text-fg outline-none placeholder:text-fg-secondary/60 focus:border-accent ${bodyMode !== "write" ? "hidden" : ""}`}
       />
+      {bodyMode === "preview" && (
+        <div className="min-h-[42vh] flex-1 overflow-y-auto rounded-b-xl border border-border bg-bg-elevated p-5">
+          {bodyText.trim() ? (
+            <Markdown indentParagraphs>{bodyText}</Markdown>
+          ) : (
+            <p className="text-fg-secondary">{s.previewEmpty}</p>
+          )}
+        </div>
+      )}
 
       {/* Scratch pad — collapsed by default so the main box stays the
           obvious place to write. Its content is mined for knowledge but
@@ -512,6 +676,8 @@ export function DiaryComposer({
         </label>
 
         <span className="text-xs text-fg-secondary">
+          {bodyCount > 0 &&
+            `${bodyCount} ${isCjkHeavy ? s.charCount : s.wordCount} · ${readingMinutes} ${s.minRead} · `}
           {draftStatus === "saving" ? s.draftSaving : draftStatus === "saved" ? s.draftSaved : s.autoHint}
         </span>
         {error && <p className="text-sm text-danger">{error}</p>}
@@ -560,4 +726,27 @@ function ToolbarButton({
 
 function ToolbarDivider() {
   return <div className="mx-0.5 my-1 w-px bg-border" aria-hidden />;
+}
+
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`rounded-md px-3 py-1 text-sm font-medium transition-colors ${
+        active ? "bg-bg text-fg shadow-sm" : "text-fg-secondary hover:text-accent"
+      }`}
+    >
+      {children}
+    </button>
+  );
 }
