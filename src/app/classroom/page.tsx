@@ -88,6 +88,13 @@ interface SubcategoryGroup {
   unsectioned: ArticleItem[];
 }
 
+interface AudiobookItem {
+  slug: string;
+  title: string;
+  status: string;
+  languages: { lang: string; generatedAt: Date }[];
+}
+
 export default async function ClassroomPage({
   searchParams,
 }: {
@@ -196,6 +203,48 @@ export default async function ClassroomPage({
     loadError = true;
   }
 
+  // Every article that has a generated audiobook, in any language —
+  // audioGeneratedAt is only ever set by a successful
+  // generateArticleAudioAction run (audio-actions.ts), so it's a reliable
+  // "has audio" flag without needing to inspect the jsonb segments column
+  // itself. Grouped by article since one note can have both an English
+  // and a Chinese audiobook (two note_content rows). Own try/catch so a
+  // problem here can't take down the rest of the page — this section is
+  // additive, not load-bearing for the classroom itself.
+  const audiobooks: AudiobookItem[] = [];
+  try {
+    const audiobookRows = await db
+      .select({
+        slug: notes.slug,
+        title: notes.title,
+        status: notes.status,
+        contentLanguage: noteContent.language,
+        audioGeneratedAt: noteContent.audioGeneratedAt,
+      })
+      .from(noteContent)
+      .innerJoin(notes, eq(noteContent.noteId, notes.id))
+      .where(isNotNull(noteContent.audioGeneratedAt))
+      .orderBy(desc(noteContent.audioGeneratedAt));
+
+    const visibleAudiobookRows = session
+      ? audiobookRows
+      : audiobookRows.filter((r) => r.status === "published");
+
+    const audiobookMap = new Map<string, AudiobookItem>();
+    for (const r of visibleAudiobookRows) {
+      if (!r.audioGeneratedAt) continue;
+      let item = audiobookMap.get(r.slug);
+      if (!item) {
+        item = { slug: r.slug, title: r.title, status: r.status, languages: [] };
+        audiobookMap.set(r.slug, item);
+      }
+      item.languages.push({ lang: r.contentLanguage, generatedAt: r.audioGeneratedAt });
+    }
+    audiobooks.push(...audiobookMap.values());
+  } catch (err) {
+    console.error("Failed to load classroom audiobooks:", err);
+  }
+
   const isEmpty = subcategoryGroups.length === 0 && uncategorized.length === 0;
 
   return (
@@ -214,6 +263,40 @@ export default async function ClassroomPage({
           </Link>
         )}
       </div>
+
+      {audiobooks.length > 0 && (
+        <section className="flex flex-col gap-3 rounded-2xl border border-border bg-bg-elevated p-4">
+          <h2 className="flex items-center gap-2 text-lg font-semibold text-fg">
+            🔊 {s.audiobooksSectionTitle}
+          </h2>
+          <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {audiobooks.map((a) => (
+              <li key={a.slug}>
+                <Link
+                  href={`/classroom/${a.slug}?lang=${a.languages[0].lang}`}
+                  className="group flex flex-col gap-1.5 rounded-xl border border-border p-3 transition-colors hover:border-accent"
+                >
+                  <span className="line-clamp-1 font-medium text-fg transition-colors group-hover:text-accent">
+                    {a.title}
+                  </span>
+                  <span className="flex items-center gap-1.5 text-xs text-fg-secondary">
+                    {a.languages.map((l) => (
+                      <span
+                        key={l.lang}
+                        className="rounded-full border border-border px-1.5 py-0.5 font-medium"
+                      >
+                        {l.lang === "zh" ? "中文" : "EN"}
+                      </span>
+                    ))}
+                    {a.status === "private" && <span>🔒 {s.private}</span>}
+                    {a.status === "draft" && <span>{s.draft}</span>}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {/* Pill tabs — the active subtab is a solid accent chip instead of a
           thin underline, so where you are is visible at a glance. */}

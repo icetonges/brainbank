@@ -10,27 +10,35 @@ export interface ListenableArticleStrings {
   paragraphOf: string; // e.g. "Paragraph {n} of {total}" with literal {n}/{total}
   audioPrev: string;
   audioNext: string;
-  hoverHint: string;
+  clickHint: string;
 }
 
-/** Renders an article as a sequence of independently-playable blocks:
- *  hovering a paragraph/heading/list that has generated audio starts
- *  reading it, and — like a real audiobook, not a series of disconnected
- *  clips — playback keeps advancing through the following blocks on its
- *  own once started, until you hover a different block (jump there
- *  instead) or reach the end. A transport bar at the top covers touch
- *  devices and anyone who'd rather press play than hover: "Paragraph N of
- *  M" counts speakable paragraphs, not raw audio files (a single long
- *  paragraph can be split across more than one file — see
- *  classroom/audio-actions.ts's splitLongText — but that's an
- *  implementation detail the reader shouldn't have to count through).
+/**
+ * Renders an article as a sequence of independently-playable blocks.
+ * Nothing ever plays on its own — every clip starts from an explicit
+ * click, never a hover or a page load:
  *
- *  Each block renders through its own <Markdown> call rather than one
- *  call for the whole article, which is what makes per-block hover
- *  targeting possible — the tradeoff is that Markdown's `first:mt-0`
- *  heading-spacing rule now fires on every block (each is the sole child
- *  of its own wrapper), so this component restores a heading's usual
- *  extra top margin itself via block.type instead. */
+ *  - Clicking a paragraph/heading/list that has generated audio plays
+ *    JUST that block (and stops when it ends — it does not continue into
+ *    the next paragraph, since a single click on one paragraph shouldn't
+ *    silently turn into listening to the whole rest of the article).
+ *  - The "Play article aloud" transport button is the one control that
+ *    plays continuously, advancing through the following blocks the way
+ *    an audiobook does — but even that only starts because you clicked
+ *    it. Prev/Next also stay in this continuous mode.
+ *
+ * "Paragraph N of M" counts speakable paragraphs, not raw audio files (a
+ * single long paragraph can be split across more than one file — see
+ * classroom/audio-actions.ts's splitLongText — but that's an
+ * implementation detail the reader shouldn't have to count through).
+ *
+ * Each block renders through its own <Markdown> call rather than one call
+ * for the whole article, which is what makes per-block click targeting
+ * possible — the tradeoff is that Markdown's `first:mt-0` heading-spacing
+ * rule now fires on every block (each is the sole child of its own
+ * wrapper), so this component restores a heading's usual extra top margin
+ * itself via block.type instead.
+ */
 export function ListenableArticle({
   blocks,
   segmentsByBlock,
@@ -50,6 +58,10 @@ export function ListenableArticle({
   const [spinePos, setSpinePos] = useState(0); // position within `spine`
   const [pieceIndex, setPieceIndex] = useState(0); // which url within that block's own array
   const [isPlaying, setIsPlaying] = useState(false);
+  // Whether reaching the end of the current block should advance into the
+  // next one (the transport bar's Play/Prev/Next) or just stop (a click on
+  // one specific paragraph) — see the component comment above.
+  const [continuous, setContinuous] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
 
   const hasAudio = spine.length > 0;
@@ -57,17 +69,21 @@ export function ListenableArticle({
   const currentUrls = currentBlockIndex !== null ? segmentsByBlock[currentBlockIndex] : undefined;
   const currentUrl = currentUrls?.[pieceIndex];
 
-  function playFromSpine(pos: number) {
+  function playFromSpine(pos: number, opts: { continuous: boolean }) {
     setSpinePos(pos);
     setPieceIndex(0);
+    setContinuous(opts.continuous);
     setIsPlaying(true);
   }
 
-  function handleHover(blockIndex: number) {
+  /** A click on one paragraph plays only that paragraph — deliberately
+   *  NOT the same "keep going" behavior as the transport bar's Play
+   *  button, so clicking a single paragraph to hear it can't turn into
+   *  the whole rest of the article playing without you asking for that. */
+  function handleBlockClick(blockIndex: number) {
     const pos = spine.indexOf(blockIndex);
-    if (pos === -1) return; // no audio for this block — leave playback alone
-    if (pos === spinePos && isPlaying) return; // already reading this one
-    playFromSpine(pos);
+    if (pos === -1) return; // no audio for this block
+    playFromSpine(pos, { continuous: false });
   }
 
   function handleEnded() {
@@ -76,8 +92,8 @@ export function ListenableArticle({
       setPieceIndex((i) => i + 1);
       return;
     }
-    if (spinePos + 1 < spine.length) {
-      playFromSpine(spinePos + 1);
+    if (continuous && spinePos + 1 < spine.length) {
+      playFromSpine(spinePos + 1, { continuous: true });
       return;
     }
     setIsPlaying(false);
@@ -87,11 +103,17 @@ export function ListenableArticle({
     if (isPlaying) {
       audioRef.current?.pause();
       setIsPlaying(false);
-    } else if (currentUrl) {
+      return;
+    }
+    if (currentUrl) {
+      // Resuming (or restarting) via the dedicated Play button always
+      // means "keep going from here," even if the paused clip was
+      // originally started as a single-paragraph click.
+      setContinuous(true);
       setIsPlaying(true);
       audioRef.current?.play().catch(() => {});
     } else if (hasAudio) {
-      playFromSpine(0);
+      playFromSpine(0, { continuous: true });
     }
   }
 
@@ -113,7 +135,7 @@ export function ListenableArticle({
           <button
             type="button"
             disabled={spinePos === 0}
-            onClick={() => playFromSpine(Math.max(0, spinePos - 1))}
+            onClick={() => playFromSpine(Math.max(0, spinePos - 1), { continuous: true })}
             className="rounded px-2 py-1 text-fg-secondary hover:bg-bg hover:text-accent disabled:opacity-30"
           >
             ‹ {s.audioPrev}
@@ -122,19 +144,22 @@ export function ListenableArticle({
           <button
             type="button"
             disabled={spinePos === spine.length - 1}
-            onClick={() => playFromSpine(Math.min(spine.length - 1, spinePos + 1))}
+            onClick={() => playFromSpine(Math.min(spine.length - 1, spinePos + 1), { continuous: true })}
             className="rounded px-2 py-1 text-fg-secondary hover:bg-bg hover:text-accent disabled:opacity-30"
           >
             {s.audioNext} ›
           </button>
-          <span className="ml-auto hidden text-xs text-fg-secondary sm:inline">{s.hoverHint}</span>
+          <span className="ml-auto hidden text-xs text-fg-secondary sm:inline">{s.clickHint}</span>
         </div>
       )}
 
       {/* One shared, hidden <audio> element reused across every block —
           same pattern as the /llm page's per-message play button — rather
           than an <audio> per block, so switching blocks is just a src
-          swap instead of juggling N media elements. */}
+          swap instead of juggling N media elements. autoPlay only fires
+          here because `isPlaying` can only become true from a click
+          handler above (never a hover, never on mount) — see the
+          component comment. */}
       {currentUrl && (
         <audio
           ref={audioRef}
@@ -152,21 +177,32 @@ export function ListenableArticle({
         {blocks.map((block) => {
           const active = currentBlockIndex === block.index && isPlaying;
           const listenable = (segmentsByBlock[block.index]?.length ?? 0) > 0;
+          const headingSpacing = block.type === "heading" ? "mt-3 first:mt-0" : "";
+          if (!listenable) {
+            return (
+              <div key={block.index} className={headingSpacing || undefined}>
+                <Markdown>{block.markdown}</Markdown>
+              </div>
+            );
+          }
           return (
             <div
               key={block.index}
-              onMouseEnter={() => handleHover(block.index)}
-              className={
-                listenable
-                  ? `-mx-2 cursor-pointer rounded-md border-l-2 px-2 py-0.5 transition-colors ${
-                      active
-                        ? "border-accent bg-accent/5"
-                        : "border-transparent hover:border-accent/40 hover:bg-bg-elevated/60"
-                    } ${block.type === "heading" ? "mt-3 first:mt-0" : ""}`
-                  : block.type === "heading"
-                    ? "mt-3 first:mt-0"
-                    : undefined
-              }
+              role="button"
+              tabIndex={0}
+              onClick={() => handleBlockClick(block.index)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  handleBlockClick(block.index);
+                }
+              }}
+              aria-pressed={active}
+              className={`-mx-2 cursor-pointer rounded-md border-l-2 px-2 py-0.5 transition-colors ${
+                active
+                  ? "border-accent bg-accent/5"
+                  : "border-accent/20 hover:border-accent/50 hover:bg-bg-elevated/60"
+              } ${headingSpacing}`}
             >
               <Markdown>{block.markdown}</Markdown>
             </div>

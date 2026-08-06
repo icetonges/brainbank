@@ -82,7 +82,18 @@ export async function generateArticleAudioAction(
 ) {
   await requireOwner();
 
-  const voice = (formData.get("voice") as string | null)?.trim() || undefined;
+  // Resolved ONCE per generation run and reused for every block's TTS
+  // call below — this was already true before, but is worth stating
+  // explicitly: if this ever ends up undefined (no dropdown selection AND
+  // no TTS_DEFAULT_VOICE configured), whatever voice agent-server picks
+  // when `voice` is omitted is entirely up to it. If that's a random
+  // pick per call rather than a stable default, the symptom is an
+  // audiobook that sounds like a different narrator every paragraph —
+  // set TTS_DEFAULT_VOICE (or pick one from the dropdown, once
+  // TTS_VOICES is configured) to force every call in this run onto the
+  // same explicit voice id and rule that out.
+  const voice =
+    (formData.get("voice") as string | null)?.trim() || process.env.TTS_DEFAULT_VOICE || undefined;
 
   const note = await db.query.notes.findFirst({ where: eq(notes.id, noteId) });
   if (!note) throw new Error("Article not found");

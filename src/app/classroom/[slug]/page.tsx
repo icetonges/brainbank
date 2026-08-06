@@ -355,7 +355,7 @@ export default async function ClassroomArticlePage({
               paragraphOf: s.paragraphOf,
               audioPrev: s.audioPrev,
               audioNext: s.audioNext,
-              hoverHint: s.hoverHint,
+              clickHint: s.clickHint,
             }}
           />
           {hasAudio && content?.audioVoice && (
