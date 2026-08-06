@@ -197,3 +197,29 @@ export function chunkForSpeech(text: string, maxChars = 1800): string[] {
 export function speechTextHash(text: string): string {
   return createHash("sha256").update(text).digest("hex");
 }
+
+export interface TtsVoiceOption {
+  id: string;
+  label: string;
+}
+
+/** Voice choices for the classroom audiobook's voice dropdown, driven by
+ *  the TTS_VOICES env var (format: "id:Label,id2:Label 2" — label
+ *  optional, falls back to the id) rather than a hardcoded list: agent-
+ *  server's qwen3-tts runs through mlx-audio on the user's own Mac, and
+ *  which voice names it actually supports depends entirely on that local
+ *  deployment — this repo has no way to introspect it. Unset/empty
+ *  returns [] and the classroom page just doesn't render a dropdown at
+ *  all, falling back to whatever agent-server's own default voice is
+ *  (same as before this feature existed). */
+export function getTtsVoices(): TtsVoiceOption[] {
+  const raw = process.env.TTS_VOICES?.trim();
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((entry) => {
+      const [id, label] = entry.split(":");
+      return { id: (id ?? "").trim(), label: (label ?? id ?? "").trim() };
+    })
+    .filter((v) => v.id);
+}

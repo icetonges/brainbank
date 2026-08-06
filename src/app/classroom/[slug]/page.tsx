@@ -24,8 +24,9 @@ import { regenerateGuideAction, translateClassroomArticleAction } from "../actio
 import { generateArticleAudioAction } from "../audio-actions";
 import { formatDateTime } from "@/lib/date";
 import { getModel, type ModelId } from "@/lib/ai/models";
-import { markdownToSpeechText, speechTextHash } from "@/lib/ai/media";
-import { AudioPlayer } from "@/components/audio-player";
+import { speechTextHash, getTtsVoices } from "@/lib/ai/media";
+import { splitMarkdownBlocks, speechTextForStaleness } from "@/lib/markdown-blocks";
+import { ListenableArticle } from "@/components/listenable-article";
 
 export const dynamic = "force-dynamic";
 // Server Actions run as a Vercel Function for the page that invoked them —
@@ -154,15 +155,26 @@ export default async function ClassroomArticlePage({
   // Audiobook — generated once per language (audio-actions.ts) and reused
   // by every visitor; the owner sees a stale hint if the article text was
   // edited since the last generation (hash mismatch) rather than the
-  // audio silently going out of sync with the text.
+  // audio silently going out of sync with the text. One entry per
+  // speakable markdown block now (blockIndex), not one entry per
+  // ~1800-char merged chunk — see the audioSegments comment in
+  // db/schema.ts for why that changed. `blocks` is also what the article
+  // body itself renders from (ListenableArticle below), so hovering a
+  // paragraph and its audio segment always refer to the same block.
   const audioLanguage: "en" | "zh" = content?.language === "zh" ? "zh" : "en";
   const generateAudio = generateArticleAudioAction.bind(null, note.id, slug, audioLanguage);
-  const audioSegments = content?.audioSegments ?? [];
   const currentBodyMarkdown = content?.bodyMarkdown ?? "";
+  const blocks = currentBodyMarkdown ? splitMarkdownBlocks(currentBodyMarkdown) : [];
+  const segmentsByBlock: Record<number, string[]> = {};
+  for (const seg of content?.audioSegments ?? []) {
+    (segmentsByBlock[seg.blockIndex] ??= []).push(seg.url);
+  }
+  const hasAudio = Object.keys(segmentsByBlock).length > 0;
   const audioIsStale =
-    audioSegments.length > 0 &&
+    hasAudio &&
     currentBodyMarkdown.trim() !== "" &&
-    content?.audioSourceHash !== speechTextHash(markdownToSpeechText(currentBodyMarkdown));
+    content?.audioSourceHash !== speechTextHash(speechTextForStaleness(currentBodyMarkdown));
+  const voiceOptions = getTtsVoices();
 
   return (
     <div className="flex flex-1 items-start gap-8">
@@ -280,9 +292,24 @@ export default async function ClassroomArticlePage({
             />
           </form>
           {content?.bodyMarkdown && (
-            <form action={generateAudio}>
+            <form action={generateAudio} className="flex items-center gap-2">
+              {voiceOptions.length > 0 && (
+                <select
+                  name="voice"
+                  defaultValue={content?.audioVoice ?? ""}
+                  aria-label={s.voiceLabel}
+                  className="rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg"
+                >
+                  <option value="">{s.voiceDefaultOption}</option>
+                  {voiceOptions.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.label}
+                    </option>
+                  ))}
+                </select>
+              )}
               <PendingFormButton
-                label={audioSegments.length > 0 ? `🔊 ${s.regenerateAudiobook}` : `🔊 ${s.generateAudiobook}`}
+                label={hasAudio ? `🔊 ${s.regenerateAudiobook}` : `🔊 ${s.generateAudiobook}`}
                 pendingLabel={s.generatingAudiobook}
                 className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-fg hover:border-accent hover:text-accent transition-colors disabled:opacity-60"
               />
@@ -314,23 +341,33 @@ export default async function ClassroomArticlePage({
 
       {content?.bodyMarkdown && (
         <section className="rounded-lg border border-border bg-bg-elevated p-5">
-          <Markdown>{content.bodyMarkdown}</Markdown>
-        </section>
-      )}
-
-      {/* Audiobook — generated once (owner action above), played by
-          everyone. Visible regardless of session, same as the article
-          body itself. */}
-      {audioSegments.length > 0 && (
-        <div className="flex flex-col gap-2">
-          <AudioPlayer
-            segments={audioSegments}
-            s={{ audioPartOf: s.audioPartOf, audioPrev: s.audioPrev, audioNext: s.audioNext }}
+          {/* Renders the article body AND (when an audiobook exists) makes
+              every paragraph hoverable to hear it read aloud, with a
+              transport bar for touch/non-hover use — see that
+              component's comment for why it's one block-by-block render
+              instead of one plain <Markdown>{bodyMarkdown}</Markdown>. */}
+          <ListenableArticle
+            blocks={blocks}
+            segmentsByBlock={segmentsByBlock}
+            s={{
+              playArticleAudio: s.playArticleAudio,
+              pauseAudio: s.pauseAudio,
+              paragraphOf: s.paragraphOf,
+              audioPrev: s.audioPrev,
+              audioNext: s.audioNext,
+              hoverHint: s.hoverHint,
+            }}
           />
-          {session && audioIsStale && (
-            <p className="text-xs text-warn">⚠️ {s.audiobookStale}</p>
+          {hasAudio && content?.audioVoice && (
+            <p className="mt-3 text-xs text-fg-secondary">
+              🎙 {s.narratedWith}{" "}
+              {voiceOptions.find((v) => v.id === content.audioVoice)?.label ?? content.audioVoice}
+            </p>
           )}
-        </div>
+          {session && audioIsStale && (
+            <p className="mt-1 text-xs text-warn">⚠️ {s.audiobookStale}</p>
+          )}
+        </section>
       )}
 
       {guide ? (

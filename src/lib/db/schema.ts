@@ -204,20 +204,40 @@ export const noteContent = pgTable("note_content", {
   // Usually one; more than one means the fallback chain kicked in partway
   // through this row's chunks.
   translatedModel: text("translated_model"),
-  // Generated audiobook (see lib/ai/media.ts's synthesizeSpeech and
-  // classroom/audio-actions.ts) — an ordered array of segment URLs rather
-  // than one file, because a long article is chunked into several TTS
-  // calls (agent-server's qwen3-tts has a practical input-length ceiling)
-  // and naive byte-level mp3 concatenation isn't reliably valid; the
-  // player (components/audio-player.tsx) just advances through the array
-  // on "ended" instead. Generated once and reused by every visitor — see
-  // audioSourceHash below for staleness detection.
-  audioSegments: jsonb("audio_segments").$type<string[]>().default([]).notNull(),
+  // Generated audiobook (see lib/ai/media.ts's synthesizeSpeech,
+  // lib/markdown-blocks.ts's splitMarkdownBlocks, and
+  // classroom/audio-actions.ts) — one entry per SPEAKABLE markdown block
+  // (paragraph/heading/list/blockquote), not one file for the whole
+  // article: blockIndex ties a segment back to the exact paragraph it was
+  // read from, which is what lets components/listenable-article.tsx play
+  // a specific paragraph's audio when you hover it, and is also just a
+  // TTS input-length ceiling workaround the way the old flat chunk array
+  // was. Usually one url per blockIndex; an oversized single block (a
+  // huge paragraph or list) can produce more than one, played back to
+  // back before advancing to the next block. Generated once and reused by
+  // every visitor — see audioSourceHash below for staleness detection.
+  //
+  // NOTE: this replaced a plain string[] shape (one entry per ~1800-char
+  // merged chunk, ignoring paragraph boundaries — the root cause of
+  // audiobooks that sounded like "a few words" per file on code-heavy
+  // articles, since a merged chunk could be mostly code that got stripped
+  // to almost nothing). No SQL migration needed for this column itself
+  // (jsonb doesn't care what shape is inside it), but any audiobook
+  // generated under the old shape is stale on read — regenerate it.
+  audioSegments: jsonb("audio_segments").$type<{ blockIndex: number; url: string }[]>().default([]).notNull(),
   audioGeneratedAt: timestamp("audio_generated_at", { withTimezone: true }),
   // sha256 of the plain-text (markdown stripped) content the audio was
   // generated from — lets the article page show "text changed since this
   // was recorded" instead of silently serving stale audio after an edit.
   audioSourceHash: text("audio_source_hash"),
+  // Voice id passed to agent-server's TTS call, or null for whatever
+  // agent-server's own default is — see lib/ai/media.ts's getTtsVoices
+  // for where the dropdown's options come from (TTS_VOICES env var, since
+  // this repo has no way to introspect which voice names the self-hosted
+  // qwen3-tts/mlx-audio deployment actually supports). Stored so the
+  // article page can show "narrated with <voice>" and so regenerating
+  // defaults back to whatever was last picked.
+  audioVoice: text("audio_voice"),
 });
 
 export const tags = pgTable("tags", {
