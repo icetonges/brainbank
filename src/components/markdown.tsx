@@ -1,6 +1,7 @@
 import ReactMarkdown, { type ExtraProps } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
+import remarkBreaks from "remark-breaks";
 import rehypeKatex from "rehype-katex";
 import rehypeHighlight from "rehype-highlight";
 import { MermaidDiagram } from "@/components/mermaid-diagram";
@@ -34,6 +35,30 @@ function hastText(node: HastNode | undefined): string {
   return (node.children ?? []).map(hastText).join("");
 }
 
+/** Links to these extensions render as a file card (icon + name) instead
+ * of an inline text link — the composer's "attach a document" flow points
+ * here, uploaded files, not web pages. */
+const DOC_ICON: Record<string, string> = {
+  pdf: "📄",
+  doc: "📝",
+  docx: "📝",
+  ppt: "📽️",
+  pptx: "📽️",
+  xls: "📊",
+  xlsx: "📊",
+  csv: "📊",
+  txt: "📄",
+  md: "📄",
+  markdown: "📄",
+  json: "📄",
+};
+
+function docExtension(href: string): string | null {
+  const match = href.split(/[?#]/)[0].match(/\.([a-zA-Z0-9]+)$/);
+  const ext = match?.[1]?.toLowerCase();
+  return ext && ext in DOC_ICON ? ext : null;
+}
+
 /**
  * Renders markdown (article bodies, learning maps, hands-on steps) with
  * the app's theme tokens. Tailwind v4 without the typography plugin, so
@@ -58,7 +83,14 @@ export function Markdown({
     // code and tables stay mono/sans via their own rules below.
     <div className="flex flex-col gap-3 font-serif text-[1.0625rem] text-fg leading-relaxed">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
+        // Plain CommonMark treats a single Enter as a "soft break" — no
+        // visual line break at all, just a joined line — which is why
+        // typing four separate lines rendered as one run-on sentence.
+        // That's correct behavior for prose meant to soft-wrap, but wrong
+        // for a diary: gate remark-breaks (single \n → real <br>) behind
+        // indentParagraphs so it only changes journaling-style renders,
+        // not classroom articles that may rely on soft-wrap paragraphs.
+        remarkPlugins={indentParagraphs ? [remarkGfm, remarkMath, remarkBreaks] : [remarkGfm, remarkMath]}
         rehypePlugins={[rehypeKatex, rehypeHighlight]}
         components={{
           h1: (p) => (
@@ -79,14 +111,40 @@ export function Markdown({
           p: (p) => <p className={indentParagraphs ? "indent-8" : undefined} {...dom(p)} />,
           strong: (p) => <strong className="font-semibold text-fg" {...dom(p)} />,
           em: (p) => <em className="italic" {...dom(p)} />,
-          a: (p) => (
-            <a
-              className="text-accent underline underline-offset-2 hover:opacity-80"
-              target="_blank"
-              rel="noopener noreferrer"
-              {...dom(p)}
-            />
-          ),
+          a: (p) => {
+            const { href, children, ...rest } = dom(p);
+            const ext = href ? docExtension(href) : null;
+            if (ext) {
+              return (
+                <a
+                  href={href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="my-1 inline-flex max-w-full items-center gap-2 rounded-lg border border-border bg-bg-elevated px-3 py-2 font-sans text-sm font-medium text-fg no-underline transition-colors hover:border-accent hover:text-accent"
+                  {...rest}
+                >
+                  <span className="text-lg leading-none" aria-hidden>
+                    {DOC_ICON[ext]}
+                  </span>
+                  <span className="truncate">{children}</span>
+                  <span className="ml-1 shrink-0 text-xs text-fg-secondary" aria-hidden>
+                    ↗
+                  </span>
+                </a>
+              );
+            }
+            return (
+              <a
+                href={href}
+                className="text-accent underline underline-offset-2 hover:opacity-80"
+                target="_blank"
+                rel="noopener noreferrer"
+                {...rest}
+              >
+                {children}
+              </a>
+            );
+          },
           ul: (p) => <ul className="ml-5 list-disc space-y-1" {...dom(p)} />,
           ol: (p) => <ol className="ml-5 list-decimal space-y-1" {...dom(p)} />,
           li: (p) => <li className="pl-1" {...dom(p)} />,

@@ -7,6 +7,7 @@ import { signAndUploadFile } from "@/lib/upload-client";
 import { mediaKindFromMimeType } from "@/lib/storage/media-kind";
 import { attachMediaAction } from "@/app/notes/[slug]/actions";
 import { createDiaryDraft, saveDiaryDraft, saveDiaryEntry } from "@/app/diary/actions";
+import { extractDocumentForComposer } from "@/app/classroom/extract-actions";
 import { LIFE_AREAS } from "@/lib/knowledge/taxonomy";
 import { t, type Lang } from "@/lib/i18n";
 import { Markdown } from "@/components/markdown";
@@ -17,6 +18,27 @@ const turndown = new TurndownService({
   fence: "```",
   bulletListMarker: "-",
 });
+
+/** Document types the composer can attach (and, on request, extract text
+ * from) — mirrors DOC_EXTENSIONS in classroom-composer.tsx and the server
+ * side's extractDocumentForComposer / mediaKindFromMimeType. */
+const DOC_EXTENSIONS = /\.(pdf|docx?|xlsx|xls|csv|pptx|txt|md|markdown|json)$/i;
+
+function isDocFile(file: File): boolean {
+  return DOC_EXTENSIONS.test(file.name);
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB"];
+  let value = bytes / 1024;
+  let i = 0;
+  while (value >= 1024 && i < units.length - 1) {
+    value /= 1024;
+    i++;
+  }
+  return `${value.toFixed(value < 10 ? 1 : 0)} ${units[i]}`;
+}
 
 const MOODS = [
   { value: "great", emoji: "🤩" },
@@ -73,6 +95,12 @@ export function DiaryComposer({
   // (see insertAtCursor etc.) so typing doesn't fight cursor position.
   const [bodyText, setBodyText] = useState("");
   const [bodyMode, setBodyMode] = useState<"write" | "preview">("write");
+  // Documents attach immediately (as a file-card link) but their text is
+  // only pulled into the entry on request — a diary entry shouldn't
+  // silently balloon into the full contents of whatever PDF got dropped
+  // in. This is the queue of "attached, not yet extracted" documents.
+  const [pendingDocs, setPendingDocs] = useState<{ id: string; name: string; url: string }[]>([]);
+  const [extractingId, setExtractingId] = useState<string | null>(null);
 
   function insertAtCursor(
     el: HTMLTextAreaElement | null,
@@ -392,12 +420,71 @@ export function DiaryComposer({
     }
   }
 
+  /** Non-image attachments (PDF, Word, Excel, …) upload and attach like an
+   *  image does, but insert as a file-card link rather than dumping their
+   *  content into the entry — see extractPendingDoc for the opt-in pull. */
+  async function handleDocument(file: File, target: HTMLTextAreaElement | null) {
+    setError(null);
+    setUploadPct(0);
+    const insertStart = target?.selectionStart ?? target?.value.length ?? 0;
+    const insertEnd = target?.selectionEnd ?? insertStart;
+
+    try {
+      const entry = await ensureDraft();
+      const { provider, url } = await signAndUploadFile(entry.noteId, file, setUploadPct);
+      await attachMediaAction(entry.noteId, entry.slug, {
+        kind: mediaKindFromMimeType(file.type || "application/octet-stream"),
+        provider,
+        url,
+        sizeBytes: file.size,
+        mimeType: file.type || "application/octet-stream",
+      });
+      insertAtCursor(
+        target,
+        `\n[${file.name}](${url}) — ${formatBytes(file.size)}\n`,
+        insertStart,
+        insertEnd,
+      );
+      notifyEdited(target);
+      if (target === bodyRef.current) {
+        setPendingDocs((prev) => [...prev, { id: url, name: file.name, url }]);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "File upload failed");
+    } finally {
+      setUploadPct(null);
+    }
+  }
+
+  /** The manual "Extract content" click — pulls the document's text (and
+   *  tables, for spreadsheets) in at the cursor via the same server action
+   *  the classroom composer uses, then drops it from the pending queue. */
+  async function extractPendingDoc(doc: { id: string; name: string; url: string }) {
+    setError(null);
+    setExtractingId(doc.id);
+    const el = bodyRef.current;
+    const insertStart = el?.selectionStart ?? el?.value.length ?? 0;
+    const insertEnd = el?.selectionEnd ?? insertStart;
+    try {
+      const { markdown } = await extractDocumentForComposer({ url: doc.url, filename: doc.name });
+      insertAtCursor(el, `\n${markdown}\n`, insertStart, insertEnd);
+      notifyEdited(el);
+      setPendingDocs((prev) => prev.filter((d) => d.id !== doc.id));
+    } catch (err) {
+      setError(err instanceof Error ? `${s.extractFailed}: ${err.message}` : s.extractFailed);
+    } finally {
+      setExtractingId(null);
+    }
+  }
+
   async function handleFiles(files: File[], target: HTMLTextAreaElement | null) {
     for (const file of files) {
       if (file.type.startsWith("image/")) {
         await handleImage(file, target);
+      } else if (isDocFile(file)) {
+        await handleDocument(file, target);
       } else {
-        setError(`${s.imagesOnly}: ${file.name}`);
+        setError(`${s.unsupportedFile}: ${file.name}`);
       }
     }
     if (fileInputRef.current) fileInputRef.current.value = "";
@@ -406,7 +493,7 @@ export function DiaryComposer({
   function pasteHandler(target: () => HTMLTextAreaElement | null) {
     return (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
       const files = Array.from(e.clipboardData?.files ?? []);
-      if (files.some((f) => f.type.startsWith("image/"))) {
+      if (files.length > 0) {
         e.preventDefault();
         handleFiles(files, target());
         return;
@@ -520,7 +607,7 @@ export function DiaryComposer({
             <ToolbarButton label="☐" title={s.toolbarChecklist} onClick={() => { toggleLinePrefix(bodyRef.current, "- [ ] "); notifyEdited(bodyRef.current); }} />
             <ToolbarDivider />
             <ToolbarButton label="🔗" title={`${s.toolbarLink} (Ctrl/⌘+K)`} onClick={() => { insertLink(bodyRef.current); notifyEdited(bodyRef.current); }} />
-            <ToolbarButton label="🖼" title={s.addImage} onClick={() => fileInputRef.current?.click()} />
+            <ToolbarButton label="📎" title={s.attachFile} onClick={() => fileInputRef.current?.click()} />
           </div>
         )}
       </div>
@@ -553,6 +640,41 @@ export function DiaryComposer({
           ) : (
             <p className="text-fg-secondary">{s.previewEmpty}</p>
           )}
+        </div>
+      )}
+
+      {/* Attached documents default to a file-card link (see handleDocument)
+          — their text only lands in the entry if you ask for it here, so
+          dropping in a tax PDF doesn't silently turn the entry into the
+          PDF's full contents. */}
+      {pendingDocs.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed border-border bg-bg-elevated px-3 py-2.5">
+          <span className="text-xs text-fg-secondary">{s.docsAttachedHint}</span>
+          {pendingDocs.map((doc) => (
+            <span
+              key={doc.id}
+              className="flex items-center gap-1.5 rounded-full border border-border bg-bg pl-2.5 pr-1.5 py-1 text-xs"
+            >
+              📄 <span className="max-w-[10rem] truncate">{doc.name}</span>
+              <button
+                type="button"
+                onClick={() => extractPendingDoc(doc)}
+                disabled={extractingId === doc.id}
+                className="rounded-full px-2 py-0.5 font-medium text-accent hover:bg-accent/10 disabled:opacity-50"
+              >
+                {extractingId === doc.id ? s.extracting : s.extractContent}
+              </button>
+              <button
+                type="button"
+                onClick={() => setPendingDocs((prev) => prev.filter((d) => d.id !== doc.id))}
+                aria-label={s.dismiss}
+                title={s.dismiss}
+                className="rounded-full px-1.5 text-fg-secondary hover:text-fg"
+              >
+                ×
+              </button>
+            </span>
+          ))}
         </div>
       )}
 
@@ -660,11 +782,11 @@ export function DiaryComposer({
         <SaveButton lang={lang} />
 
         <label className="cursor-pointer rounded-lg border border-border px-3 py-2 text-sm font-medium text-fg hover:border-accent hover:text-accent transition-colors">
-          {uploadPct !== null ? `${s.uploading} ${uploadPct}%` : `🖼 ${s.addImage}`}
+          {uploadPct !== null ? `${s.uploading} ${uploadPct}%` : `📎 ${s.attachFile}`}
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*"
+            accept="image/*,.pdf,.doc,.docx,.xlsx,.xls,.csv,.pptx,.txt,.md,.markdown,.json"
             multiple
             className="hidden"
             disabled={uploadPct !== null}
