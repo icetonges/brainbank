@@ -1526,33 +1526,78 @@ export async function diaryTitleAndTags(
 
 // --- distill (diary entry -> candidate knowledge atoms) ---
 
+const ATOM_KINDS = [
+  "fact",
+  "preference",
+  "pattern",
+  "goal",
+  "person",
+  "project",
+  "skill",
+  "question",
+  "idea",
+] as const;
+
+// The local models occasionally invent a plausible-sounding "kind" that
+// isn't one of the nine above ("strategy", "approach", "methodology",
+// "ongoing_question", "tooling", ... all observed in practice) even with
+// the prompt spelling the exact tokens out — and because atoms is a plain
+// z.array(atomCandidateSchema), ONE bad kind fails the WHOLE array,
+// silently discarding every other good atom the model found in that
+// entry. This coerces the common near-misses onto the closest real kind
+// before validation runs, falling back to "idea" (closest thing to a
+// catch-all) for anything still unrecognized, so an odd label costs one
+// atom's precision instead of the entire extraction.
+const ATOM_KIND_ALIASES: Record<string, (typeof ATOM_KINDS)[number]> = {
+  strategy: "pattern",
+  approach: "pattern",
+  methodology: "pattern",
+  tooling: "skill",
+  tool: "skill",
+  technique: "skill",
+  ongoing_question: "question",
+  open_question: "question",
+  belief: "preference",
+  value: "preference",
+  habit: "pattern",
+  routine: "pattern",
+  insight: "idea",
+  observation: "fact",
+  relationship: "person",
+  milestone: "goal",
+  plan: "goal",
+};
+
+function coerceAtomKind(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if ((ATOM_KINDS as readonly string[]).includes(normalized)) return normalized;
+  return ATOM_KIND_ALIASES[normalized] ?? "idea";
+}
+
 const atomCandidateSchema = z.object({
   kind: z
-    .enum([
-      "fact",
-      "preference",
-      "pattern",
-      "goal",
-      "person",
-      "project",
-      "skill",
-      "question",
-      "idea",
-    ])
+    .preprocess(coerceAtomKind, z.enum(ATOM_KINDS))
     .describe("What type of knowledge this is"),
   statement: z
     .string()
     .describe(
       "ONE self-contained sentence, written in the third person about the author (e.g. 'Prefers deep work before 10am'). Must stand alone without the entry for context.",
     ),
+  // detail/excerpt/confidence coerced from missing/wrong-typed rather than
+  // required outright — observed failure mode alongside the kind mismatch
+  // above: a local model sometimes omits one of these three entirely
+  // instead of writing "detail":"" as the prompt's example shows, which
+  // used to fail the whole atom (and thus the whole array) over a field
+  // whose own description already says empty/best-effort is fine.
   detail: z
-    .string()
+    .preprocess((v) => (typeof v === "string" ? v : ""), z.string())
     .describe("Optional supporting nuance or caveat. Empty string if there's nothing to add."),
   excerpt: z
-    .string()
+    .preprocess((v) => (typeof v === "string" ? v : ""), z.string())
     .describe("The short passage from the entry that justifies this, quoted near-verbatim."),
   confidence: z
-    .number()
+    .preprocess((v) => (typeof v === "number" ? v : 0.5), z.number())
     .describe(
       "0.0-1.0 — how strongly this single entry supports the claim. A passing mention is ~0.3; an explicit clear statement is ~0.8.",
     ),
