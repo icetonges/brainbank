@@ -2,6 +2,7 @@ import { getLang } from "@/lib/i18n-server";
 import { t } from "@/lib/i18n";
 import { LlmStatusCard } from "@/components/llm-status-card";
 import { LlmChatPanel } from "@/components/llm-chat-panel";
+import { TextToAudioPanel } from "@/components/text-to-audio-panel";
 
 // Intentionally public, unlike most of the rest of the app (/new, /admin) —
 // this is a status page + chatbox for the self-hosted local model, and the
@@ -27,6 +28,17 @@ export default async function LlmPage({
 
       <LlmStatusCard s={s} />
       <LlmChatPanel s={s} />
+      <TextToAudioPanel
+        s={{
+          title: s.ttsTitle,
+          intro: s.ttsIntro,
+          placeholder: s.ttsPlaceholder,
+          generate: s.ttsGenerate,
+          generating: s.ttsGenerating,
+          download: s.ttsDownload,
+          videoComingSoon: s.videoComingSoon,
+        }}
+      />
     </div>
   );
 }

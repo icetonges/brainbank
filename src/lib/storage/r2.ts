@@ -56,6 +56,30 @@ export async function createR2UploadTarget(
   return { uploadUrl, publicUrl, key };
 }
 
+/** Uploads bytes straight to R2 from server code and returns the public
+ * URL — for content generated server-side (TTS audio, etc.) that never
+ * needs the presigned browser round-trip createR2UploadTarget exists for,
+ * since the bytes are already sitting in the Vercel function's memory. */
+export async function uploadBufferToR2(
+  key: string,
+  body: Buffer,
+  contentType: string,
+): Promise<{ publicUrl: string }> {
+  const bucket = process.env.R2_BUCKET;
+  const publicUrlBase = process.env.R2_PUBLIC_URL;
+  if (!bucket || !publicUrlBase) {
+    throw new Error(
+      "Cloudflare R2 is not configured. Set R2_BUCKET and R2_PUBLIC_URL in .env.local.",
+    );
+  }
+
+  const client = r2Client();
+  await client.send(
+    new PutObjectCommand({ Bucket: bucket, Key: key, Body: body, ContentType: contentType }),
+  );
+  return { publicUrl: `${publicUrlBase.replace(/\/$/, "")}/${key}` };
+}
+
 export function isR2Configured(): boolean {
   return Boolean(
     process.env.R2_ACCOUNT_ID &&

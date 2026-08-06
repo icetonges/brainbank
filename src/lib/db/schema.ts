@@ -41,6 +41,7 @@ export const languageEnum = pgEnum("language", ["en", "zh"]);
 export const mediaKindEnum = pgEnum("media_kind", [
   "image",
   "video",
+  "audio",
   "pdf",
   "doc",
   "spreadsheet",
@@ -203,6 +204,20 @@ export const noteContent = pgTable("note_content", {
   // Usually one; more than one means the fallback chain kicked in partway
   // through this row's chunks.
   translatedModel: text("translated_model"),
+  // Generated audiobook (see lib/ai/media.ts's synthesizeSpeech and
+  // classroom/audio-actions.ts) — an ordered array of segment URLs rather
+  // than one file, because a long article is chunked into several TTS
+  // calls (agent-server's qwen3-tts has a practical input-length ceiling)
+  // and naive byte-level mp3 concatenation isn't reliably valid; the
+  // player (components/audio-player.tsx) just advances through the array
+  // on "ended" instead. Generated once and reused by every visitor — see
+  // audioSourceHash below for staleness detection.
+  audioSegments: jsonb("audio_segments").$type<string[]>().default([]).notNull(),
+  audioGeneratedAt: timestamp("audio_generated_at", { withTimezone: true }),
+  // sha256 of the plain-text (markdown stripped) content the audio was
+  // generated from — lets the article page show "text changed since this
+  // was recorded" instead of silently serving stale audio after an edit.
+  audioSourceHash: text("audio_source_hash"),
 });
 
 export const tags = pgTable("tags", {

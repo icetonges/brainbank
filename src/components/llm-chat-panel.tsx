@@ -37,6 +37,12 @@ interface LlmChatStrings {
   chatTokensTotal: string;
   modelLabel: string;
   modelHeavyWarning: string;
+  playAudio: string;
+  stopAudio: string;
+  audioLoading: string;
+  micRecord: string;
+  micStop: string;
+  micTranscribing: string;
 }
 
 // Mirrors USAGE_TRAILER_PREFIX/SUFFIX in src/lib/ai/tasks.ts exactly — see
@@ -98,6 +104,23 @@ export function LlmChatPanel({ s }: { s: LlmChatStrings }) {
   // on," not a retroactive change to earlier replies.
   const [modelId, setModelId] = useState<ModelId>(DEFAULT_MODEL_ID);
   const abortRef = useRef<AbortController | null>(null);
+
+  // Per-reply "🔊 Play" — one shared <audio> element rather than one per
+  // message, so starting a new reply's playback naturally stops whatever
+  // was already playing (setting .src on it does that for free).
+  const audioElRef = useRef<HTMLAudioElement>(null);
+  const audioObjectUrlRef = useRef<string | null>(null);
+  const [playingIndex, setPlayingIndex] = useState<number | null>(null);
+  const [audioLoadingIndex, setAudioLoadingIndex] = useState<number | null>(null);
+
+  // 🎤 mic input — records to a Blob via MediaRecorder, then posts it to
+  // /api/tasks/transcribe and drops the result into the text input rather
+  // than auto-sending, so a mis-transcription can be edited before it's
+  // sent like any other typed message.
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
+  const [recording, setRecording] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
 
   // Drives the live "Xs" readout on the in-flight message. Only ticks
   // while something is actually pending, so it's not running idle.
@@ -188,6 +211,84 @@ export function LlmChatPanel({ s }: { s: LlmChatStrings }) {
     }
   }
 
+  /** Fetches TTS audio for one reply and plays it — clicking the button on
+   *  the message that's currently playing pauses it instead of restarting. */
+  async function playMessage(index: number, text: string) {
+    if (playingIndex === index) {
+      audioElRef.current?.pause();
+      setPlayingIndex(null);
+      return;
+    }
+    setError(null);
+    setAudioLoadingIndex(index);
+    try {
+      const res = await fetch("/api/tasks/speech", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      if (!res.ok) throw new Error(await res.text().catch(() => "Text-to-speech failed"));
+      const blob = await res.blob();
+      const el = audioElRef.current;
+      if (!el) return;
+      if (audioObjectUrlRef.current) URL.revokeObjectURL(audioObjectUrlRef.current);
+      const url = URL.createObjectURL(blob);
+      audioObjectUrlRef.current = url;
+      el.src = url;
+      el.onended = () => setPlayingIndex(null);
+      await el.play();
+      setPlayingIndex(index);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Text-to-speech failed");
+    } finally {
+      setAudioLoadingIndex(null);
+    }
+  }
+
+  /** Starts/stops a mic recording; the actual transcribe-and-fill-input
+   *  work happens in the recorder's onstop handler once the final chunk
+   *  is available. */
+  async function toggleRecording() {
+    if (recording) {
+      mediaRecorderRef.current?.stop();
+      return;
+    }
+    setError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "";
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      recordedChunksRef.current = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) recordedChunksRef.current.push(e.data);
+      };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((track) => track.stop());
+        setRecording(false);
+        const blob = new Blob(recordedChunksRef.current, { type: recorder.mimeType || "audio/webm" });
+        if (blob.size === 0) return;
+        setTranscribing(true);
+        try {
+          const form = new FormData();
+          form.set("file", blob, "voice-input.webm");
+          const res = await fetch("/api/tasks/transcribe", { method: "POST", body: form });
+          if (!res.ok) throw new Error(await res.text().catch(() => "Transcription failed"));
+          const { text } = (await res.json()) as { text: string };
+          if (text?.trim()) setInput((prev) => (prev ? `${prev} ${text.trim()}` : text.trim()));
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Transcription failed");
+        } finally {
+          setTranscribing(false);
+        }
+      };
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setRecording(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Microphone access failed");
+    }
+  }
+
   return (
     <div className="flex flex-1 flex-col gap-3 rounded-lg border border-border bg-bg-elevated p-4">
       <h2 className="text-sm font-semibold uppercase tracking-wide text-accent">
@@ -245,7 +346,7 @@ export function LlmChatPanel({ s }: { s: LlmChatStrings }) {
                 )}
 
                 {isAssistant && (m.status === "streaming" || m.status === "done") && (
-                  <div className="mt-0.5 flex flex-wrap gap-x-3 text-xs text-fg-secondary">
+                  <div className="mt-0.5 flex flex-wrap items-center gap-x-3 text-xs text-fg-secondary">
                     {elapsedMs !== undefined && (
                       <span className="inline-flex items-center gap-1">
                         {m.status === "streaming" && (
@@ -261,6 +362,18 @@ export function LlmChatPanel({ s }: { s: LlmChatStrings }) {
                         {m.usage.totalTokens != null ? ` (${m.usage.totalTokens} ${s.chatTokensTotal})` : ""}
                       </span>
                     )}
+                    {m.status === "done" && m.content.trim() && (
+                      <button
+                        type="button"
+                        onClick={() => playMessage(i, m.content)}
+                        disabled={audioLoadingIndex === i}
+                        title={playingIndex === i ? s.stopAudio : s.playAudio}
+                        aria-label={playingIndex === i ? s.stopAudio : s.playAudio}
+                        className="rounded px-1.5 py-0.5 text-accent hover:bg-accent/10 disabled:opacity-50"
+                      >
+                        {audioLoadingIndex === i ? s.audioLoading : playingIndex === i ? "⏸" : "🔊"}
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -270,6 +383,12 @@ export function LlmChatPanel({ s }: { s: LlmChatStrings }) {
       </div>
 
       {error && <p className="text-sm text-danger">{error}</p>}
+
+      {/* Shared playback element for every "🔊 Play" button above — kept
+          out of the message loop so there's only ever one <audio>, and
+          starting a new reply's playback naturally interrupts whatever
+          was already playing. */}
+      <audio ref={audioElRef} className="hidden" />
 
       <div className="flex gap-2">
         <input
@@ -281,9 +400,25 @@ export function LlmChatPanel({ s }: { s: LlmChatStrings }) {
               send();
             }
           }}
-          placeholder={s.chatPlaceholder}
-          className="flex-1 rounded-md border border-border bg-bg px-3 py-2 text-sm text-fg outline-none focus:border-accent"
+          placeholder={transcribing ? s.micTranscribing : s.chatPlaceholder}
+          disabled={transcribing}
+          className="flex-1 rounded-md border border-border bg-bg px-3 py-2 text-sm text-fg outline-none focus:border-accent disabled:opacity-60"
         />
+        <button
+          type="button"
+          onClick={toggleRecording}
+          disabled={transcribing}
+          title={recording ? s.micStop : s.micRecord}
+          aria-label={recording ? s.micStop : s.micRecord}
+          aria-pressed={recording}
+          className={`rounded-md border px-3 py-2 text-sm font-medium transition-colors disabled:opacity-60 ${
+            recording
+              ? "border-danger bg-danger/15 text-danger"
+              : "border-border text-fg hover:border-accent hover:text-accent"
+          }`}
+        >
+          {recording ? "⏹" : "🎤"}
+        </button>
         <button
           type="button"
           onClick={send}

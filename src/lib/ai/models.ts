@@ -196,6 +196,30 @@ export const LOCAL_ONLY_CHAIN: ModelId[] = FALLBACK_CHAIN.filter(
 // EMBEDDING_DIMENSIONS in db/schema.ts.
 export const EMBEDDING_WIRE_ID = "nomic-embed-text";
 
+// --- MEDIA MODELS (text-to-speech / speech-to-text / image) ---
+//
+// Non-chat capabilities on the SAME self-hosted agent-server as the chat
+// models above — deliberately not added to MODELS/ModelInfo (no token
+// pricing, context window, or vision semantics apply to "synthesize this
+// text as audio"), same reasoning as EMBEDDING_WIRE_ID staying separate.
+// All three go through lib/ai/media.ts, which calls agent-server's
+// OpenAI-compatible /v1/audio/speech, /v1/audio/transcriptions, and
+// /v1/images/generations — gated by the SAME LOCAL_LLM_FUNNEL_URL /
+// LOCAL_LLM_SHARED_SECRET as chat (providers.ts's local()), not a second
+// pair of env vars: one agent-server process fronts all of it. Each
+// capability depends on agent-server's own backing service being
+// configured on its side (TTS_SERVICE_URL for mlx-audio, STT_SERVICE_URL
+// for whisper-cli, IMAGE_GEN_SERVICE_URL for image_server.py) — until
+// then agent-server itself returns a 501 with a clear explanation, which
+// media.ts passes through rather than masking as a generic failure.
+export const TTS_WIRE_ID = "qwen3-tts";
+export const STT_WIRE_ID = "whisper-large-v3-turbo";
+export const IMAGE_WIRE_ID = "flux.2-klein";
+// No video-generation entry yet — LTX-2.3 is still a documented TODO on
+// agent-server's side (no OpenAI-standard response shape exists to call
+// yet, per the integration guide). Add a *_WIRE_ID here plus a media.ts
+// function the same way once that route exists server-side.
+
 // --- AGENTIC MODELS ---
 //
 // Models with autonomous tool use (web search, code execution) baked into

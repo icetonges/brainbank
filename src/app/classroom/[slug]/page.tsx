@@ -21,8 +21,11 @@ import { PendingFormButton } from "@/components/pending-form-button";
 import { PrivacyToggleButton } from "@/components/privacy-toggle-button";
 import { ClassroomSideNav } from "@/components/classroom-side-nav";
 import { regenerateGuideAction, translateClassroomArticleAction } from "../actions";
+import { generateArticleAudioAction } from "../audio-actions";
 import { formatDateTime } from "@/lib/date";
 import { getModel, type ModelId } from "@/lib/ai/models";
+import { markdownToSpeechText, speechTextHash } from "@/lib/ai/media";
+import { AudioPlayer } from "@/components/audio-player";
 
 export const dynamic = "force-dynamic";
 // Server Actions run as a Vercel Function for the page that invoked them —
@@ -148,6 +151,19 @@ export default async function ClassroomArticlePage({
   const tabLabel =
     lang === "zh" ? CLASSROOM_TAB_LABELS_ZH[note.category] : CLASSROOM_TAB_LABELS[note.category];
 
+  // Audiobook — generated once per language (audio-actions.ts) and reused
+  // by every visitor; the owner sees a stale hint if the article text was
+  // edited since the last generation (hash mismatch) rather than the
+  // audio silently going out of sync with the text.
+  const audioLanguage: "en" | "zh" = content?.language === "zh" ? "zh" : "en";
+  const generateAudio = generateArticleAudioAction.bind(null, note.id, slug, audioLanguage);
+  const audioSegments = content?.audioSegments ?? [];
+  const currentBodyMarkdown = content?.bodyMarkdown ?? "";
+  const audioIsStale =
+    audioSegments.length > 0 &&
+    currentBodyMarkdown.trim() !== "" &&
+    content?.audioSourceHash !== speechTextHash(markdownToSpeechText(currentBodyMarkdown));
+
   return (
     <div className="flex flex-1 items-start gap-8">
       {/* Persistent "jump to any article" nav — hidden below lg so the
@@ -263,6 +279,15 @@ export default async function ClassroomArticlePage({
               className="rounded-md border border-accent/60 px-3 py-1.5 text-sm font-medium text-accent hover:bg-accent hover:text-accent-fg transition-colors disabled:opacity-60"
             />
           </form>
+          {content?.bodyMarkdown && (
+            <form action={generateAudio}>
+              <PendingFormButton
+                label={audioSegments.length > 0 ? `🔊 ${s.regenerateAudiobook}` : `🔊 ${s.generateAudiobook}`}
+                pendingLabel={s.generatingAudiobook}
+                className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-fg hover:border-accent hover:text-accent transition-colors disabled:opacity-60"
+              />
+            </form>
+          )}
           <PrivacyToggleButton
             noteId={note.id}
             slug={slug}
@@ -291,6 +316,21 @@ export default async function ClassroomArticlePage({
         <section className="rounded-lg border border-border bg-bg-elevated p-5">
           <Markdown>{content.bodyMarkdown}</Markdown>
         </section>
+      )}
+
+      {/* Audiobook — generated once (owner action above), played by
+          everyone. Visible regardless of session, same as the article
+          body itself. */}
+      {audioSegments.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <AudioPlayer
+            segments={audioSegments}
+            s={{ audioPartOf: s.audioPartOf, audioPrev: s.audioPrev, audioNext: s.audioNext }}
+          />
+          {session && audioIsStale && (
+            <p className="text-xs text-warn">⚠️ {s.audiobookStale}</p>
+          )}
+        </div>
       )}
 
       {guide ? (

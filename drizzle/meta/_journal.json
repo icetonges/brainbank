@@ -22,6 +22,13 @@
       "when": 1785688823563,
       "tag": "0002_large_dragon_man",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1786047003105,
+      "tag": "0003_breezy_zombie",
+      "breakpoints": true
     }
   ]
 }
