@@ -13,7 +13,8 @@
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
     "trends:fetch": "tsx scripts/fetch-trends.ts",
-    "github-trending:fetch": "tsx scripts/fetch-github-trending.ts"
+    "github-trending:fetch": "tsx scripts/fetch-github-trending.ts",
+    "audiobooks:generate": "tsx scripts/generate-audiobooks.ts"
   },
   "dependencies": {
     "@ai-sdk/google": "^4.0.31",
