@@ -130,26 +130,97 @@ function splitLongText(text: string, language: "en" | "zh" = "en"): string[] {
   return pieces;
 }
 
-/** Transient-failure safety net around a single TTS call — retries once
- *  before giving up, since a one-off network hiccup or a cold-loading
- *  model slot on agent-server shouldn't sacrifice an otherwise-good piece
- *  when a second attempt would likely just work. Does not attempt to
- *  detect a *truncated-but-successful* response (no reliable way to get
- *  audio duration from an mp3 buffer without a decoding dependency this
- *  repo doesn't have) — that class of failure is what the clause-level
- *  splitting above targets instead, by keeping every single call's input
- *  short enough that there's nothing left in it to truncate. */
-async function synthesizeSpeechWithRetry(
-  input: Parameters<typeof synthesizeSpeech>[0],
-): ReturnType<typeof synthesizeSpeech> {
+// Duration-based truncation check — the safety net the two comments above
+// this point both said didn't exist ("no reliable way to get audio
+// duration from an mp3 buffer without a decoding dependency this repo
+// doesn't have"). It exists now: music-metadata decodes just the header/
+// frame info (not the whole audio) to get duration cheaply. This matters
+// because clause-level splitting (above) removes the *known* trigger for
+// truncation, but doesn't prove there's no OTHER trigger (a stray "……",
+// an em dash, a run of whitespace, a Latin-script run inside CJK text —
+// anything not in the punctuation set splitLongText knows about). Rather
+// than keep chasing individual punctuation marks one production bug at a
+// time, this checks the actual observable symptom directly: does the
+// returned clip's length roughly match how long that much text should
+// take to read aloud. If it's implausibly short, that's a truncated
+// response regardless of *why*, and it's worth a retry.
+//
+// The per-language floor is deliberately generous (i.e. a low bar to
+// clear) — this only needs to catch "stopped after the first clause and
+// dropped the rest," not fine-tune against real narration speed, so a
+// wide margin against false-flagging a legitimately fast/short clip
+// matters more than precision.
+const MIN_CHARS_PER_SEC: Record<"en" | "zh", number> = { en: 8, zh: 2 };
+const MIN_EXPECTED_SECONDS = 0.35; // floor for very short pieces (a lone word)
+const MAX_TTS_ATTEMPTS = 3;
+
+function expectedMinSeconds(text: string, language: "en" | "zh"): number {
+  return Math.max(MIN_EXPECTED_SECONDS, text.length / MIN_CHARS_PER_SEC[language]);
+}
+
+/** Parses just enough of the mp3 to read its duration from the header/
+ *  frame data — not a full decode. Returns null (rather than throwing) on
+ *  anything music-metadata can't parse, so an unusual-but-valid response
+ *  from agent-server doesn't get treated as evidence of truncation just
+ *  because this repo's duration check couldn't read it. */
+async function getAudioDurationSeconds(buffer: Buffer, mimeType: string): Promise<number | null> {
   try {
-    return await synthesizeSpeech(input);
-  } catch (err) {
-    console.warn(
-      `[audiobook] TTS call failed, retrying once: ${err instanceof Error ? err.message : err}`,
-    );
-    return synthesizeSpeech(input);
+    const { parseBuffer } = await import("music-metadata");
+    const meta = await parseBuffer(buffer, mimeType);
+    return meta.format.duration ?? null;
+  } catch {
+    return null;
   }
+}
+
+/** One TTS call, retried (up to MAX_TTS_ATTEMPTS total) on either a thrown
+ *  error (network hiccup, cold-loading model slot on agent-server) OR a
+ *  suspiciously-short response (see the duration check above) — both are
+ *  "this attempt didn't actually produce the requested audio," just
+ *  discovered two different ways. Logs every attempt's outcome, including
+ *  the piece's own text, so a run against real content tells you exactly
+ *  which paragraph is still failing and how short the clip came back —
+ *  see this file's `npm run audiobooks:generate` for where that log
+ *  surfaces when run locally. Gives up and returns the last (possibly
+ *  still-short) result after MAX_TTS_ATTEMPTS rather than failing the
+ *  whole article generation over one stubborn clause. */
+async function synthesizeSpeechChecked(
+  input: Parameters<typeof synthesizeSpeech>[0],
+  language: "en" | "zh",
+): ReturnType<typeof synthesizeSpeech> {
+  const expected = expectedMinSeconds(input.text, language);
+  const preview = input.text.length > 40 ? `${input.text.slice(0, 40)}…` : input.text;
+  let last: Awaited<ReturnType<typeof synthesizeSpeech>> | undefined;
+
+  for (let attempt = 1; attempt <= MAX_TTS_ATTEMPTS; attempt++) {
+    let result: Awaited<ReturnType<typeof synthesizeSpeech>>;
+    try {
+      result = await synthesizeSpeech(input);
+    } catch (err) {
+      console.warn(
+        `[audiobook] TTS call failed (attempt ${attempt}/${MAX_TTS_ATTEMPTS}): ${err instanceof Error ? err.message : err} — "${preview}"`,
+      );
+      if (attempt === MAX_TTS_ATTEMPTS) throw err;
+      continue;
+    }
+    last = result;
+    const duration = await getAudioDurationSeconds(Buffer.from(result.audio), result.contentType);
+    if (duration === null) {
+      // Can't measure it — accept as-is rather than false-flagging.
+      return result;
+    }
+    if (duration >= expected) {
+      console.log(
+        `[audiobook] ok (${duration.toFixed(2)}s, expected ≥${expected.toFixed(2)}s, ${input.text.length} chars) — "${preview}"`,
+      );
+      return result;
+    }
+    console.warn(
+      `[audiobook] SUSPECTED TRUNCATION attempt ${attempt}/${MAX_TTS_ATTEMPTS}: got ${duration.toFixed(2)}s, expected ≥${expected.toFixed(2)}s for ${input.text.length} chars — "${preview}"`,
+    );
+  }
+  console.error(`[audiobook] giving up after ${MAX_TTS_ATTEMPTS} attempts, likely still truncated — "${preview}"`);
+  return last!;
 }
 
 export interface GenerateAudioResult {
@@ -200,7 +271,7 @@ export async function generateArticleAudio(
   for (const block of speakable) {
     const pieces = splitLongText(block.speechText!, language);
     for (let i = 0; i < pieces.length; i++) {
-      const { audio, contentType } = await synthesizeSpeechWithRetry({ text: pieces[i], voice });
+      const { audio, contentType } = await synthesizeSpeechChecked({ text: pieces[i], voice }, language);
       const ext = contentType.includes("wav") ? "wav" : contentType.includes("flac") ? "flac" : "mp3";
       const buffer = Buffer.from(audio);
       totalBytes += buffer.byteLength;
