@@ -226,11 +226,17 @@ async function synthesizeSpeechChecked(
   input: Parameters<typeof synthesizeSpeech>[0],
   language: "en" | "zh",
 ): ReturnType<typeof synthesizeSpeech> {
+  // `language` is threaded into every call now — see media.ts's
+  // TTS_LANGUAGE_NAME comment for why (a documented mlx-audio parameter
+  // this repo was never sending, which lines up with truncation right at
+  // a Chinese-to-English code-switch boundary with no punctuation cue,
+  // e.g. a Chinese sentence ending in an untagged English word).
+  const fullInput = { ...input, language };
   const preview = input.text.length > 40 ? `${input.text.slice(0, 40)}…` : input.text;
   await paceTtsCall();
   let result: Awaited<ReturnType<typeof synthesizeSpeech>>;
   try {
-    result = await synthesizeSpeech(input);
+    result = await synthesizeSpeech(fullInput);
   } catch (err) {
     if (err instanceof TtsRateLimitError) {
       const backoffMs = err.retryAfterMs ?? DEFAULT_RATE_LIMIT_BACKOFF_MS;
@@ -239,13 +245,13 @@ async function synthesizeSpeechChecked(
       );
       await sleep(backoffMs);
       await paceTtsCall();
-      result = await synthesizeSpeech(input);
+      result = await synthesizeSpeech(fullInput);
     } else {
       console.warn(
         `[audiobook] TTS call failed, retrying once: ${err instanceof Error ? err.message : err} — "${preview}"`,
       );
       await paceTtsCall();
-      result = await synthesizeSpeech(input);
+      result = await synthesizeSpeech(fullInput);
     }
   }
 

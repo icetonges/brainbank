@@ -70,6 +70,25 @@ function parseRetryAfterMs(header: string | null): number | null {
   return null;
 }
 
+// Maps this app's "en"/"zh" to the value mlx-audio's own qwen3-tts
+// generate_custom_voice() documents for its `language` argument (see
+// https://github.com/Blaizzy/mlx-audio/blob/main/mlx_audio/tts/models/qwen3_tts/README.md
+// — the example passes language="English" alongside a named `speaker`,
+// on the same predefined-voice code path our named TTS_VOICES_EN/ZH
+// entries indicate agent-server uses, not the voice-cloning Base model).
+// NOT CONFIRMED against agent-server's own schema — agent-server wraps
+// mlx-audio behind an OpenAI-compatible /v1/audio/speech route, and
+// OpenAI's own speech endpoint has no `language` field, so whether
+// agent-server forwards a same-named extra field through to mlx-audio's
+// `language=` argument is a question only agent-server's source (or its
+// live /openapi.json) can answer — check that before assuming this is
+// wired all the way through. Sent as a plain extra JSON field either way:
+// harmless if agent-server ignores unknown fields (typical FastAPI
+// behavior unless a route explicitly forbids extras), and directly fixes
+// the code-switch-boundary truncation (e.g. "BashTool 启动的后台 shell"
+// cutting off right before the untagged English word) if it's read.
+const TTS_LANGUAGE_NAME: Record<"en" | "zh", string> = { en: "English", zh: "Chinese" };
+
 /** Text-to-speech via agent-server's /v1/audio/speech (qwen3-tts). One
  *  call is one chunk — long text should be pre-split with chunkForSpeech
  *  below; agent-server/mlx-audio has a practical input-length ceiling and
@@ -80,6 +99,7 @@ export async function synthesizeSpeech(input: {
   voice?: string;
   speed?: number;
   format?: "mp3" | "wav" | "opus" | "flac";
+  language?: "en" | "zh";
 }): Promise<SpeechResult> {
   const format = input.format ?? "mp3";
   const res = await agentServerFetch("/v1/audio/speech", {
@@ -91,6 +111,7 @@ export async function synthesizeSpeech(input: {
       voice: input.voice,
       speed: input.speed,
       response_format: format,
+      ...(input.language ? { language: TTS_LANGUAGE_NAME[input.language] } : {}),
     }),
   });
   if (!res.ok) {
