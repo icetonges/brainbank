@@ -15,7 +15,7 @@
 import { db } from "../db";
 import { noteContent } from "../db/schema";
 import { eq, and } from "drizzle-orm";
-import { synthesizeSpeech, speechTextHash } from "./media";
+import { synthesizeSpeech, speechTextHash, TtsRateLimitError } from "./media";
 import { splitMarkdownBlocks, speechTextForStaleness } from "../markdown-blocks";
 import { uploadBufferToR2 } from "../storage/r2";
 
@@ -159,6 +159,43 @@ function expectedMinSeconds(text: string, language: "en" | "zh"): number {
   return Math.max(MIN_EXPECTED_SECONDS, text.length / MIN_CHARS_PER_SEC[language]);
 }
 
+// Client-side pacing for agent-server's own per-key rate limit — observed
+// directly against production: "rate limit exceeded: 60 requests/minute
+// for this key", a 429 from agent-server itself (not from qwen3-tts or
+// mlx-audio, and not documented anywhere in THIS repo — agent-server is a
+// separate project; see agent-server-patch/README.md for what little
+// about it lives here). Nothing paced calls before this, and clause-level
+// splitting (above) increases how many calls one article needs, which is
+// what pushed a real run over the limit.
+//
+// 1500ms between calls (= 40/min) is deliberately well under 60, not
+// shaved close to it: agent-server's exact window algorithm (fixed vs.
+// sliding minute, whether other endpoints share the same budget as
+// /v1/audio/speech, whether there's burst allowance) isn't known from
+// this codebase. If 429s still happen after this, that's the place to
+// look — agent-server's own rate-limiter source or its /docs, not a
+// tighter guess made from here — and MIN_CALL_INTERVAL_MS below is the
+// one number to adjust once the real policy is known.
+const MIN_CALL_INTERVAL_MS = 1500;
+const DEFAULT_RATE_LIMIT_BACKOFF_MS = 20_000; // used only when agent-server sends no Retry-After
+let lastTtsCallAt = 0;
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Blocks until at least MIN_CALL_INTERVAL_MS has passed since the last
+ *  TTS call started. Module-level state, not per-request — correct here
+ *  because generateArticleAudio already calls agent-server strictly
+ *  sequentially (see that function's comment on why), so there's only
+ *  ever one caller pacing itself against its own last call, never two
+ *  concurrent generations racing this timestamp. */
+async function paceTtsCall(): Promise<void> {
+  const wait = lastTtsCallAt + MIN_CALL_INTERVAL_MS - Date.now();
+  if (wait > 0) await sleep(wait);
+  lastTtsCallAt = Date.now();
+}
+
 /** Parses just enough of the mp3 to read its duration from the header/
  *  frame data — not a full decode. Returns null (rather than throwing) on
  *  anything music-metadata can't parse, so an unusual-but-valid response
@@ -174,24 +211,42 @@ async function getAudioDurationSeconds(buffer: Buffer, mimeType: string): Promis
   }
 }
 
-/** One TTS call — retries ONCE, only on a thrown error (network hiccup,
- *  cold-loading model slot on agent-server), same as the original,
- *  pre-duration-check behavior. Never retries based on the duration
- *  heuristic (see the comment above for why that turned out unsafe
- *  against a real local backend) — it only logs what it measured. */
+/** One TTS call — paced against agent-server's rate limit (see above),
+ *  then retried on a thrown error: once for an ordinary failure (network
+ *  hiccup, cold-loading model slot), or specifically on a 429 by waiting
+ *  out agent-server's own Retry-After (falling back to a fixed guess if
+ *  it didn't send one) before the retry, rather than immediately
+ *  re-firing into an active rate-limit window — which is exactly what
+ *  blind retry-once did against a real 429 (see the error log this fix
+ *  responds to: the retry failed with the identical 429 a heartbeat
+ *  later). Never retries based on the duration heuristic (see the
+ *  comment above for why that turned out unsafe against a real local
+ *  backend) — it only logs what it measured. */
 async function synthesizeSpeechChecked(
   input: Parameters<typeof synthesizeSpeech>[0],
   language: "en" | "zh",
 ): ReturnType<typeof synthesizeSpeech> {
   const preview = input.text.length > 40 ? `${input.text.slice(0, 40)}…` : input.text;
+  await paceTtsCall();
   let result: Awaited<ReturnType<typeof synthesizeSpeech>>;
   try {
     result = await synthesizeSpeech(input);
   } catch (err) {
-    console.warn(
-      `[audiobook] TTS call failed, retrying once: ${err instanceof Error ? err.message : err} — "${preview}"`,
-    );
-    result = await synthesizeSpeech(input);
+    if (err instanceof TtsRateLimitError) {
+      const backoffMs = err.retryAfterMs ?? DEFAULT_RATE_LIMIT_BACKOFF_MS;
+      console.warn(
+        `[audiobook] rate limited by agent-server, waiting ${(backoffMs / 1000).toFixed(1)}s before retrying: ${err.message} — "${preview}"`,
+      );
+      await sleep(backoffMs);
+      await paceTtsCall();
+      result = await synthesizeSpeech(input);
+    } else {
+      console.warn(
+        `[audiobook] TTS call failed, retrying once: ${err instanceof Error ? err.message : err} — "${preview}"`,
+      );
+      await paceTtsCall();
+      result = await synthesizeSpeech(input);
+    }
   }
 
   const duration = await getAudioDurationSeconds(Buffer.from(result.audio), result.contentType);

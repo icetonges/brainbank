@@ -37,6 +37,39 @@ export interface SpeechResult {
   contentType: string;
 }
 
+/** Thrown specifically for a 429 from agent-server's own per-key rate
+ *  limiter (observed directly in production: "rate limit exceeded: 60
+ *  requests/minute for this key") — kept distinct from the generic
+ *  Error below so a caller doing many sequential calls (lib/ai/audiobook.ts)
+ *  can back off and retry instead of treating it like any other failure.
+ *  `retryAfterMs` is populated from the response's Retry-After header when
+ *  agent-server sends one; null means it didn't, and the caller has to
+ *  fall back to its own guessed backoff. */
+export class TtsRateLimitError extends Error {
+  readonly retryAfterMs: number | null;
+  constructor(message: string, retryAfterMs: number | null) {
+    super(message);
+    this.name = "TtsRateLimitError";
+    this.retryAfterMs = retryAfterMs;
+  }
+}
+
+/** Retry-After can be either delay-seconds ("120") or an HTTP-date — both
+ *  are valid per RFC 9110 §10.2.3, and nothing about agent-server's own
+ *  implementation is documented in this repo (it's a separate project —
+ *  see agent-server-patch/README.md), so this handles both rather than
+ *  assuming the simpler numeric form. Returns null if the header is
+ *  absent or unparseable, not 0 — the caller needs to tell "server told
+ *  us how long to wait" apart from "server didn't say." */
+function parseRetryAfterMs(header: string | null): number | null {
+  if (!header) return null;
+  const seconds = Number(header);
+  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+  const dateMs = Date.parse(header);
+  if (!Number.isNaN(dateMs)) return Math.max(0, dateMs - Date.now());
+  return null;
+}
+
 /** Text-to-speech via agent-server's /v1/audio/speech (qwen3-tts). One
  *  call is one chunk — long text should be pre-split with chunkForSpeech
  *  below; agent-server/mlx-audio has a practical input-length ceiling and
@@ -62,6 +95,12 @@ export async function synthesizeSpeech(input: {
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
+    if (res.status === 429) {
+      throw new TtsRateLimitError(
+        `Text-to-speech rate limited (429): ${body.slice(0, 300)}`,
+        parseRetryAfterMs(res.headers.get("retry-after")),
+      );
+    }
     throw new Error(`Text-to-speech failed (${res.status}): ${body.slice(0, 300)}`);
   }
   const audio = await res.arrayBuffer();
