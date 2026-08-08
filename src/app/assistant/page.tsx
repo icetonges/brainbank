@@ -161,12 +161,14 @@ export default async function AssistantPage({
             label={s.statKnows}
             hint={`${stats.pinnedAtoms} ${s.statPinned}`}
             accent="#3b82f6"
+            href={isEmpty ? undefined : "#knowledge-map"}
           />
           <StatCard
             value={stats.reinforcements}
             label={s.statCorroborated}
             hint={s.statCorroboratedHint}
             accent="#22c55e"
+            href={isEmpty ? undefined : "#knowledge-map"}
           />
           <StatCard
             value={stats.totalLinks}
@@ -177,6 +179,13 @@ export default async function AssistantPage({
                 : s.statNoTensions
             }
             accent="#8b5cf6"
+            href={
+              stats.openContradictions > 0
+                ? "#tensions"
+                : isEmpty
+                  ? undefined
+                  : "#knowledge-map"
+            }
           />
           <StatCard
             value={stats.diaryEntries}
@@ -185,6 +194,7 @@ export default async function AssistantPage({
               stats.undistilled > 0 ? `${stats.undistilled} ${s.statPending}` : s.statAllDistilled
             }
             accent="#f59e0b"
+            href="/diary"
           />
         </div>
 
@@ -277,7 +287,7 @@ export default async function AssistantPage({
           {/* Contradictions first — unresolved tension is the highest-value
               thing to look at, and burying it would defeat the purpose. */}
           {contradictions.length > 0 && (
-            <section className="flex flex-col gap-3">
+            <section id="tensions" className="flex scroll-mt-6 flex-col gap-3">
               <h2 className="flex items-center gap-2 text-lg font-semibold text-fg">
                 ⚡ {s.tensionsTitle}
                 <span className="rounded-full bg-danger/15 px-2 py-0.5 text-xs font-semibold text-danger">
@@ -294,7 +304,7 @@ export default async function AssistantPage({
             <InsightDeck insights={insights} lang={lang} />
           </section>
 
-          <section className="flex flex-col gap-3">
+          <section id="knowledge-map" className="flex scroll-mt-6 flex-col gap-3">
             <h2 className="text-lg font-semibold text-fg">🌌 {s.mapTitle}</h2>
             <p className="-mt-1 text-sm text-fg-secondary">{s.mapHint}</p>
             <KnowledgeWorkbench atoms={atoms} links={links} lang={lang} />
@@ -339,20 +349,41 @@ function StatCard({
   label,
   hint,
   accent,
+  href,
 }: {
   value: number;
   label: string;
   hint: string;
   accent: string;
+  /** Where the card navigates to — an in-page anchor (e.g. "#knowledge-map")
+   *  or a route (e.g. "/diary"). Omit to render a plain, non-interactive
+   *  card (used when the section it would point to isn't rendered, e.g.
+   *  the knowledge map before the first atom exists). */
+  href?: string;
 }) {
-  return (
-    <div
-      className="flex flex-col gap-0.5 rounded-2xl border border-border bg-bg-elevated p-4"
-      style={{ borderLeftWidth: 3, borderLeftColor: accent }}
-    >
+  const className =
+    "flex flex-col gap-0.5 rounded-2xl border border-border bg-bg-elevated p-4 text-left" +
+    (href ? " transition-colors hover:border-accent" : "");
+  const style = { borderLeftWidth: 3, borderLeftColor: accent };
+  const content = (
+    <>
       <span className="text-3xl font-bold tabular-nums text-fg">{value}</span>
       <span className="text-sm font-medium text-fg">{label}</span>
       <span className="text-xs text-fg-secondary">{hint}</span>
+    </>
+  );
+
+  if (href) {
+    return (
+      <Link href={href} className={className} style={style}>
+        {content}
+      </Link>
+    );
+  }
+
+  return (
+    <div className={className} style={style}>
+      {content}
     </div>
   );
 }

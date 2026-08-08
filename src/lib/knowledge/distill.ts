@@ -261,11 +261,28 @@ export async function distillDiaryEntry(noteId: number): Promise<DistillResult> 
         // single Ollama instance (same reasoning as the translate loop in
         // tasks.ts — concurrent dispatch just queues them while each
         // call's own timeout keeps counting).
-        const { verdict, rationale } = await reconcileAtom(candidate, {
-          kind: match.kind,
-          statement: match.statement,
-          detail: match.detail,
-        });
+        let outcome: { verdict: string; rationale: string };
+        try {
+          outcome = await reconcileAtom(candidate, {
+            kind: match.kind,
+            statement: match.statement,
+            detail: match.detail,
+          });
+        } catch (err) {
+          // An unreadable reconcile response (garbled JSON, a hallucinated
+          // tool call, a timeout) used to throw out of this whole
+          // function — aborting every OTHER candidate in this entry too,
+          // including ones already handled fine, and leaving the entry
+          // permanently stuck in the "awaiting extraction" backlog since
+          // it never reaches the distilledAt update below, no matter how
+          // many times the owner clicks catch-up. Treating one unreadable
+          // comparison as "no match on this candidate" keeps the rest of
+          // the run going — worst case is a duplicate atom (cheap, and
+          // mergeable later from /assistant), not the entire entry lost.
+          console.error("[knowledge] reconcile failed, treating as no match", err);
+          continue;
+        }
+        const { verdict, rationale } = outcome;
 
         if (verdict === "same") {
           if (await reinforceAtom(match.id, candidate, noteId)) atomsReinforced++;
