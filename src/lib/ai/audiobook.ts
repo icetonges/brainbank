@@ -130,29 +130,30 @@ function splitLongText(text: string, language: "en" | "zh" = "en"): string[] {
   return pieces;
 }
 
-// Duration-based truncation check — the safety net the two comments above
-// this point both said didn't exist ("no reliable way to get audio
-// duration from an mp3 buffer without a decoding dependency this repo
-// doesn't have"). It exists now: music-metadata decodes just the header/
-// frame info (not the whole audio) to get duration cheaply. This matters
-// because clause-level splitting (above) removes the *known* trigger for
-// truncation, but doesn't prove there's no OTHER trigger (a stray "……",
-// an em dash, a run of whitespace, a Latin-script run inside CJK text —
-// anything not in the punctuation set splitLongText knows about). Rather
-// than keep chasing individual punctuation marks one production bug at a
-// time, this checks the actual observable symptom directly: does the
-// returned clip's length roughly match how long that much text should
-// take to read aloud. If it's implausibly short, that's a truncated
-// response regardless of *why*, and it's worth a retry.
-//
-// The per-language floor is deliberately generous (i.e. a low bar to
-// clear) — this only needs to catch "stopped after the first clause and
-// dropped the rest," not fine-tune against real narration speed, so a
-// wide margin against false-flagging a legitimately fast/short clip
-// matters more than precision.
-const MIN_CHARS_PER_SEC: Record<"en" | "zh", number> = { en: 8, zh: 2 };
-const MIN_EXPECTED_SECONDS = 0.35; // floor for very short pieces (a lone word)
-const MAX_TTS_ATTEMPTS = 3;
+// Duration-based truncation check — logs the actual vs. expected clip
+// length so a real run's console output tells you which pieces look
+// suspicious, WITHOUT retrying based on that signal. It used to retry
+// (up to 3x per piece) on anything under the floor, which sounded right
+// in theory but broke against a real run: qwen3-tts here reads Chinese at
+// something like 3.5-6.5+ chars/sec (much faster than the first guessed
+// floor of 2), so nearly every short, completely-normal clip measured
+// "too short" against that floor and got retried 3 times for nothing —
+// tripling call volume against a local, single-model-slot TTS backend,
+// which is almost certainly what produced the "could not reach TTS
+// service at http://127.0.0.1:8090" 502s partway through that run (the
+// backend didn't recover; it got hammered off the back of a bad
+// heuristic). A duration floor that's loose enough to not misfire on a
+// fast-but-complete short clause is also too loose to reliably tell
+// "read fast" apart from "dropped the last few characters" — the signal
+// just isn't precise enough at that resolution to safely automate a
+// retry loop against a resource-constrained local model server. So: this
+// stays purely informational (one log line per piece, real duration vs a
+// deliberately generous floor) for a human to spot-check, and the actual
+// defense against truncation is the clause-level splitting above, which
+// removes the mechanism (multi-clause spans with a punctuation mark
+// mid-piece) rather than trying to detect its symptom after the fact.
+const MIN_CHARS_PER_SEC: Record<"en" | "zh", number> = { en: 15, zh: 8 };
+const MIN_EXPECTED_SECONDS = 0.3; // floor for very short pieces (a lone word)
 
 function expectedMinSeconds(text: string, language: "en" | "zh"): number {
   return Math.max(MIN_EXPECTED_SECONDS, text.length / MIN_CHARS_PER_SEC[language]);
@@ -173,54 +174,36 @@ async function getAudioDurationSeconds(buffer: Buffer, mimeType: string): Promis
   }
 }
 
-/** One TTS call, retried (up to MAX_TTS_ATTEMPTS total) on either a thrown
- *  error (network hiccup, cold-loading model slot on agent-server) OR a
- *  suspiciously-short response (see the duration check above) — both are
- *  "this attempt didn't actually produce the requested audio," just
- *  discovered two different ways. Logs every attempt's outcome, including
- *  the piece's own text, so a run against real content tells you exactly
- *  which paragraph is still failing and how short the clip came back —
- *  see this file's `npm run audiobooks:generate` for where that log
- *  surfaces when run locally. Gives up and returns the last (possibly
- *  still-short) result after MAX_TTS_ATTEMPTS rather than failing the
- *  whole article generation over one stubborn clause. */
+/** One TTS call — retries ONCE, only on a thrown error (network hiccup,
+ *  cold-loading model slot on agent-server), same as the original,
+ *  pre-duration-check behavior. Never retries based on the duration
+ *  heuristic (see the comment above for why that turned out unsafe
+ *  against a real local backend) — it only logs what it measured. */
 async function synthesizeSpeechChecked(
   input: Parameters<typeof synthesizeSpeech>[0],
   language: "en" | "zh",
 ): ReturnType<typeof synthesizeSpeech> {
-  const expected = expectedMinSeconds(input.text, language);
   const preview = input.text.length > 40 ? `${input.text.slice(0, 40)}…` : input.text;
-  let last: Awaited<ReturnType<typeof synthesizeSpeech>> | undefined;
-
-  for (let attempt = 1; attempt <= MAX_TTS_ATTEMPTS; attempt++) {
-    let result: Awaited<ReturnType<typeof synthesizeSpeech>>;
-    try {
-      result = await synthesizeSpeech(input);
-    } catch (err) {
-      console.warn(
-        `[audiobook] TTS call failed (attempt ${attempt}/${MAX_TTS_ATTEMPTS}): ${err instanceof Error ? err.message : err} — "${preview}"`,
-      );
-      if (attempt === MAX_TTS_ATTEMPTS) throw err;
-      continue;
-    }
-    last = result;
-    const duration = await getAudioDurationSeconds(Buffer.from(result.audio), result.contentType);
-    if (duration === null) {
-      // Can't measure it — accept as-is rather than false-flagging.
-      return result;
-    }
-    if (duration >= expected) {
-      console.log(
-        `[audiobook] ok (${duration.toFixed(2)}s, expected ≥${expected.toFixed(2)}s, ${input.text.length} chars) — "${preview}"`,
-      );
-      return result;
-    }
+  let result: Awaited<ReturnType<typeof synthesizeSpeech>>;
+  try {
+    result = await synthesizeSpeech(input);
+  } catch (err) {
     console.warn(
-      `[audiobook] SUSPECTED TRUNCATION attempt ${attempt}/${MAX_TTS_ATTEMPTS}: got ${duration.toFixed(2)}s, expected ≥${expected.toFixed(2)}s for ${input.text.length} chars — "${preview}"`,
+      `[audiobook] TTS call failed, retrying once: ${err instanceof Error ? err.message : err} — "${preview}"`,
     );
+    result = await synthesizeSpeech(input);
   }
-  console.error(`[audiobook] giving up after ${MAX_TTS_ATTEMPTS} attempts, likely still truncated — "${preview}"`);
-  return last!;
+
+  const duration = await getAudioDurationSeconds(Buffer.from(result.audio), result.contentType);
+  if (duration !== null) {
+    const expected = expectedMinSeconds(input.text, language);
+    if (duration < expected) {
+      console.warn(
+        `[audiobook] short clip (informational only, not retried): got ${duration.toFixed(2)}s, expected ≥${expected.toFixed(2)}s for ${input.text.length} chars — "${preview}"`,
+      );
+    }
+  }
+  return result;
 }
 
 export interface GenerateAudioResult {
