@@ -54,5 +54,5 @@ export async function pickModel(
       "Local LLM unavailable and GOOGLE_GENERATIVE_AI_API_KEY is not set — nothing left in the chain to generate with.",
     );
   }
-  return { model: resolveModel("google/gemini-2.5-flash-lite"), label: "gemini" };
+  return { model: resolveModel("google/gemini-3.5-flash-lite"), label: "gemini" };
 }
