@@ -191,34 +191,17 @@ function splitLongText(text: string, language: "en" | "zh" = "en"): string[] {
   return pieces;
 }
 
-// Duration-based truncation check — logs the actual vs. expected clip
-// length so a real run's console output tells you which pieces look
-// suspicious, WITHOUT retrying based on that signal. It used to retry
-// (up to 3x per piece) on anything under the floor, which sounded right
-// in theory but broke against a real run: qwen3-tts here reads Chinese at
-// something like 3.5-6.5+ chars/sec (much faster than the first guessed
-// floor of 2), so nearly every short, completely-normal clip measured
-// "too short" against that floor and got retried 3 times for nothing —
-// tripling call volume against a local, single-model-slot TTS backend,
-// which is almost certainly what produced the "could not reach TTS
-// service at http://127.0.0.1:8090" 502s partway through that run (the
-// backend didn't recover; it got hammered off the back of a bad
-// heuristic). A duration floor that's loose enough to not misfire on a
-// fast-but-complete short clause is also too loose to reliably tell
-// "read fast" apart from "dropped the last few characters" — the signal
-// just isn't precise enough at that resolution to safely automate a
-// retry loop against a resource-constrained local model server. So: this
-// stays purely informational (one log line per piece, real duration vs a
-// deliberately generous floor) for a human to spot-check, and the actual
-// defense against truncation is the clause-level splitting above, which
-// removes the mechanism (multi-clause spans with a punctuation mark
-// mid-piece) rather than trying to detect its symptom after the fact.
-const MIN_CHARS_PER_SEC: Record<"en" | "zh", number> = { en: 15, zh: 8 };
-const MIN_EXPECTED_SECONDS = 0.3; // floor for very short pieces (a lone word)
-
-function expectedMinSeconds(text: string, language: "en" | "zh"): number {
-  return Math.max(MIN_EXPECTED_SECONDS, text.length / MIN_CHARS_PER_SEC[language]);
-}
+// An earlier version of this file tried an absolute duration floor here
+// (chars-per-second by language) and retried anything under it. Dropped
+// entirely — not just the retry, the floor itself: a real production run
+// showed completely legitimate, deterministic clips at 3.5-6.5+ chars/sec
+// for Chinese, meaning "read fast" and "got truncated" produce duration
+// numbers in the same range and can't be told apart by an absolute
+// threshold. What replaced it (synthesizeSpeechChecked below) uses a
+// RELATIVE comparison instead — two independent samples of the same
+// text, keep whichever is longer — which needs no assumed correct rate at
+// all. See that function's comment for the confirmed upstream bug this is
+// actually mitigating.
 
 // Client-side pacing for agent-server's own per-key rate limit — observed
 // directly against production: "rate limit exceeded: 60 requests/minute
@@ -272,32 +255,23 @@ async function getAudioDurationSeconds(buffer: Buffer, mimeType: string): Promis
   }
 }
 
-/** One TTS call — paced against agent-server's rate limit (see above),
- *  then retried on a thrown error: once for an ordinary failure (network
- *  hiccup, cold-loading model slot), or specifically on a 429 by waiting
- *  out agent-server's own Retry-After (falling back to a fixed guess if
- *  it didn't send one) before the retry, rather than immediately
- *  re-firing into an active rate-limit window — which is exactly what
- *  blind retry-once did against a real 429 (see the error log this fix
- *  responds to: the retry failed with the identical 429 a heartbeat
- *  later). Never retries based on the duration heuristic (see the
- *  comment above for why that turned out unsafe against a real local
- *  backend) — it only logs what it measured. */
-async function synthesizeSpeechChecked(
-  input: Parameters<typeof synthesizeSpeech>[0],
-  language: "en" | "zh",
+/** One TTS call — paced against agent-server's rate limit, then retried
+ *  on a thrown error: once for an ordinary failure (network hiccup,
+ *  cold-loading model slot), or specifically on a 429 by waiting out
+ *  agent-server's own Retry-After (or a fixed guess if it sent none)
+ *  before retrying, rather than immediately re-firing into an active
+ *  rate-limit window. Does not know or care about duration — that's
+ *  handled a level up now (see synthesizeSpeechChecked's comment for
+ *  why: this repo's own duration floor can't reliably tell "read fast"
+ *  from "truncated," but Qwen3-TTS itself has a confirmed, documented
+ *  truncation bug independent of text content). */
+async function synthesizeOnce(
+  fullInput: Parameters<typeof synthesizeSpeech>[0],
+  preview: string,
 ): ReturnType<typeof synthesizeSpeech> {
-  // `language` is threaded into every call now — see media.ts's
-  // TTS_LANGUAGE_NAME comment for why (a documented mlx-audio parameter
-  // this repo was never sending, which lines up with truncation right at
-  // a Chinese-to-English code-switch boundary with no punctuation cue,
-  // e.g. a Chinese sentence ending in an untagged English word).
-  const fullInput = { ...input, language };
-  const preview = input.text.length > 40 ? `${input.text.slice(0, 40)}…` : input.text;
   await paceTtsCall();
-  let result: Awaited<ReturnType<typeof synthesizeSpeech>>;
   try {
-    result = await synthesizeSpeech(fullInput);
+    return await synthesizeSpeech(fullInput);
   } catch (err) {
     if (err instanceof TtsRateLimitError) {
       const backoffMs = err.retryAfterMs ?? DEFAULT_RATE_LIMIT_BACKOFF_MS;
@@ -306,26 +280,74 @@ async function synthesizeSpeechChecked(
       );
       await sleep(backoffMs);
       await paceTtsCall();
-      result = await synthesizeSpeech(fullInput);
-    } else {
-      console.warn(
-        `[audiobook] TTS call failed, retrying once: ${err instanceof Error ? err.message : err} — "${preview}"`,
-      );
-      await paceTtsCall();
-      result = await synthesizeSpeech(fullInput);
+      return synthesizeSpeech(fullInput);
     }
+    console.warn(
+      `[audiobook] TTS call failed, retrying once: ${err instanceof Error ? err.message : err} — "${preview}"`,
+    );
+    await paceTtsCall();
+    return synthesizeSpeech(fullInput);
   }
+}
 
-  const duration = await getAudioDurationSeconds(Buffer.from(result.audio), result.contentType);
-  if (duration !== null) {
-    const expected = expectedMinSeconds(input.text, language);
-    if (duration < expected) {
-      console.warn(
-        `[audiobook] short clip (informational only, not retried): got ${duration.toFixed(2)}s, expected ≥${expected.toFixed(2)}s for ${input.text.length} chars — "${preview}"`,
-      );
+// Best-of-N sampling — the actual mitigation for a CONFIRMED upstream bug,
+// not a guess. Qwen3-TTS's own generation code caps how many audio tokens
+// it's allowed to produce using a formula tied to input text length
+// (`effective_max_tokens = min(max_tokens, max(75, target_token_count *
+// 6))`, found in mlx_audio/tts/models/qwen3_tts/qwen3_tts.py's
+// _generate_icl/_generate_with_instruct — see
+// https://github.com/jundot/omlx/issues/843), so generation can hit that
+// ceiling and stop mid-utterance independent of chunking, punctuation, or
+// script — confirmed independently by
+// https://github.com/Blaizzy/mlx-audio/issues/464, where dropout persisted
+// "even with added punctuation" across multiple phrasings. The real fix is
+// server-side (raising that multiplier in agent-server's own mlx-audio
+// install — the omlx reporter changed it from 6 to 16 and said truncation
+// "improved significantly"); this repo can't reach that code.
+//
+// What this repo CAN do: the failure is evidently stochastic (not every
+// attempt on the same text truncates — this matches a real production log
+// where identical text produced different durations across retries). So
+// take N independent samples of the same piece and keep the longest one —
+// no assumed "correct" speaking rate required (that's what made the
+// earlier duration-floor retry unreliable: it couldn't tell fast-but-
+// complete apart from truncated using an absolute threshold). A relative
+// "which of these is longer" comparison sidesteps that entirely. 2 is a
+// deliberate balance: each independent draw that avoids the bug roughly
+// squares the chance BOTH draws hit it, without doubling generation time
+// into something impractical for a large article now that calls are
+// already paced 1500ms apart.
+const SYNTHESIS_ATTEMPTS_PER_PIECE = 2;
+
+async function synthesizeSpeechChecked(
+  input: Parameters<typeof synthesizeSpeech>[0],
+  language: "en" | "zh",
+): ReturnType<typeof synthesizeSpeech> {
+  // `language` is threaded into every call — see media.ts's
+  // TTS_LANGUAGE_NAME comment for why (a documented mlx-audio parameter
+  // this repo was never sending).
+  const fullInput = { ...input, language };
+  const preview = input.text.length > 40 ? `${input.text.slice(0, 40)}…` : input.text;
+
+  let best: Awaited<ReturnType<typeof synthesizeSpeech>> | null = null;
+  let bestDuration = -1;
+  for (let attempt = 1; attempt <= SYNTHESIS_ATTEMPTS_PER_PIECE; attempt++) {
+    const result = await synthesizeOnce(fullInput, preview);
+    const duration = await getAudioDurationSeconds(Buffer.from(result.audio), result.contentType);
+    console.log(
+      `[audiobook] attempt ${attempt}/${SYNTHESIS_ATTEMPTS_PER_PIECE}: ${duration !== null ? `${duration.toFixed(2)}s` : "duration unknown"}, ${input.text.length} chars — "${preview}"`,
+    );
+    // duration === null means music-metadata couldn't read it (not
+    // evidence of truncation) — only replace `best` on a STRICTLY longer
+    // measured duration, so an unmeasurable result never displaces an
+    // already-measured one, and the first result is always the fallback
+    // if nothing is ever measurable.
+    if (best === null || (duration !== null && duration > bestDuration)) {
+      best = result;
+      bestDuration = duration ?? bestDuration;
     }
   }
-  return result;
+  return best!;
 }
 
 export interface GenerateAudioResult {
