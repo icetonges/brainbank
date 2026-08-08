@@ -64,6 +64,29 @@ import { uploadBufferToR2 } from "../storage/r2";
 //     instead of one merged one — a minor UX cost, deliberately accepted
 //     over the alternative of silently losing words again.
 //
+//  4. (Found and REVERTED after shipping.) A follow-up attempt also split
+//     every piece at CJK<->Latin script transitions, on the theory that
+//     an untagged Chinese-to-English code-switch (e.g. "BashTool 启动的
+//     后台 shell") was a separate truncation trigger the punctuation split
+//     couldn't catch. It technically worked for that one symptom, but
+//     created a much worse one, confirmed directly from a production
+//     Network-tab capture: one ordinary sentence mixing a few English
+//     terms into Chinese prose ("LSPTool 将 IDE 的语言服务器协议统一封装为
+//     Agent 工具，使 Claude Code 从文本搜索升级为语义级代码理解。") was
+//     being cut into FIVE separate mp3 files for ONE clause alone —
+//     "LSPTool", "将", "IDE", "的语言服务器协议统一封装为", "Agent",
+//     "工具，" as isolated one-or-two-word clips chained together. Even
+//     with flawless playback and zero truncation in any individual clip,
+//     that many clip boundaries inside one sentence is indistinguishable
+//     from constant pausing — which is exactly what kept getting reported
+//     ("pauses at spaces, commas, special characters") even after the
+//     player's auto-advance bug was separately fixed. The fragmentation
+//     itself was the remaining problem. Reverted; see
+//     synthesizeSpeechChecked's comment below for why best-of-2 sampling
+//     is the better trade for whatever code-switch truncation risk
+//     remains, instead of pre-emptively shattering every mixed-language
+//     sentence into single-word clips.
+//
 // Chinese also gets a lower absolute ceiling than English (MAX_TTS_CHARS
 // per language) since it packs far more spoken content per character (no
 // inter-word spaces, each character is a full syllable) — the same
@@ -94,64 +117,9 @@ function hardSlice(text: string, maxChars: number): string[] {
  *  maxChars. Scoped to one markdown block's text, never merging across
  *  paragraph boundaries (see the audioSegments comment in db/schema.ts
  *  for why per-block generation replaced the old whole-article chunker in
- *  the first place). */
-// Script-boundary split — a DIFFERENT failure mode from the punctuation
-// one above, found from a real production example with NO punctuation at
-// all: "BashTool 启动的后台 shell" (a list item mixing an inline-code
-// English term into Chinese prose) truncates right at the Chinese-to-
-// English boundary, mid-utterance, with nothing for the earlier fix to
-// split on. Checked against mlx-audio's own docs (github.com/Blaizzy/
-// mlx-audio): every documented voice is single-language (Chinese:
-// Vivian/Serena/Uncle_Fu/Dylan/Eric, English: Ryan/Aiden), and the
-// generate_custom_voice() call takes ONE `language` value per call, not
-// per-span — nothing in its public API or examples shows it handling an
-// UNTAGGED language switch mid-utterance. Sending a `language` hint
-// (media.ts) assumes the model can still parse a code-switch once told
-// which language the SURROUNDING text is in; that's a real, documented
-// parameter, but nothing confirms it makes the model handle an embedded
-// foreign-script run correctly rather than just picking a phonemizer for
-// the dominant language and still stumbling on the minority-script span.
-//
-// So: stop asking it to code-switch within one call at all. Split every
-// piece at CJK<->Latin script transitions, so each individual TTS call is
-// single-script by construction — matching the one case the docs actually
-// demonstrate working, instead of relying on unverified cross-script
-// robustness. "BashTool 启动的后台 shell" becomes three separate calls
-// ("BashTool", "启动的后台", "shell"), each its own audio segment stitched
-// back into the same block by the existing multi-segment player (see
-// audio-player.tsx / listenable-article.tsx — already built for "a block
-// can be more than one clip", nothing new needed on the playback side).
-const CJK_CHAR = /[㐀-鿿豈-﫿　-〿＀-￯]/;
-const LATIN_CHAR = /[A-Za-z0-9]/;
-
-/** Splits text into maximal same-script runs — a run of CJK characters,
- *  or a run of Latin letters/digits (internal spaces/punctuation don't
- *  break a Latin run, so "Claude Code" or "BashTool." stay one piece;
- *  only an actual script change does). Neutral characters (whitespace,
- *  punctuation) extend whichever run they trail rather than starting a
- *  new one or forcing a break by themselves — only a CJK<->Latin
- *  transition is a split point. A single-script input (a normal English
- *  or Chinese-only string) returns unchanged as one run: this is a
- *  targeted fix for mixed-script spans, not a general re-splitter. */
-function splitByScript(text: string): string[] {
-  const runs: string[] = [];
-  let current = "";
-  let currentType: "cjk" | "latin" | null = null;
-  for (const ch of text) {
-    const type = CJK_CHAR.test(ch) ? "cjk" : LATIN_CHAR.test(ch) ? "latin" : null;
-    if (type === null || currentType === null || type === currentType) {
-      current += ch;
-      if (type !== null) currentType = type;
-    } else {
-      if (current) runs.push(current);
-      current = ch;
-      currentType = type;
-    }
-  }
-  if (current) runs.push(current);
-  return runs;
-}
-
+ *  the first place). Deliberately punctuation-only now — no script-
+ *  boundary splitting (see header comment point 4 for why that was tried
+ *  and reverted). */
 function splitLongText(text: string, language: "en" | "zh" = "en"): string[] {
   const maxChars = maxCharsFor(language);
   const fragments = text.split(/(?<=[.!?。！？,，、;；:：])\s*/).filter(Boolean);
@@ -172,20 +140,13 @@ function splitLongText(text: string, language: "en" | "zh" = "en"): string[] {
   // trailing delimiter would end up mid-string. So it's just left as its
   // own short, standalone piece — a minor one-word clip at worst, not a
   // correctness bug (see header comment point 3 for the merge logic this
-  // replaced, and why it was unsafe). The same no-merge rule applies to
-  // the script-boundary split below, for the same reason: merging a Latin
-  // run back onto its neighboring CJK run would just recreate the exact
-  // code-switch-in-one-call this split exists to eliminate.
+  // replaced, and why it was unsafe).
   const pieces: string[] = [];
   for (const clause of clauses) {
-    for (const run of splitByScript(clause)) {
-      const trimmed = run.trim();
-      if (!trimmed) continue; // whitespace-only run from between scripts
-      if (trimmed.length <= maxChars) {
-        pieces.push(trimmed);
-      } else {
-        pieces.push(...hardSlice(trimmed, maxChars));
-      }
+    if (clause.length <= maxChars) {
+      pieces.push(clause);
+    } else {
+      pieces.push(...hardSlice(clause, maxChars));
     }
   }
   return pieces;
@@ -317,6 +278,13 @@ async function synthesizeOnce(
 // squares the chance BOTH draws hit it, without doubling generation time
 // into something impractical for a large article now that calls are
 // already paced 1500ms apart.
+//
+// This is ALSO now the answer for the code-switch case that script-
+// boundary splitting was originally built for (see header comment point
+// 4): there's no evidence that failure specifically needed script
+// isolation rather than just being another instance of this same
+// stochastic bug landing at that spot by chance. Best-of-2 covers it
+// without pre-fragmenting every mixed-language sentence.
 const SYNTHESIS_ATTEMPTS_PER_PIECE = 2;
 
 async function synthesizeSpeechChecked(
