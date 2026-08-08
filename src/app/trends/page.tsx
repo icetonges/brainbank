@@ -97,12 +97,83 @@ export default async function TrendsPage({
     loadError = true;
   }
 
+  // The newest digest's overview gets a featured spot at the very top of
+  // the page (see below) rather than making readers scroll to the first
+  // day-card to find it — the day-by-day loop skips re-rendering this same
+  // content for that one digest so it isn't shown twice.
+  const latestDigest = digests[0];
+
   return (
     <div className="flex w-full flex-col gap-10">
       <div>
         <h1 className="text-2xl font-semibold text-fg">{s.title}</h1>
         <p className="mt-1 text-fg-secondary">{s.description}</p>
       </div>
+
+      {!loadError && latestDigest && (latestDigest.summaryMarkdown || latestDigest.insight) && (
+        <section className="flex flex-col gap-4 rounded-2xl border border-accent/40 bg-accent/5 p-6">
+          <h2 className="text-lg font-semibold text-fg">{s.latestSummaryTitle}</h2>
+
+          {latestDigest.summaryMarkdown && (
+            <p className="max-w-3xl leading-relaxed text-fg">
+              {pick(isZh, latestDigest.summaryMarkdown, latestDigest.summaryMarkdownZh)}
+            </p>
+          )}
+
+          {latestDigest.insight && (
+            <div className="max-w-3xl">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-accent">
+                {s.insightLabel}
+              </h3>
+              <p className="mt-1 text-sm leading-relaxed text-fg-secondary">
+                {pick(isZh, latestDigest.insight, latestDigest.insightZh)}
+              </p>
+            </div>
+          )}
+
+          {(latestDigest.actionItems.length > 0 || latestDigest.watchList.length > 0) && (
+            <div className="grid max-w-3xl gap-4 sm:grid-cols-2">
+              {latestDigest.actionItems.length > 0 && (
+                <div className="flex flex-col gap-1.5">
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-accent">
+                    {s.actionItemsLabel}
+                  </h3>
+                  <ul className="flex flex-col gap-1 text-sm text-fg-secondary">
+                    {pickList(isZh, latestDigest.actionItems, latestDigest.actionItemsZh).map((it, i) => (
+                      <li key={i} className="flex gap-2">
+                        <span className="text-accent">→</span>
+                        <span>{it}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {latestDigest.watchList.length > 0 && (
+                <div className="flex flex-col gap-1.5">
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-accent">
+                    {s.watchListLabel}
+                  </h3>
+                  <ul className="flex flex-col gap-1 text-sm text-fg-secondary">
+                    {pickList(isZh, latestDigest.watchList, latestDigest.watchListZh).map((it, i) => (
+                      <li key={i} className="flex gap-2">
+                        <span className="text-accent">•</span>
+                        <span>{it}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* Independent data source from the digests below (its own
+          github_trending_runs/repos/developers tables, populated by the
+          fetch-github-trending-{daily,weekly,monthly}.yml workflows) —
+          placed ahead of the daily news digests per the owner's preferred
+          reading order (repos/tooling activity first, news second). */}
+      <GithubTrendingSection lang={lang} />
 
       {loadError && (
         <div className="rounded-lg border border-danger/40 bg-bg-elevated p-5 text-fg-secondary">
@@ -119,16 +190,21 @@ export default async function TrendsPage({
 
       {digests.map((digest) => {
         const items = itemsByDigest.get(digest.id) ?? [];
+        // The newest digest's summary/insight/action-items/watch-list are
+        // already featured in the hero section above — skip repeating them
+        // here so they don't appear twice on the page. Its item cards
+        // still render below like every other day.
+        const isLatest = digest.id === latestDigest?.id;
         return (
           <section key={digest.id} className="flex flex-col gap-4 border-b border-border pb-8 last:border-b-0">
             <h2 className="text-lg font-semibold text-fg">{formatDigestDate(digest.date, dateLocale)}</h2>
-            {digest.summaryMarkdown && (
+            {!isLatest && digest.summaryMarkdown && (
               <p className="max-w-3xl leading-relaxed text-fg-secondary">
                 {pick(isZh, digest.summaryMarkdown, digest.summaryMarkdownZh)}
               </p>
             )}
 
-            {digest.insight && (
+            {!isLatest && digest.insight && (
               <div className="max-w-3xl rounded-lg border border-accent/30 bg-accent/5 p-3">
                 <h3 className="text-xs font-semibold uppercase tracking-wide text-accent">
                   {s.insightLabel}
@@ -139,7 +215,7 @@ export default async function TrendsPage({
               </div>
             )}
 
-            {(digest.actionItems.length > 0 || digest.watchList.length > 0) && (
+            {!isLatest && (digest.actionItems.length > 0 || digest.watchList.length > 0) && (
               <div className="grid max-w-3xl gap-4 sm:grid-cols-2">
                 {digest.actionItems.length > 0 && (
                   <div className="flex flex-col gap-1.5">
@@ -219,13 +295,6 @@ export default async function TrendsPage({
           </section>
         );
       })}
-
-      {/* Independent data source from the digests above (its own
-          github_trending_runs/repos/developers tables, populated by the
-          fetch-github-trending-{daily,weekly,monthly}.yml workflows) —
-          rendered here as a subsection rather than its own nav entry/route,
-          since both answer "what's happening in AI right now". */}
-      <GithubTrendingSection lang={lang} />
     </div>
   );
 }

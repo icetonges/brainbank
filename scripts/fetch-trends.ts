@@ -26,6 +26,16 @@
 // structured bilingual overview (summary/insight/action items/watch list)
 // per day, and upserts everything into Neon.
 //
+// "news"-category items additionally get an AI relevance check (see
+// NEWS_FOCUS / itemSummarySchema's `keep` field below) before insertion —
+// on request, scoped down from general AI news to practical engineering
+// content: breakthroughs, agentic AI/agent-harness engineering, agent loop
+// design, graph engineering, knowledge management, and LLM tooling/wikis.
+// This only filters what gets stored going forward; it doesn't retroactively
+// remove anything already in the DB from before this filter existed. Papers
+// and repos are never subject to it — both categories are already on-topic
+// by construction (arXiv cs.CL, AI-topic GitHub search).
+//
 // Run locally with:
 //   npx tsx scripts/fetch-trends.ts
 // (needs DATABASE_URL in the environment, plus at least one of the AI
@@ -57,6 +67,16 @@ const BACKFILL_BATCH_SIZE = 20;
 // writeDailyOverview's call site in main().
 const OVERVIEW_WINDOW_SIZE = 60;
 
+// Both local models this script can use (see pick-model.ts) are Qwen3-
+// family, which hybrid-reason by default — observed in the main app
+// (src/lib/ai/tasks.ts) spending an entire generateObject call's tokens on
+// internal reasoning and returning no usable JSON at all. This script's two
+// generateObject calls (summarizeItemBilingual, writeDailyOverview) share
+// that same risk and had none of the app's hardening, so both prompts below
+// get the same mitigation: Qwen3's documented "/no_think" soft switch,
+// appended to the user turn. Costs nothing on a model that ignores it.
+const NO_THINKING_SUFFIX = "\n\n/no_think";
+
 interface NormalizedItem {
   source: string;
   category: TrendCategory;
@@ -66,6 +86,10 @@ interface NormalizedItem {
   summary?: string;
   summaryZh?: string;
   publishedAt?: Date;
+  /** Set for "news" items after summarizeItemBilingual runs — see NEWS_FOCUS
+   *  and main()'s filter below. Undefined for paper/repo items, which are
+   *  never subject to this filter. */
+  keep?: boolean;
 }
 
 const RSS_SOURCES: { url: string; source: string; category: TrendCategory }[] = [
@@ -218,7 +242,19 @@ async function fetchGithubTrending(): Promise<NormalizedItem[]> {
   }));
 }
 
+// Criteria for the "news" category's relevance filter (see `keep` below) —
+// pulled out as a constant since it's referenced from both the per-item
+// classifier's schema description and its system prompt, and needs to stay
+// in sync with the daily-overview prompt's framing too.
+const NEWS_FOCUS =
+  "genuine AI technology breakthroughs (new models, real capability/benchmark jumps); agentic AI engineering — agent harness/framework design, agent loop (plan-act-observe / ReAct-style) architecture; graph engineering — knowledge graphs, GraphRAG, graph-based reasoning; knowledge management systems and practices; LLM tooling, wikis, and other reference/documentation systems; and other hands-on, practical engineering content a builder could actually use";
+
 const itemSummarySchema = z.object({
+  keep: z
+    .boolean()
+    .describe(
+      `Only meaningful for category="news" items: true if this is substantive, practical content about ${NEWS_FOCUS}. False for generic company PR, funding/hiring announcements, policy or legal news, or anything with no concrete technical substance. For category="paper" or category="repo", always true — this field doesn't apply to those.`,
+    ),
   summaryEn: z.string().describe("One plain-English sentence: what/why this is worth a look. No preamble, no markdown."),
   summaryZh: z.string().describe("The same sentence in Simplified Chinese — a real translation, not a restatement."),
 });
@@ -226,23 +262,33 @@ const itemSummarySchema = z.object({
 /** One AI call per item produces BOTH languages at once (rather than a
  * separate translation pass afterward) — same total call count as the
  * English-only version this replaced, since the model is already reading
- * the item once either way. */
+ * the item once either way. Also makes the "news" relevance call (`keep`)
+ * in the same call rather than a second one, for the same reason. */
 async function summarizeItemBilingual(
   model: LanguageModel,
   item: NormalizedItem,
-): Promise<{ en: string; zh: string }> {
+): Promise<{ en: string; zh: string; keep: boolean }> {
   const { object } = await generateObject({
     model,
     maxOutputTokens: 300,
     abortSignal: AbortSignal.timeout(30_000),
     schema: itemSummarySchema,
-    system:
+    system: [
       "You write single-sentence summaries of AI news articles, research papers, and GitHub repos for a busy reader, in both English and Simplified Chinese. The two fields must say the same thing — summaryZh is a translation of summaryEn, not an independent summary.",
-    prompt: `Category: ${item.category}\nSource: ${item.source}\nTitle: ${item.title}${item.description ? `\nDescription: ${item.description}` : ""}`,
+      `For category="news" items specifically, you also decide whether this belongs in a digest focused on ${NEWS_FOCUS} — set "keep" accordingly. Papers and repos are always kept regardless.`,
+    ].join("\n\n"),
+    prompt:
+      `Category: ${item.category}\nSource: ${item.source}\nTitle: ${item.title}${item.description ? `\nDescription: ${item.description}` : ""}` +
+      NO_THINKING_SUFFIX,
   });
   return {
     en: object.summaryEn.trim().slice(0, 300),
     zh: object.summaryZh.trim().slice(0, 300),
+    // Only "news" items are actually subject to the filter (see main()) —
+    // the model is told papers/repos are always true, but a category-level
+    // override here means a stray false on a non-news item can never
+    // accidentally drop a paper or repo even if the model gets that wrong.
+    keep: item.category !== "news" || object.keep,
   };
 }
 
@@ -322,9 +368,11 @@ async function writeDailyOverview(
     maxOutputTokens: 1200,
     abortSignal: AbortSignal.timeout(45_000),
     schema: dailyOverviewSchema,
-    system:
+    system: [
       "You analyze a day's pulled AI news/research/repo items for the top of a digest page read by someone building AI products and maintaining a personal knowledge base. Stay grounded in the specific items given — never invent details not present in the list. Write every field in both English and Simplified Chinese as instructed per-field; the Chinese fields are translations of their English counterparts, not independent commentary.",
-    prompt: `Today is ${date}. Here's everything pulled today:\n${bulletList}`,
+      `The news items you're given have already been filtered toward ${NEWS_FOCUS}. Keep that same practical, builder-focused lens in the overview, insight, action items, and watch list — favor what's concretely useful to someone building agentic systems over generic industry commentary.`,
+    ].join("\n\n"),
+    prompt: `Today is ${date}. Here's everything pulled today:\n${bulletList}` + NO_THINKING_SUFFIX,
   });
   return object;
 }
@@ -387,18 +435,31 @@ async function main() {
 
   if (fresh.length > 0) {
     for (const item of fresh) {
+      // Fail-open on a summarization error: keep=true by default so an AI
+      // hiccup on this one item drops its summary text, not the item
+      // itself — losing real content to a transient failure would defeat
+      // the whole point of the relevance filter below.
       const summary = await summarizeItemBilingual(model, item).catch((err) => {
         console.error(`[trends] Summary failed for ${item.url}:`, err);
-        return { en: "", zh: "" };
+        return { en: "", zh: "", keep: true };
       });
       item.summary = summary.en;
       item.summaryZh = summary.zh;
+      item.keep = summary.keep;
+    }
+
+    // Relevance filter — only applies to "news" (see NEWS_FOCUS above);
+    // papers and repos are structurally already on-topic and always kept.
+    const keptFresh = fresh.filter((item) => item.category !== "news" || item.keep !== false);
+    const droppedCount = fresh.length - keptFresh.length;
+    if (droppedCount > 0) {
+      console.log(`[trends] Dropped ${droppedCount} news item(s) as off-topic for the engineering-focused digest.`);
     }
 
     const inserted = await db
       .insert(trendItems)
       .values(
-        fresh.map((item) => ({
+        keptFresh.map((item) => ({
           digestId,
           category: item.category,
           source: item.source,
