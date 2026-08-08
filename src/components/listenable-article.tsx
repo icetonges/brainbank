@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Markdown } from "@/components/markdown";
 import type { MarkdownBlock } from "@/lib/markdown-blocks";
 
@@ -15,17 +15,29 @@ export interface ListenableArticleStrings {
 
 /**
  * Renders an article as a sequence of independently-playable blocks.
- * Nothing ever plays on its own — every clip starts from an explicit
- * click, never a hover or a page load:
+ * Nothing ever plays on its own from a plain page load — every clip
+ * starts from an explicit click or an explicit #block-N link, never a
+ * hover:
  *
- *  - Clicking a paragraph/heading/list that has generated audio plays
- *    JUST that block (and stops when it ends — it does not continue into
- *    the next paragraph, since a single click on one paragraph shouldn't
- *    silently turn into listening to the whole rest of the article).
- *  - The "Play article aloud" transport button is the one control that
- *    plays continuously, advancing through the following blocks the way
- *    an audiobook does — but even that only starts because you clicked
- *    it. Prev/Next also stay in this continuous mode.
+ *  - Clicking a paragraph/heading/list that has generated audio starts
+ *    playback FROM that block and keeps going, audiobook-style, through
+ *    every following block to the end of the article — same continuous
+ *    behavior as the transport bar's Play button, just with a different
+ *    starting point. (Earlier versions stopped after the one clicked
+ *    block; changed because a reader jumping into the middle of an
+ *    article wants to keep listening from there, not re-click for every
+ *    paragraph.)
+ *  - The "Play article aloud" transport button starts continuous playback
+ *    from wherever it's currently paused, or from the top if nothing has
+ *    played yet. Prev/Next also stay in this continuous mode.
+ *  - Each listenable block also gets a stable `#block-N` id (N = the
+ *    block's index) so it can be deep-linked to — landing on the page
+ *    with that hash present scrolls to and starts continuous playback
+ *    from that paragraph, same as clicking it. Browsers generally block
+ *    audio autoplay without a user gesture on a fresh page load, so this
+ *    is best-effort: if the browser blocks it, the reader lands scrolled
+ *    to the right paragraph with playback already cued up, one Play
+ *    click away instead of zero.
  *
  * "Paragraph N of M" counts speakable paragraphs, not raw audio files (a
  * single long paragraph can be split across more than one file — see
@@ -76,15 +88,37 @@ export function ListenableArticle({
     setIsPlaying(true);
   }
 
-  /** A click on one paragraph plays only that paragraph — deliberately
-   *  NOT the same "keep going" behavior as the transport bar's Play
-   *  button, so clicking a single paragraph to hear it can't turn into
-   *  the whole rest of the article playing without you asking for that. */
+  /** A click on one paragraph starts continuous playback from there —
+   *  same "keep going" behavior as the transport bar's Play button, just
+   *  starting wherever was clicked instead of wherever playback last left
+   *  off (see the component comment for why this changed). */
   function handleBlockClick(blockIndex: number) {
     const pos = spine.indexOf(blockIndex);
     if (pos === -1) return; // no audio for this block
-    playFromSpine(pos, { continuous: false });
+    playFromSpine(pos, { continuous: true });
   }
+
+  // Deep-link support: landing on the page with #block-N in the URL jumps
+  // to and starts continuous playback from that paragraph, same as
+  // clicking it — see the component comment for the autoplay-policy
+  // caveat. Runs once spine is known; re-runs if the hash changes (e.g.
+  // an in-page link to a different paragraph) without a full navigation.
+  useEffect(() => {
+    if (!hasAudio) return;
+    const hash = window.location.hash.slice(1);
+    const match = hash.match(/^block-(\d+)$/);
+    if (!match) return;
+    const pos = spine.indexOf(Number(match[1]));
+    if (pos === -1) return;
+    playFromSpine(pos, { continuous: true });
+    document.getElementById(hash)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- playFromSpine
+    // is a plain function recreated every render (not memoized), so
+    // listing it here would re-run this effect on every render instead of
+    // only when hasAudio/spine/the hash itself actually change — which
+    // would re-jump-and-replay on every unrelated re-render and interrupt
+    // playback the reader may have since moved past.
+  }, [hasAudio, spine, typeof window !== "undefined" ? window.location.hash : ""]);
 
   function handleEnded() {
     const urls = currentUrls ?? [];
@@ -158,8 +192,8 @@ export function ListenableArticle({
           than an <audio> per block, so switching blocks is just a src
           swap instead of juggling N media elements. autoPlay only fires
           here because `isPlaying` can only become true from a click
-          handler above (never a hover, never on mount) — see the
-          component comment. */}
+          handler, the transport button, or the #block-N deep-link effect
+          on mount (never a bare hover) — see the component comment. */}
       {currentUrl && (
         <audio
           ref={audioRef}
@@ -188,6 +222,7 @@ export function ListenableArticle({
           return (
             <div
               key={block.index}
+              id={`block-${block.index}`}
               role="button"
               tabIndex={0}
               onClick={() => handleBlockClick(block.index)}
@@ -198,7 +233,7 @@ export function ListenableArticle({
                 }
               }}
               aria-pressed={active}
-              className={`-mx-2 cursor-pointer rounded-md border-l-2 px-2 py-0.5 transition-colors ${
+              className={`-mx-2 scroll-mt-20 cursor-pointer rounded-md border-l-2 px-2 py-0.5 transition-colors ${
                 active
                   ? "border-accent bg-accent/5"
                   : "border-accent/20 hover:border-accent/50 hover:bg-bg-elevated/60"
