@@ -149,7 +149,18 @@ export function markdownToSpeechText(markdown: string): string {
  *  mid-sentence where avoidable) so a long article becomes several
  *  playlist segments instead of one call that risks a provider-side
  *  length limit or a single point of failure. A lone paragraph longer
- *  than maxChars gets hard-split on sentence boundaries as a fallback. */
+ *  than maxChars gets hard-split on sentence boundaries as a fallback.
+ *
+ *  Not currently called anywhere — the audiobook pipeline generates
+ *  per-markdown-block instead (lib/ai/audiobook.ts's splitLongText),
+ *  which is also where a real production bug in this same sentence-split
+ *  regex got found and fixed (the `\s+` here never matches in Chinese
+ *  prose — no space follows "。"/"！"/"？" — so long Chinese paragraphs
+ *  never actually split into sentences before hitting maxChars; fixed
+ *  below too so this doesn't become a landmine if it's ever wired up).
+ *  audiobook.ts's version goes further (clause-level splitting on commas
+ *  too, language-aware ceilings) — this one only gets the same minimal
+ *  regex fix since it's dead code, not the full treatment. */
 export function chunkForSpeech(text: string, maxChars = 1800): string[] {
   const paragraphs = text.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
   const chunks: string[] = [];
@@ -173,7 +184,7 @@ export function chunkForSpeech(text: string, maxChars = 1800): string[] {
     }
     // A single paragraph longer than the limit — split on sentence
     // boundaries instead of dropping it or blowing past maxChars.
-    const sentences = para.split(/(?<=[.!?。！？])\s+/);
+    const sentences = para.split(/(?<=[.!?。！？:：])\s*/).filter(Boolean);
     let piece = "";
     for (const sentence of sentences) {
       const withSentence = piece ? `${piece} ${sentence}` : sentence;
