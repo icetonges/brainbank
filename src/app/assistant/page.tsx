@@ -169,7 +169,6 @@ export default async function AssistantPage({
             label={s.statCorroborated}
             hint={s.statCorroboratedHint}
             accent="#22c55e"
-            href={isEmpty ? undefined : "#knowledge-map"}
           />
           <StatCard
             value={stats.totalLinks}
@@ -180,13 +179,7 @@ export default async function AssistantPage({
                 : s.statNoTensions
             }
             accent="#8b5cf6"
-            href={
-              stats.openContradictions > 0
-                ? "#tensions"
-                : isEmpty
-                  ? undefined
-                  : "#knowledge-map"
-            }
+            href={stats.openContradictions > 0 ? "#tensions" : undefined}
           />
           <StatCard
             value={stats.diaryEntries}

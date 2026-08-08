@@ -36,6 +36,16 @@
 // and repos are never subject to it — both categories are already on-topic
 // by construction (arXiv cs.CL, AI-topic GitHub search).
 //
+// The daily overview step (writeDailyOverview) now also folds in the
+// latest GitHub Trending daily snapshot (a separate table, populated by
+// fetch-github-trending-daily.yml — see fetchLatestDailyGithubRepos below)
+// so the automatic summary covers the same combined picture — news + GitHub
+// activity together — as the /trends page's manual "generate/refresh
+// summary" button. fetchLatestDailyGithubRepos just grabs whatever the most
+// recent daily-cadence run is (no same-day requirement), so this doesn't
+// depend on the two workflows' cron order — if this one runs before that
+// day's GitHub fetch, it'll just use yesterday's snapshot, which is fine.
+//
 // Run locally with:
 //   npx tsx scripts/fetch-trends.ts
 // (needs DATABASE_URL in the environment, plus at least one of the AI
@@ -49,7 +59,13 @@ import { desc, eq, inArray, or } from "drizzle-orm";
 import { generateObject, type LanguageModel } from "ai";
 import { z } from "zod";
 import { db } from "../src/lib/db";
-import { trendDigests, trendItems, type TrendCategory } from "../src/lib/db/schema";
+import {
+  trendDigests,
+  trendItems,
+  githubTrendingRuns,
+  githubTrendingRepos,
+  type TrendCategory,
+} from "../src/lib/db/schema";
 import { pickModel } from "./lib/pick-model";
 
 const MAX_ITEMS_PER_FEED = 12;
@@ -66,6 +82,11 @@ const BACKFILL_BATCH_SIZE = 20;
 // a "today only" overview would then simply never get written. See
 // writeDailyOverview's call site in main().
 const OVERVIEW_WINDOW_SIZE = 60;
+// How many repos from the latest daily GitHub Trending snapshot feed the
+// overview alongside the news window above — same limit the app's manual
+// "generate/refresh summary" button uses (trends/actions.ts), kept in sync
+// manually since that file can't import this standalone script either.
+const GITHUB_REPOS_LIMIT = 15;
 
 // Both local models this script can use (see pick-model.ts) are Qwen3-
 // family, which hybrid-reason by default — observed in the main app
@@ -355,24 +376,66 @@ const dailyOverviewSchema = z.object({
   watchListZh: z.array(z.string()).min(3).max(5).describe("The same watch-list items, in Simplified Chinese, same order."),
 });
 
+/** Latest daily-cadence GitHub Trending snapshot (its own tables, populated
+ *  by the separate fetch-github-trending-daily.yml workflow — see
+ *  src/components/github-trending-section.tsx) — folded into the same
+ *  overview prompt as the news/paper items below so the automatic daily
+ *  overview covers the same combined picture as the app's manual
+ *  "generate/refresh summary" button (trends/actions.ts's
+ *  generateTrendsOverview), instead of the two drifting apart. */
+async function fetchLatestDailyGithubRepos(): Promise<
+  { fullName: string; description: string; language: string | null; stars: number }[]
+> {
+  const [run] = await db
+    .select({ id: githubTrendingRuns.id })
+    .from(githubTrendingRuns)
+    .where(eq(githubTrendingRuns.cadence, "daily"))
+    .orderBy(desc(githubTrendingRuns.date))
+    .limit(1);
+  if (!run) return [];
+
+  return db
+    .select({
+      fullName: githubTrendingRepos.fullName,
+      description: githubTrendingRepos.description,
+      language: githubTrendingRepos.language,
+      stars: githubTrendingRepos.stars,
+    })
+    .from(githubTrendingRepos)
+    .where(eq(githubTrendingRepos.runId, run.id))
+    .orderBy(githubTrendingRepos.rank)
+    .limit(GITHUB_REPOS_LIMIT);
+}
+
 async function writeDailyOverview(
   model: LanguageModel,
   date: string,
   items: { category: TrendCategory; title: string; source: string; summary: string }[],
+  githubRepos: { fullName: string; description: string; language: string | null; stars: number }[],
 ) {
-  const bulletList = items
-    .map((i) => `- [${i.category}] ${i.title} (${i.source})${i.summary ? `: ${i.summary}` : ""}`)
-    .join("\n");
+  const newsBullets =
+    items
+      .map((i) => `- [${i.category}] ${i.title} (${i.source})${i.summary ? `: ${i.summary}` : ""}`)
+      .join("\n") || "(none pulled)";
+  const repoBullets =
+    githubRepos
+      .map(
+        (r) =>
+          `- ${r.fullName}${r.language ? ` (${r.language})` : ""} — ${r.stars} stars${r.description ? `: ${r.description}` : ""}`,
+      )
+      .join("\n") || "(none pulled)";
   const { object } = await generateObject({
     model,
     maxOutputTokens: 1200,
     abortSignal: AbortSignal.timeout(45_000),
     schema: dailyOverviewSchema,
     system: [
-      "You analyze a day's pulled AI news/research/repo items for the top of a digest page read by someone building AI products and maintaining a personal knowledge base. Stay grounded in the specific items given — never invent details not present in the list. Write every field in both English and Simplified Chinese as instructed per-field; the Chinese fields are translations of their English counterparts, not independent commentary.",
+      "You analyze a day's pulled AI news/research items and GitHub Trending repos together for the top of a digest page read by someone building AI products and maintaining a personal knowledge base. Stay grounded in the specific items given — never invent details not present in the lists. Write every field in both English and Simplified Chinese as instructed per-field; the Chinese fields are translations of their English counterparts, not independent commentary.",
       `The news items you're given have already been filtered toward ${NEWS_FOCUS}. Keep that same practical, builder-focused lens in the overview, insight, action items, and watch list — favor what's concretely useful to someone building agentic systems over generic industry commentary.`,
     ].join("\n\n"),
-    prompt: `Today is ${date}. Here's everything pulled today:\n${bulletList}` + NO_THINKING_SUFFIX,
+    prompt:
+      `Today is ${date}.\n\nAI news/research pulled today:\n${newsBullets}\n\nGitHub Trending repos (today's daily snapshot):\n${repoBullets}` +
+      NO_THINKING_SUFFIX,
   });
   return object;
 }
@@ -488,12 +551,17 @@ async function main() {
     .orderBy(desc(trendItems.createdAt))
     .limit(OVERVIEW_WINDOW_SIZE);
 
-  if (recentItems.length === 0) {
-    console.log("[trends] No items in the database yet — nothing to write an overview from.");
+  const githubRepos = await fetchLatestDailyGithubRepos().catch((err) => {
+    console.error("[trends] Failed to load latest GitHub Trending snapshot for the overview:", err);
+    return [];
+  });
+
+  if (recentItems.length === 0 && githubRepos.length === 0) {
+    console.log("[trends] No items or GitHub Trending snapshot in the database yet — nothing to write an overview from.");
     return;
   }
 
-  const overview = await writeDailyOverview(model, today, recentItems).catch((err) => {
+  const overview = await writeDailyOverview(model, today, recentItems, githubRepos).catch((err) => {
     console.error("[trends] Daily overview failed:", err);
     return null;
   });
