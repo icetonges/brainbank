@@ -1605,7 +1605,16 @@ const atomCandidateSchema = z.object({
 
 const distillSchema = z.object({
   atoms: z.preprocess(
-    (val) => (val === undefined || val === null ? [] : val),
+    (val) => {
+      if (val === undefined || val === null) return [];
+      // A content-rich entry (e.g. pasted meeting notes) can legitimately
+      // surface more than 8 candidates, and the local model sometimes
+      // returns all of them instead of picking the top 8 as instructed.
+      // Slicing here means an over-generous response still saves the
+      // first 8 atoms instead of failing max() validation and losing the
+      // whole entry's extraction to a single array-length mismatch.
+      return Array.isArray(val) ? val.slice(0, 8) : val;
+    },
     z
       .array(atomCandidateSchema)
       .max(8)
@@ -1692,14 +1701,77 @@ export async function extractKnowledgeAtoms(
 
 // --- reconcile (is this candidate the same belief as an existing atom?) ---
 
-const reconcileSchema = z.object({
-  verdict: z
-    .enum(["same", "contradicts", "refines", "distinct"])
-    .describe(
-      "same = restates the existing atom; contradicts = incompatible with it; refines = narrows/extends it; distinct = unrelated",
-    ),
-  rationale: z.string().describe("One short sentence explaining the verdict"),
-});
+const RECONCILE_VERDICTS = ["same", "contradicts", "refines", "distinct"] as const;
+
+function asVerdict(value: unknown): (typeof RECONCILE_VERDICTS)[number] | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().toLowerCase();
+  return (RECONCILE_VERDICTS as readonly string[]).includes(normalized)
+    ? (normalized as (typeof RECONCILE_VERDICTS)[number])
+    : undefined;
+}
+
+/**
+ * Observed in production: the reconcile call's two-field schema
+ * ({verdict, rationale}) is small enough that the local models frequently
+ * substitute their own field names for it instead — real failures logged
+ * include {answer,reasoning}, {result}, {relationship,explanation}, and
+ * {response:{label}} — even though the *value* is almost always one of the
+ * four valid verdict words. Failing the whole distillation run over a
+ * field-naming mismatch throws away a correct answer, so this scans the
+ * raw response for a recognizable verdict word under any of the names
+ * actually seen (plus one level of nesting) before validating strictly.
+ * A response with no verdict word anywhere (e.g. a hallucinated tool call)
+ * still falls through to the strict schema below and fails loudly, which
+ * is correct — there's nothing to recover there.
+ */
+function coerceReconcileShape(raw: unknown): unknown {
+  if (raw === null || typeof raw !== "object") return raw;
+  const obj = raw as Record<string, unknown>;
+
+  const rationaleOf = (o: Record<string, unknown>) => {
+    const r = o.rationale ?? o.reasoning ?? o.explanation ?? o.reason;
+    return typeof r === "string" ? r : "";
+  };
+
+  for (const key of ["verdict", "answer", "result", "relationship", "label"]) {
+    const v = asVerdict(obj[key]);
+    if (v) return { verdict: v, rationale: rationaleOf(obj) };
+  }
+
+  for (const key of ["response", "result", "answer", "output"]) {
+    const nested = obj[key];
+    if (nested && typeof nested === "object") {
+      const nestedObj = nested as Record<string, unknown>;
+      for (const nk of ["verdict", "answer", "result", "relationship", "label"]) {
+        const v = asVerdict(nestedObj[nk]);
+        if (v) return { verdict: v, rationale: rationaleOf(nestedObj) || rationaleOf(obj) };
+      }
+    }
+  }
+
+  // Last resort: any value anywhere that's a bare verdict word.
+  for (const v of Object.values(obj)) {
+    const found = asVerdict(v);
+    if (found) return { verdict: found, rationale: rationaleOf(obj) };
+  }
+
+  return raw; // let the strict schema fail loudly with a clear error
+}
+
+const reconcileSchema = z.preprocess(
+  coerceReconcileShape,
+  z.object({
+    verdict: z
+      .enum(RECONCILE_VERDICTS)
+      .describe(
+        "same = restates the existing atom; contradicts = incompatible with it; refines = narrows/extends it; distinct = unrelated",
+      ),
+    rationale: z
+      .preprocess((v) => (typeof v === "string" ? v : ""), z.string())
+      .describe("One short sentence explaining the verdict"),
+  }),
+);
 
 export type ReconcileVerdict = z.infer<typeof reconcileSchema>;
 
@@ -1721,7 +1793,13 @@ export async function reconcileAtom(
     (model) =>
       generateObject({
         model,
-        maxOutputTokens: 512,
+        // Was 512 — observed in production truncating mid-response
+        // (finishReason: "length", no object generated) on the more
+        // verbose local model even though its actual JSON is tiny; this
+        // task's output is two short fields, so 2048 is generous headroom
+        // rather than a real cost, and it's cheap insurance against the
+        // same truncation recurring on a wordier model in the chain.
+        maxOutputTokens: 2048,
         abortSignal: AbortSignal.timeout(TASK_TIMEOUT_MS),
         schema: reconcileSchema,
         system: [
@@ -1733,6 +1811,7 @@ export async function reconcileAtom(
           "- 'distinct': they're about different things.",
           "",
           "When genuinely unsure between 'same' and 'distinct', answer 'distinct' — a duplicate atom is easy to merge later, but wrongly collapsing two different beliefs silently destroys information.",
+          'Respond with a JSON object with exactly two keys: "verdict" (one of "same", "contradicts", "refines", "distinct") and "rationale" (one short sentence). Do not use any other key names.',
           NO_BROWSING_INSTRUCTION,
         ].join("\n"),
         prompt: [
