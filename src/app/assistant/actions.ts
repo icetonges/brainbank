@@ -193,7 +193,17 @@ export async function setInsightStatusAction(insightId: number, status: InsightS
   revalidatePath("/assistant");
 }
 
-/** On-demand synthesis — "think about what you know and tell me something". */
+/** On-demand synthesis — "think about what you know and tell me something".
+ *
+ *  If every model in the fallback chain fails to produce valid output,
+ *  runSynthesis throws — and unlike the three actions below, this one
+ *  isn't fire-and-forget, so an uncaught throw here used to reject the
+ *  form submission outright and surface Next's generic "An unexpected
+ *  response was received from the server" crash instead of just landing
+ *  back on /assistant with no new insights. Caught and logged instead, for
+ *  the same reason background-jobs.ts swallows distillation failures: a
+ *  bad model response on this button shouldn't look like the app broke.
+ */
 export async function synthesizeAction(formData: FormData) {
   await requireOwner();
 
@@ -203,7 +213,11 @@ export async function synthesizeAction(formData: FormData) {
     ? (rawKinds.split(",").map((k) => k.trim()).filter(Boolean) as InsightKind[])
     : undefined;
 
-  await runSynthesis(window, kinds);
+  try {
+    await runSynthesis(window, kinds);
+  } catch (error) {
+    console.error("Synthesis failed", error);
+  }
   revalidatePath("/assistant");
 }
 

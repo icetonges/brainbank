@@ -1829,23 +1829,76 @@ export async function reconcileAtom(
 
 // --- synthesize (atoms -> highlights, themes, ideas, business angles) ---
 
-const insightSchema = z.object({
-  kind: z
-    .enum(["highlight", "theme", "idea", "business", "recommendation", "reflection"])
-    .describe("What type of insight this is"),
-  title: z.string().describe("A punchy one-line title (max ~90 chars)"),
-  body: z
-    .string()
-    .describe(
-      "2-5 sentences of markdown. Concrete and specific to this person's actual material. For 'business', include what the angle is, why THEY specifically are positioned for it, and a realistic first step.",
+const INSIGHT_KINDS = ["highlight", "theme", "idea", "business", "recommendation", "reflection"] as const;
+
+function asInsightKind(value: unknown): (typeof INSIGHT_KINDS)[number] | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().toLowerCase();
+  return (INSIGHT_KINDS as readonly string[]).includes(normalized)
+    ? (normalized as (typeof INSIGHT_KINDS)[number])
+    : undefined;
+}
+
+/**
+ * Same failure mode as coerceReconcileShape above, seen in production on
+ * this call too: the model wrote a genuinely good insight but under
+ * {type, content, atoms} instead of {kind, title, body, atomIndexes} — one
+ * long paragraph with no separate title at all. Rather than lose well-
+ * written content to a field-naming/shape mismatch, this renames the
+ * fields it recognizes and, when there's no separate title, carves one out
+ * of the leading clause of `content` (several real responses wrote a
+ * natural "Punchy title: body" sentence into that single string) or falls
+ * back to a truncation.
+ */
+function coerceInsightShape(raw: unknown): unknown {
+  if (raw === null || typeof raw !== "object") return raw;
+  const obj = raw as Record<string, unknown>;
+
+  const kind = obj.kind ?? obj.type ?? obj.insightType ?? obj.category;
+  const atomIndexes = obj.atomIndexes ?? obj.atoms ?? obj.atomIds ?? obj.indexes ?? obj.sources;
+
+  let title = typeof obj.title === "string" ? obj.title : undefined;
+  let body = typeof obj.body === "string" ? obj.body : undefined;
+
+  if ((!title || !body) && typeof obj.content === "string" && obj.content.trim()) {
+    const content = obj.content.trim();
+    // "Punchy title: rest of the insight" — several observed responses
+    // wrote exactly this shape into the single content string.
+    const split = content.match(/^([\s\S]{10,90}?)[:—-]\s+([\s\S]+)$/);
+    if (split) {
+      title ??= split[1].trim();
+      body ??= split[2].trim();
+    } else {
+      title ??= content.length > 90 ? `${content.slice(0, 87).trim()}…` : content;
+      body ??= content;
+    }
+  }
+
+  return { kind, title, body, atomIndexes };
+}
+
+const insightSchema = z.preprocess(
+  coerceInsightShape,
+  z.object({
+    kind: z
+      .preprocess(asInsightKind, z.enum(INSIGHT_KINDS))
+      .describe("What type of insight this is"),
+    title: z
+      .preprocess((v) => (typeof v === "string" ? v : ""), z.string())
+      .describe("A punchy one-line title (max ~90 chars)"),
+    body: z
+      .preprocess((v) => (typeof v === "string" ? v : ""), z.string())
+      .describe(
+        "2-5 sentences of markdown. Concrete and specific to this person's actual material. For 'business', include what the angle is, why THEY specifically are positioned for it, and a realistic first step.",
+      ),
+    atomIndexes: z.preprocess(
+      (val) => (val === undefined || val === null ? [] : val),
+      z
+        .array(z.number())
+        .describe("Indexes (from the numbered list given) of the atoms this insight draws on"),
     ),
-  atomIndexes: z.preprocess(
-    (val) => (val === undefined || val === null ? [] : val),
-    z
-      .array(z.number())
-      .describe("Indexes (from the numbered list given) of the atoms this insight draws on"),
-  ),
-});
+  }),
+);
 
 const synthesizeSchema = z.object({
   insights: z.preprocess(
@@ -1916,6 +1969,7 @@ export async function synthesizeInsights(
             ? `- Only produce insights of these kinds: ${input.kinds.join(", ")}.`
             : "- Produce a mix, weighted toward themes and ideas.",
           "",
+          'Each insight object must use exactly these four keys: "kind", "title", "body", "atomIndexes". Do not use other key names like "type", "content", or "atoms".',
           NO_BROWSING_INSTRUCTION,
           JSON_ARRAY_SHAPE_REMINDER,
         ].join("\n"),
