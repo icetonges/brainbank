@@ -367,6 +367,27 @@ function markdownStringOrList(description: string) {
 const JSON_ARRAY_SHAPE_REMINDER =
   'Return real JSON, not a description of JSON. Every field described as a list/array MUST be an actual JSON array of separate items — e.g. ["item one","item two"], never a single comma-separated string like "item one, item two". Every field described as a list of objects MUST be an array of real JSON objects with each named property set, never a list of plain strings.';
 
+// Both local models are Qwen3-family, which hybrid-reason by default:
+// unless told otherwise, they can spend part or all of a turn on internal
+// chain-of-thought before (or instead of) answering. That's a plausible,
+// consistent explanation for a whole class of failures seen in production
+// across this file's generateObject calls (extract/reconcile/synthesize)
+// that plain schema coercion can't fix, because there's no JSON to coerce
+// when it happens: usage shows real output tokens spent but an empty
+// `text`/`content` ("the model did not return a response", finishReason
+// "stop" — not a truncation), and separately a response that was a
+// hallucinated tool-call envelope (mcp__sequentialthinking__...) instead
+// of an answer. Both look like the model reasoning itself into never
+// producing (or producing a tool call instead of) the requested object.
+// Qwen3's documented soft switch is the literal string "/no_think"
+// appended to the user turn (see Qwen3's usage guide) — distinct from the
+// hard enable_thinking=False switch, which would have to be set in
+// agent-server's chat template config on the Mac, outside this repo's
+// reach. A structured-output task never uses visible reasoning (only the
+// final JSON matters), so suppressing it costs nothing here even if this
+// particular local deployment turns out to ignore the switch.
+const NO_THINKING_SUFFIX = "\n\n/no_think";
+
 // Some models occasionally answer with real line breaks escaped as the
 // literal two-character sequence "\" + "n" (and "\t" for tabs) instead of
 // actual whitespace — collapsing headings/lists/code fences into one
@@ -1676,14 +1697,15 @@ export async function extractKnowledgeAtoms(
           JSON_ARRAY_SHAPE_REMINDER,
           'Example: {"atoms":[{"kind":"preference","statement":"Prefers to do deep technical work before 10am and batch meetings in the afternoon","detail":"Has said this holds even on days that start badly.","excerpt":"got the hard part done before standup again","confidence":0.7}]}',
         ].join("\n"),
-        prompt: [
-          `Date: ${input.occurredAt.toISOString().slice(0, 10)}`,
-          `Title: ${input.title}`,
-          `Entry:\n${input.body}`,
-          input.scratch?.trim() ? `Scratch notes (raw fragments — mine these too):\n${input.scratch}` : null,
-        ]
-          .filter(Boolean)
-          .join("\n\n"),
+        prompt:
+          [
+            `Date: ${input.occurredAt.toISOString().slice(0, 10)}`,
+            `Title: ${input.title}`,
+            `Entry:\n${input.body}`,
+            input.scratch?.trim() ? `Scratch notes (raw fragments — mine these too):\n${input.scratch}` : null,
+          ]
+            .filter(Boolean)
+            .join("\n\n") + NO_THINKING_SUFFIX,
       }),
     { objectMode: true, localOnly: true },
   );
@@ -1814,13 +1836,14 @@ export async function reconcileAtom(
           'Respond with a JSON object with exactly two keys: "verdict" (one of "same", "contradicts", "refines", "distinct") and "rationale" (one short sentence). Do not use any other key names.',
           NO_BROWSING_INSTRUCTION,
         ].join("\n"),
-        prompt: [
-          `Existing (${existing.kind}): ${existing.statement}`,
-          existing.detail ? `Existing detail: ${existing.detail}` : null,
-          `New (${candidate.kind}): ${candidate.statement}`,
-        ]
-          .filter(Boolean)
-          .join("\n"),
+        prompt:
+          [
+            `Existing (${existing.kind}): ${existing.statement}`,
+            existing.detail ? `Existing detail: ${existing.detail}` : null,
+            `New (${candidate.kind}): ${candidate.statement}`,
+          ]
+            .filter(Boolean)
+            .join("\n") + NO_THINKING_SUFFIX,
       }),
     { objectMode: true, localOnly: true },
   );
@@ -1973,11 +1996,10 @@ export async function synthesizeInsights(
           NO_BROWSING_INSTRUCTION,
           JSON_ARRAY_SHAPE_REMINDER,
         ].join("\n"),
-        prompt: [
-          `Period: ${input.periodLabel}`,
-          `Knowledge base (${input.atoms.length} atoms):`,
-          numbered,
-        ].join("\n\n"),
+        prompt:
+          [`Period: ${input.periodLabel}`, `Knowledge base (${input.atoms.length} atoms):`, numbered].join(
+            "\n\n",
+          ) + NO_THINKING_SUFFIX,
       }),
     { objectMode: true, onModelUsed },
   );
