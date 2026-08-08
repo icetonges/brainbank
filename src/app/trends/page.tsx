@@ -5,8 +5,20 @@ import { desc, inArray } from "drizzle-orm";
 import { getLang } from "@/lib/i18n-server";
 import { t } from "@/lib/i18n";
 import { GithubTrendingSection } from "@/components/github-trending-section";
+import { generateTodaysSummaryAction } from "./actions";
+import { MODELS, DEFAULT_MODEL_ID } from "@/lib/ai/models";
+import { PendingFormButton } from "@/components/pending-form-button";
 
 export const dynamic = "force-dynamic";
+// generateTodaysSummaryAction (trends/actions.ts) makes a generateObject
+// call that can run long against the local model chain — same reasoning as
+// the assistant/classroom pages: a Server Action's Vercel Function duration
+// is supposed to inherit from the invoking page's route segment config, but
+// that alone has proven unreliable for Server Actions specifically (see
+// vercel.json's matching "src/app/trends/**" entry, added as the same
+// platform-level backstop used there after a documented production
+// incident where the page-level export alone wasn't enough).
+export const maxDuration = 500;
 
 // How many days of digests to show — the daily fetch (see
 // .github/workflows/fetch-trends.yml / scripts/fetch-trends.ts) keeps
@@ -110,63 +122,99 @@ export default async function TrendsPage({
         <p className="mt-1 text-fg-secondary">{s.description}</p>
       </div>
 
-      {!loadError && latestDigest && (latestDigest.summaryMarkdown || latestDigest.insight) && (
-        <section className="flex flex-col gap-4 rounded-2xl border border-accent/40 bg-accent/5 p-6">
+      {/* Always rendered — previously this box only appeared once the
+          daily cron had already written a summary, which meant a fresh
+          deploy (or a day the cron hasn't run yet) showed nothing here at
+          all with no way to fix that from the page itself. The
+          generate/refresh form works off whatever news/GitHub items are
+          already in the DB right now, independent of the cron's schedule. */}
+      <section className="flex flex-col gap-4 rounded-2xl border border-accent/40 bg-accent/5 p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-lg font-semibold text-fg">{s.latestSummaryTitle}</h2>
+          <form action={generateTodaysSummaryAction} className="flex flex-wrap items-center gap-2">
+            <select
+              name="modelId"
+              defaultValue={DEFAULT_MODEL_ID}
+              aria-label={s.modelLabel}
+              className="rounded-lg border border-border bg-bg px-2.5 py-1.5 text-sm text-fg outline-none focus:border-accent"
+            >
+              {MODELS.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                  {m.isFree ? "" : " 💲"}
+                </option>
+              ))}
+            </select>
+            <PendingFormButton
+              label={
+                latestDigest?.summaryMarkdown || latestDigest?.insight
+                  ? `↻ ${s.refreshSummary}`
+                  : `✨ ${s.generateSummary}`
+              }
+              pendingLabel={s.generatingSummary}
+              className="rounded-lg bg-accent px-3 py-1.5 text-sm font-semibold text-accent-fg hover:opacity-90 disabled:opacity-60 transition-opacity"
+            />
+          </form>
+        </div>
 
-          {latestDigest.summaryMarkdown && (
-            <p className="max-w-3xl leading-relaxed text-fg">
-              {pick(isZh, latestDigest.summaryMarkdown, latestDigest.summaryMarkdownZh)}
-            </p>
-          )}
-
-          {latestDigest.insight && (
-            <div className="max-w-3xl">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-accent">
-                {s.insightLabel}
-              </h3>
-              <p className="mt-1 text-sm leading-relaxed text-fg-secondary">
-                {pick(isZh, latestDigest.insight, latestDigest.insightZh)}
+        {latestDigest?.summaryMarkdown || latestDigest?.insight ? (
+          <>
+            {latestDigest.summaryMarkdown && (
+              <p className="max-w-3xl leading-relaxed text-fg">
+                {pick(isZh, latestDigest.summaryMarkdown, latestDigest.summaryMarkdownZh)}
               </p>
-            </div>
-          )}
+            )}
 
-          {(latestDigest.actionItems.length > 0 || latestDigest.watchList.length > 0) && (
-            <div className="grid max-w-3xl gap-4 sm:grid-cols-2">
-              {latestDigest.actionItems.length > 0 && (
-                <div className="flex flex-col gap-1.5">
-                  <h3 className="text-xs font-semibold uppercase tracking-wide text-accent">
-                    {s.actionItemsLabel}
-                  </h3>
-                  <ul className="flex flex-col gap-1 text-sm text-fg-secondary">
-                    {pickList(isZh, latestDigest.actionItems, latestDigest.actionItemsZh).map((it, i) => (
-                      <li key={i} className="flex gap-2">
-                        <span className="text-accent">→</span>
-                        <span>{it}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              {latestDigest.watchList.length > 0 && (
-                <div className="flex flex-col gap-1.5">
-                  <h3 className="text-xs font-semibold uppercase tracking-wide text-accent">
-                    {s.watchListLabel}
-                  </h3>
-                  <ul className="flex flex-col gap-1 text-sm text-fg-secondary">
-                    {pickList(isZh, latestDigest.watchList, latestDigest.watchListZh).map((it, i) => (
-                      <li key={i} className="flex gap-2">
-                        <span className="text-accent">•</span>
-                        <span>{it}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-          )}
-        </section>
-      )}
+            {latestDigest.insight && (
+              <div className="max-w-3xl">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-accent">
+                  {s.insightLabel}
+                </h3>
+                <p className="mt-1 text-sm leading-relaxed text-fg-secondary">
+                  {pick(isZh, latestDigest.insight, latestDigest.insightZh)}
+                </p>
+              </div>
+            )}
+
+            {(latestDigest.actionItems.length > 0 || latestDigest.watchList.length > 0) && (
+              <div className="grid max-w-3xl gap-4 sm:grid-cols-2">
+                {latestDigest.actionItems.length > 0 && (
+                  <div className="flex flex-col gap-1.5">
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-accent">
+                      {s.actionItemsLabel}
+                    </h3>
+                    <ul className="flex flex-col gap-1 text-sm text-fg-secondary">
+                      {pickList(isZh, latestDigest.actionItems, latestDigest.actionItemsZh).map((it, i) => (
+                        <li key={i} className="flex gap-2">
+                          <span className="text-accent">→</span>
+                          <span>{it}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {latestDigest.watchList.length > 0 && (
+                  <div className="flex flex-col gap-1.5">
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-accent">
+                      {s.watchListLabel}
+                    </h3>
+                    <ul className="flex flex-col gap-1 text-sm text-fg-secondary">
+                      {pickList(isZh, latestDigest.watchList, latestDigest.watchListZh).map((it, i) => (
+                        <li key={i} className="flex gap-2">
+                          <span className="text-accent">•</span>
+                          <span>{it}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+          </>
+        ) : (
+          <p className="max-w-3xl text-sm text-fg-secondary">{s.noSummaryYet}</p>
+        )}
+      </section>
 
       {/* Independent data source from the digests below (its own
           github_trending_runs/repos/developers tables, populated by the

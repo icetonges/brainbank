@@ -15,6 +15,9 @@
     "src/app/assistant/**": {
       "maxDuration": 500
     },
+    "src/app/trends/**": {
+      "maxDuration": 500
+    },
     "src/app/api/tasks/**": {
       "maxDuration": 300
     }

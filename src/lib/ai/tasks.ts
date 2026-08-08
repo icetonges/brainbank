@@ -62,7 +62,11 @@ export type TaskName =
   // operates on already-distilled atoms and uses the normal chain.
   | "diary-title"
   | "distill"
-  | "synthesize";
+  | "synthesize"
+  // /trends' on-demand "generate/refresh summary" button (trends/actions.ts)
+  // — reads already-public AI news + GitHub Trending data, so like
+  // "synthesize" it's on the normal chain, no localOnly restriction.
+  | "trends-overview";
 
 // Every task defaults to the local self-hosted model (DEFAULT_MODEL_ID —
 // see models.ts, MODELS[].isDefault) — private, free, no external API call.
@@ -103,6 +107,7 @@ export const TASK_MODELS: Record<TaskName, ModelId> = {
   "diary-title": DEFAULT_MODEL_ID,
   distill: DEFAULT_MODEL_ID,
   synthesize: DEFAULT_MODEL_ID,
+  "trends-overview": DEFAULT_MODEL_ID,
 };
 
 // Left in every grounded task's system prompt as harmless defense-in-depth
@@ -2014,4 +2019,104 @@ export async function synthesizeInsights(
       (n) => Number.isInteger(n) && n >= 0 && n < input.atoms.length,
     ),
   }));
+}
+
+// --- trends overview (on-demand version of fetch-trends.ts's writeDailyOverview) ---
+//
+// scripts/fetch-trends.ts's writeDailyOverview does the same job for the
+// unattended daily cron, but deliberately uses its own simpler pickModel()
+// rather than this file's withFallback/chainFor — it's a standalone script
+// outside the app. This is the in-app counterpart for the /trends page's
+// manual "generate/refresh summary" button: same idea (summarize today's
+// pulled items into an overview/insight/action-items/watch-list), but wired
+// through the app's normal task machinery so it gets automatic per-model
+// fallback and an explicit model override from the page's picker, neither
+// of which the cron script needs since it always runs unattended.
+
+const trendsOverviewSchema = z.object({
+  overviewEn: z
+    .string()
+    .describe(
+      "3-5 plain-English sentences summarizing today's pulled AI news and GitHub Trending activity together, as one combined picture. Prose only, no markdown, no headings.",
+    ),
+  overviewZh: z.string().describe("The same overview, in Simplified Chinese (a real translation, not independent commentary)."),
+  insight: z
+    .string()
+    .describe(
+      "One or two sentences naming a non-obvious pattern or connection across TODAY's items specifically — not a generic AI-industry observation, not a restatement of any single item.",
+    ),
+  insightZh: z.string().describe("The insight, in Simplified Chinese."),
+  actionItems: z
+    .array(z.string())
+    .min(3)
+    .max(5)
+    .describe(
+      "3-5 concrete, specific things a reader building agentic AI systems or a personal knowledge base could actually do this week, grounded in today's specific items — not generic advice.",
+    ),
+  actionItemsZh: z.array(z.string()).min(3).max(5).describe("The same action items, in Simplified Chinese, same order."),
+  watchList: z
+    .array(z.string())
+    .min(3)
+    .max(5)
+    .describe("3-5 short phrases naming emerging signals from today's items worth monitoring but not yet actionable."),
+  watchListZh: z.array(z.string()).min(3).max(5).describe("The same watch-list items, in Simplified Chinese, same order."),
+});
+
+export type TrendsOverview = z.infer<typeof trendsOverviewSchema>;
+
+export interface TrendsOverviewInput {
+  items: { category: string; title: string; source: string; summary: string }[];
+  githubRepos: { fullName: string; description: string; language: string | null; stars: number }[];
+}
+
+export async function generateTrendsOverview(
+  input: TrendsOverviewInput,
+  modelId?: ModelId,
+): Promise<TrendsOverview> {
+  const newsBullets =
+    input.items
+      .map((i) => `- [${i.category}] ${i.title} (${i.source})${i.summary ? `: ${i.summary}` : ""}`)
+      .join("\n") || "(nothing pulled)";
+  const repoBullets =
+    input.githubRepos
+      .map(
+        (r) =>
+          `- ${r.fullName}${r.language ? ` (${r.language})` : ""} — ${r.stars} stars${r.description ? `: ${r.description}` : ""}`,
+      )
+      .join("\n") || "(nothing pulled)";
+
+  const { object } = await withFallback(
+    "trends-overview",
+    modelId ?? TASK_MODELS["trends-overview"],
+    (model) =>
+      generateObject({
+        model,
+        maxOutputTokens: MAX_OUTPUT_TOKENS,
+        abortSignal: AbortSignal.timeout(TASK_TIMEOUT_MS),
+        schema: trendsOverviewSchema,
+        system: [
+          "You analyze today's pulled AI news, research, and GitHub Trending repos for the top of a digest page read by someone building agentic AI products and maintaining a personal knowledge base. Stay grounded in the specific items given — never invent details not present in the lists. Write every field in both English and Simplified Chinese as instructed per-field; the Chinese fields are translations of their English counterparts, not independent commentary.",
+          "Favor practical, builder-focused takeaways — agentic AI/agent-harness engineering, agent loop design, graph/knowledge engineering, LLM tooling and wikis — over generic industry commentary.",
+          'Every field must use exactly the key names given: "overviewEn", "overviewZh", "insight", "insightZh", "actionItems", "actionItemsZh", "watchList", "watchListZh". Do not rename or nest them.',
+          NO_BROWSING_INSTRUCTION,
+          JSON_ARRAY_SHAPE_REMINDER,
+        ].join("\n\n"),
+        prompt:
+          [`AI news/research pulled today:\n${newsBullets}`, `GitHub Trending repos (today's daily snapshot):\n${repoBullets}`].join(
+            "\n\n",
+          ) + NO_THINKING_SUFFIX,
+      }),
+    { objectMode: true },
+  );
+
+  return {
+    overviewEn: unescapeLiteralWhitespace(object.overviewEn).trim(),
+    overviewZh: unescapeLiteralWhitespace(object.overviewZh).trim(),
+    insight: unescapeLiteralWhitespace(object.insight).trim(),
+    insightZh: unescapeLiteralWhitespace(object.insightZh).trim(),
+    actionItems: object.actionItems,
+    actionItemsZh: object.actionItemsZh,
+    watchList: object.watchList,
+    watchListZh: object.watchListZh,
+  };
 }
