@@ -203,18 +203,8 @@ export interface TtsVoiceOption {
   label: string;
 }
 
-/** Voice choices for the classroom audiobook's voice dropdown, driven by
- *  the TTS_VOICES env var (format: "id:Label,id2:Label 2" — label
- *  optional, falls back to the id) rather than a hardcoded list: agent-
- *  server's qwen3-tts runs through mlx-audio on the user's own Mac, and
- *  which voice names it actually supports depends entirely on that local
- *  deployment — this repo has no way to introspect it. Unset/empty
- *  returns [] and the classroom page just doesn't render a dropdown at
- *  all, falling back to whatever agent-server's own default voice is
- *  (same as before this feature existed). */
-export function getTtsVoices(): TtsVoiceOption[] {
-  const raw = process.env.TTS_VOICES?.trim();
-  if (!raw) return [];
+function parseVoiceList(raw: string | undefined): TtsVoiceOption[] {
+  if (!raw?.trim()) return [];
   return raw
     .split(",")
     .map((entry) => {
@@ -222,4 +212,28 @@ export function getTtsVoices(): TtsVoiceOption[] {
       return { id: (id ?? "").trim(), label: (label ?? id ?? "").trim() };
     })
     .filter((v) => v.id);
+}
+
+/** Voice choices for the classroom audiobook's voice dropdown, driven by
+ *  env vars rather than a hardcoded list: agent-server's qwen3-tts runs
+ *  through mlx-audio on the user's own Mac, and which voice names it
+ *  actually supports depends entirely on that local deployment — this
+ *  repo has no way to introspect it.
+ *
+ *  Split per language (TTS_VOICES_EN / TTS_VOICES_ZH) because a voice that
+ *  sounds right narrating English prose usually isn't the right pick for
+ *  Chinese prose (and vice versa) — showing one merged list on every
+ *  article let you pick a mismatched voice/language pair with no warning.
+ *  TTS_VOICES (no suffix) is kept as a shared fallback for either language
+ *  if the split var isn't set, so existing single-list configs still work
+ *  unchanged. Unset/empty (both the language-specific and shared var)
+ *  returns [] and the classroom page just doesn't render a dropdown at
+ *  all, falling back to whatever agent-server's own default voice is
+ *  (same as before this feature existed). */
+export function getTtsVoices(language: "en" | "zh"): TtsVoiceOption[] {
+  const perLanguage = parseVoiceList(
+    process.env[language === "zh" ? "TTS_VOICES_ZH" : "TTS_VOICES_EN"],
+  );
+  if (perLanguage.length > 0) return perLanguage;
+  return parseVoiceList(process.env.TTS_VOICES);
 }

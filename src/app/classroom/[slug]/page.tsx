@@ -174,7 +174,7 @@ export default async function ClassroomArticlePage({
     hasAudio &&
     currentBodyMarkdown.trim() !== "" &&
     content?.audioSourceHash !== speechTextHash(speechTextForStaleness(currentBodyMarkdown));
-  const voiceOptions = getTtsVoices();
+  const voiceOptions = getTtsVoices(audioLanguage);
 
   return (
     <div className="flex flex-1 items-start gap-8">
