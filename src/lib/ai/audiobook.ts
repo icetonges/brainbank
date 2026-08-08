@@ -95,13 +95,67 @@ function hardSlice(text: string, maxChars: number): string[] {
  *  paragraph boundaries (see the audioSegments comment in db/schema.ts
  *  for why per-block generation replaced the old whole-article chunker in
  *  the first place). */
+// Script-boundary split — a DIFFERENT failure mode from the punctuation
+// one above, found from a real production example with NO punctuation at
+// all: "BashTool 启动的后台 shell" (a list item mixing an inline-code
+// English term into Chinese prose) truncates right at the Chinese-to-
+// English boundary, mid-utterance, with nothing for the earlier fix to
+// split on. Checked against mlx-audio's own docs (github.com/Blaizzy/
+// mlx-audio): every documented voice is single-language (Chinese:
+// Vivian/Serena/Uncle_Fu/Dylan/Eric, English: Ryan/Aiden), and the
+// generate_custom_voice() call takes ONE `language` value per call, not
+// per-span — nothing in its public API or examples shows it handling an
+// UNTAGGED language switch mid-utterance. Sending a `language` hint
+// (media.ts) assumes the model can still parse a code-switch once told
+// which language the SURROUNDING text is in; that's a real, documented
+// parameter, but nothing confirms it makes the model handle an embedded
+// foreign-script run correctly rather than just picking a phonemizer for
+// the dominant language and still stumbling on the minority-script span.
+//
+// So: stop asking it to code-switch within one call at all. Split every
+// piece at CJK<->Latin script transitions, so each individual TTS call is
+// single-script by construction — matching the one case the docs actually
+// demonstrate working, instead of relying on unverified cross-script
+// robustness. "BashTool 启动的后台 shell" becomes three separate calls
+// ("BashTool", "启动的后台", "shell"), each its own audio segment stitched
+// back into the same block by the existing multi-segment player (see
+// audio-player.tsx / listenable-article.tsx — already built for "a block
+// can be more than one clip", nothing new needed on the playback side).
+const CJK_CHAR = /[㐀-鿿豈-﫿　-〿＀-￯]/;
+const LATIN_CHAR = /[A-Za-z0-9]/;
+
+/** Splits text into maximal same-script runs — a run of CJK characters,
+ *  or a run of Latin letters/digits (internal spaces/punctuation don't
+ *  break a Latin run, so "Claude Code" or "BashTool." stay one piece;
+ *  only an actual script change does). Neutral characters (whitespace,
+ *  punctuation) extend whichever run they trail rather than starting a
+ *  new one or forcing a break by themselves — only a CJK<->Latin
+ *  transition is a split point. A single-script input (a normal English
+ *  or Chinese-only string) returns unchanged as one run: this is a
+ *  targeted fix for mixed-script spans, not a general re-splitter. */
+function splitByScript(text: string): string[] {
+  const runs: string[] = [];
+  let current = "";
+  let currentType: "cjk" | "latin" | null = null;
+  for (const ch of text) {
+    const type = CJK_CHAR.test(ch) ? "cjk" : LATIN_CHAR.test(ch) ? "latin" : null;
+    if (type === null || currentType === null || type === currentType) {
+      current += ch;
+      if (type !== null) currentType = type;
+    } else {
+      if (current) runs.push(current);
+      current = ch;
+      currentType = type;
+    }
+  }
+  if (current) runs.push(current);
+  return runs;
+}
+
 function splitLongText(text: string, language: "en" | "zh" = "en"): string[] {
   const maxChars = maxCharsFor(language);
   const fragments = text.split(/(?<=[.!?。！？,，、;；:：])\s*/).filter(Boolean);
-
-  if (fragments.length <= 1) {
-    return text.length <= maxChars ? [text] : hardSlice(text, maxChars);
-  }
+  const clauses = fragments.length <= 1 ? [text] : fragments;
 
   // Every fragment here — except possibly the very last one — already
   // ends in a delimiter (that's what produced the split at that point).
@@ -118,13 +172,20 @@ function splitLongText(text: string, language: "en" | "zh" = "en"): string[] {
   // trailing delimiter would end up mid-string. So it's just left as its
   // own short, standalone piece — a minor one-word clip at worst, not a
   // correctness bug (see header comment point 3 for the merge logic this
-  // replaced, and why it was unsafe).
+  // replaced, and why it was unsafe). The same no-merge rule applies to
+  // the script-boundary split below, for the same reason: merging a Latin
+  // run back onto its neighboring CJK run would just recreate the exact
+  // code-switch-in-one-call this split exists to eliminate.
   const pieces: string[] = [];
-  for (const fragment of fragments) {
-    if (fragment.length <= maxChars) {
-      pieces.push(fragment);
-    } else {
-      pieces.push(...hardSlice(fragment, maxChars));
+  for (const clause of clauses) {
+    for (const run of splitByScript(clause)) {
+      const trimmed = run.trim();
+      if (!trimmed) continue; // whitespace-only run from between scripts
+      if (trimmed.length <= maxChars) {
+        pieces.push(trimmed);
+      } else {
+        pieces.push(...hardSlice(trimmed, maxChars));
+      }
     }
   }
   return pieces;

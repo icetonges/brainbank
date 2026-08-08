@@ -18,6 +18,15 @@
 //
 // Usage:
 //   npx tsx scripts/generate-audiobooks.ts [--voice=<id>] [--limit=10] [--dry-run]
+//   npx tsx scripts/generate-audiobooks.ts --slug=<article-slug> [--voice=<id>]
+//
+// --slug targets exactly one article by its notes.slug (ignores --limit
+// and the oldest-first ordering) — for stress-testing one specific known-
+// hard article (mixed English/Chinese, lots of inline code, whatever)
+// instead of whatever happens to be oldest. Errors out immediately if no
+// zh content matches, rather than silently falling through to the
+// --limit behavior — a --slug typo should be loud, not quietly process
+// the wrong article.
 //
 // Loads .env.local/.env itself (via @next/env, the same loader `next dev`
 // uses internally — it's already a direct dependency of this project) so
@@ -73,6 +82,7 @@ async function main() {
   const voice = argValue("voice") || process.env.TTS_DEFAULT_VOICE || undefined;
   const limit = Number(argValue("limit") ?? DEFAULT_LIMIT);
   const dryRun = process.argv.includes("--dry-run");
+  const slug = argValue("slug");
 
   // Catches ANY angle-bracket placeholder text getting pasted in literally
   // (e.g. "<real-id>", "<a real voice id>") rather than one exact string —
@@ -102,7 +112,8 @@ async function main() {
     );
   }
 
-  const rows = await db
+  const baseWhere = and(isNotNull(notes.category), ne(noteContent.bodyMarkdown, ""));
+  const query = db
     .select({
       id: notes.id,
       slug: notes.slug,
@@ -114,10 +125,17 @@ async function main() {
     .innerJoin(
       noteContent,
       and(eq(noteContent.noteId, notes.id), eq(noteContent.language, "zh")),
-    )
-    .where(and(isNotNull(notes.category), ne(noteContent.bodyMarkdown, "")))
-    .orderBy(asc(notes.createdAt))
-    .limit(limit);
+    );
+
+  const rows = slug
+    ? await query.where(and(baseWhere, eq(notes.slug, slug))).limit(1)
+    : await query.where(baseWhere).orderBy(asc(notes.createdAt)).limit(limit);
+
+  if (slug && rows.length === 0) {
+    console.error(`✗ No classroom article with slug "${slug}" (and non-empty zh content) found.`);
+    process.exitCode = 1;
+    return;
+  }
 
   console.log(`Found ${rows.length} Chinese classroom article(s) to process${voice ? ` (voice: ${voice})` : ""}.\n`);
 
