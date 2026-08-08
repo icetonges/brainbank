@@ -304,6 +304,14 @@ async function withFallback<T>(
 // Real arrays pass through untouched.
 function arrayOfStrings(description: string) {
   return z.preprocess((val) => {
+    // Same "missing field entirely" failure already handled for
+    // publishAssist's `resources` below — observed in production on
+    // `tags` too (both local Qwen models: an otherwise well-formed
+    // topic/category/summary/learningMap/handsOn/resources object with
+    // `tags` just absent). Coercing to [] costs nothing (tags are always
+    // additive/optional to a working article) and is a far better outcome
+    // than discarding an entire good generation over one missing array.
+    if (val === undefined || val === null) return [];
     if (typeof val === "string") {
       return val
         .split(",")

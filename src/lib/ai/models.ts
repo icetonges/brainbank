@@ -14,7 +14,7 @@
 // VRAM with the other two, and every selection of it paid a 60+ second
 // cold-load tax, which made it a poor fit for an automatic fallback chain.
 // Its replacement as the chain's last resort is a real commercial API —
-// google/gemini-2.5-flash-lite (see providers.ts's google() factory) —
+// google/gemini-3.5-flash-lite (see providers.ts's google() factory) —
 // re-adding Google (previously pulled out entirely per explicit
 // instruction, alongside Groq/Anthropic) specifically and only as that
 // last-ditch fallback: cheap, fast, and doesn't depend on the Mac being
@@ -28,7 +28,7 @@ export type ProviderId = "local" | "google";
 export type ModelId =
   | "local/qwen3.6-35b-a3b"
   | "local/qwen3-vl-30b"
-  | "google/gemini-2.5-flash-lite";
+  | "google/gemini-3.5-flash-lite";
 
 export interface ModelInfo {
   id: ModelId;
@@ -116,8 +116,8 @@ export const MODELS: ModelInfo[] = [
   // and fast enough to be a reasonable last-resort rather than a
   // budget-buster, per Google's published pricing.
   {
-    id: "google/gemini-2.5-flash-lite",
-    name: "Gemini 2.5 Flash-Lite (commercial fallback)",
+    id: "google/gemini-3.5-flash-lite",
+    name: "Gemini 3.5 Flash-Lite (commercial fallback)",
     provider: "google",
     providerLabel: "Google",
     providerColor: "#4285f4",
@@ -129,7 +129,17 @@ export const MODELS: ModelInfo[] = [
     isFree: false,
     supportsVision: true,
     badge: "Commercial",
-    wireId: "gemini-2.5-flash-lite",
+    // Was gemini-2.5-flash-lite — Google started 404ing that id ("no longer
+    // available to new users") even though it hadn't reached its own
+    // deprecations page yet; a Gemini API quirk where some legacy model ids
+    // stay grandfathered for old projects but 404 for others rather than
+    // erroring identically for everyone. 3.5 Flash-Lite is the current
+    // stable "fastest, most cost-effective" tier per ai.google.dev/gemini-
+    // api/docs/models (checked 2026-08-08) — same role in this chain, not
+    // a capability upgrade. If this ever 404s again, check that page for
+    // whatever's current in the Flash-Lite tier rather than assuming this
+    // one string is permanent.
+    wireId: "gemini-3.5-flash-lite",
   },
 ];
 
@@ -157,7 +167,7 @@ export const MODELS: ModelInfo[] = [
 export const FALLBACK_CHAIN: ModelId[] = [
   "local/qwen3.6-35b-a3b",
   "local/qwen3-vl-30b",
-  "google/gemini-2.5-flash-lite",
+  "google/gemini-3.5-flash-lite",
 ];
 
 export const DEFAULT_MODEL_ID: ModelId =

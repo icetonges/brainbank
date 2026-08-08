@@ -12,7 +12,7 @@ import { DEFAULT_MODEL_ID, getModel, type ModelId, type ProviderId } from "./mod
 // @ai-sdk/anthropic) are still removed from here — and from package.json —
 // per the original explicit instruction to run on local only. Google
 // (@ai-sdk/google) is the one exception, re-added specifically to back
-// google/gemini-2.5-flash-lite as the fallback chain's commercial last
+// google/gemini-3.5-flash-lite as the fallback chain's commercial last
 // resort — see models.ts's header comment for why.
 
 // Default local model tag, only used when LOCAL_LLM_MODEL isn't set — kept
@@ -109,7 +109,7 @@ export function resolveModel(modelId: ModelId): LanguageModel {
   // vision entry always uses its hardcoded wireId, matching
   // HANDOFF-FOR-WINDOWS.md §2's "Model ID (use exactly)" instruction. The
   // Google entry isn't part of that override — it always uses its own
-  // wireId (models.ts's "gemini-2.5-flash-lite") regardless.
+  // wireId (models.ts's "gemini-3.5-flash-lite") regardless.
   const wireModelId =
     info.provider === "local"
       ? info.id === DEFAULT_MODEL_ID
