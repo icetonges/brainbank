@@ -81,6 +81,45 @@ export function ListenableArticle({
   const currentUrls = currentBlockIndex !== null ? segmentsByBlock[currentBlockIndex] : undefined;
   const currentUrl = currentUrls?.[pieceIndex];
 
+  // Advances the SAME persistent <audio> element to the next clip by
+  // setting .src and calling .play() imperatively, instead of the
+  // previous approach (a fresh <audio key={currentUrl}> element per
+  // clip via React's key-remount). That was the actual bug behind
+  // "continuous playback stops after every clip and needs a manual
+  // re-click": browsers grant autoplay permission to a MEDIA ELEMENT
+  // that a user gesture already started playing, and that permission
+  // does NOT reliably carry over to a brand-new element created moments
+  // later by React destroying and recreating the DOM node (even though
+  // it happens synchronously inside the `ended` handler of the element
+  // the user actually clicked) — so every single auto-advance between
+  // pieces/blocks was getting silently blocked by autoplay policy on at
+  // least some browsers, leaving playback paused until the reader
+  // manually pressed Play again for each individual clip. A persistent
+  // element whose .src changes underneath it keeps the original user
+  // gesture's playback permission for as long as it keeps playing.
+  useEffect(() => {
+    const el = audioRef.current;
+    if (!el || !currentUrl) return;
+    // Only touch .src when the clip actually changed — reassigning the
+    // same URL restarts playback from 0:00, which would fight a plain
+    // pause/resume on the same clip.
+    if (el.src !== currentUrl) el.src = currentUrl;
+    // isPlaying IS a dependency here (unlike an earlier version of this
+    // effect): clicking a paragraph that happens to already be the
+    // current spinePos/pieceIndex (e.g. the very first paragraph, before
+    // anything else has changed position) leaves `currentUrl` unchanged,
+    // so an effect keyed on currentUrl alone would never fire and
+    // playback would silently never start for that specific click. Firing
+    // on isPlaying too, and re-checking `el.paused` before calling play(),
+    // covers that case without fighting the pause path: a plain pause
+    // calls audioRef.current.pause() directly and then sets isPlaying to
+    // false, which lands here as isPlaying=false and skips the play()
+    // branch entirely, so it can't un-pause itself.
+    if (isPlaying && el.paused) {
+      el.play().catch(() => setIsPlaying(false));
+    }
+  }, [currentUrl, isPlaying]);
+
   function playFromSpine(pos: number, opts: { continuous: boolean }) {
     setSpinePos(pos);
     setPieceIndex(0);
@@ -187,19 +226,18 @@ export function ListenableArticle({
         </div>
       )}
 
-      {/* One shared, hidden <audio> element reused across every block —
-          same pattern as the /llm page's per-message play button — rather
-          than an <audio> per block, so switching blocks is just a src
-          swap instead of juggling N media elements. autoPlay only fires
-          here because `isPlaying` can only become true from a click
-          handler, the transport button, or the #block-N deep-link effect
-          on mount (never a bare hover) — see the component comment. */}
-      {currentUrl && (
+      {/* One shared, hidden, PERSISTENT <audio> element — no `key` prop,
+          deliberately, and no `src`/`autoPlay` here either. Both now live
+          in the currentUrl effect above, which sets .src and calls
+          .play() imperatively on this same DOM node instead of letting it
+          get destroyed and recreated per clip (see that effect's comment
+          for why a fresh element per clip is what broke auto-advance).
+          Kept mounted even before anything has played (not conditioned on
+          currentUrl) specifically so the ref exists and audioRef.current
+          is a real, stable element from the start. */}
+      {hasAudio && (
         <audio
           ref={audioRef}
-          key={currentUrl}
-          src={currentUrl}
-          autoPlay={isPlaying}
           onEnded={handleEnded}
           onPause={() => setIsPlaying(false)}
           onPlay={() => setIsPlaying(true)}
