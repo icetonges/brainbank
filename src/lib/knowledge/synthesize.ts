@@ -92,6 +92,10 @@ export interface SynthesisResult {
 export async function runSynthesis(
   window: SynthesisWindow = "week",
   kinds?: InsightKind[],
+  /** Explicit model override from the assistant page's picker — falls
+   *  through to TASK_MODELS.synthesize (see synthesizeInsights) when
+   *  omitted, same as every other task in the app. */
+  modelId?: ModelId,
 ): Promise<SynthesisResult> {
   const [run] = await db
     .insert(knowledgeRuns)
@@ -121,7 +125,7 @@ export async function runSynthesis(
         periodLabel: WINDOW_LABEL[window],
         kinds,
       },
-      undefined,
+      modelId,
       (id) => usedModels.add(id),
     );
 

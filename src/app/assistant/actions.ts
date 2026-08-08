@@ -16,6 +16,7 @@ import { runSynthesis, type SynthesisWindow } from "@/lib/knowledge/synthesize";
 import { decayAtoms } from "@/lib/knowledge/distill";
 import { dispatchDistillJob } from "@/lib/background-jobs";
 import { embedTextsOrNull } from "@/lib/ai/embeddings";
+import { MODELS, type ModelId } from "@/lib/ai/models";
 
 // Curation surface for the knowledge base. The engine grows knowledge
 // automatically; everything here is the MANUAL half — add, edit, pin,
@@ -212,9 +213,14 @@ export async function synthesizeAction(formData: FormData) {
   const kinds = rawKinds
     ? (rawKinds.split(",").map((k) => k.trim()).filter(Boolean) as InsightKind[])
     : undefined;
+  // Validated against the registry rather than cast blindly — formData is
+  // client-controlled, and an unrecognized id would otherwise reach
+  // resolveModel() and throw "Unknown model id" deep inside withFallback.
+  const rawModelId = String(formData.get("modelId") ?? "");
+  const modelId = MODELS.some((m) => m.id === rawModelId) ? (rawModelId as ModelId) : undefined;
 
   try {
-    await runSynthesis(window, kinds);
+    await runSynthesis(window, kinds, modelId);
   } catch (error) {
     console.error("Synthesis failed", error);
   }

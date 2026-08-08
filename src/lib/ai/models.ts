@@ -250,14 +250,20 @@ export const GROUNDED_FALLBACK_CHAIN: ModelId[] = FALLBACK_CHAIN.filter(
 // of {title,url,description} objects, handsOn as an array instead of a
 // string) — every local model shares the same agent-server, which per
 // HANDOFF-FOR-WINDOWS.md doesn't support strict structured-output
-// enforcement (response_format is best-effort JSON, not a hard schema), so
-// none of the three are excluded here; that would just mean generateObject
-// tasks have nowhere to go. The fix lives in tasks.ts instead: every
-// generateObject system prompt spells out the
-// exact JSON shape with a concrete example, and the schemas use
+// enforcement (response_format is best-effort JSON, not a hard schema).
+// providers.ts's local() now sets supportsStructuredOutputs: true as an
+// experiment to revisit that finding (agent-server is actively versioned
+// and may have gained real json_schema support since) — if that pans out
+// it should reduce how often these mismatches happen, but doesn't
+// guarantee they stop, so none of the three are excluded here regardless;
+// that would just mean generateObject tasks have nowhere to go if the
+// experiment doesn't pan out. The fix that doesn't depend on that
+// experiment lives in tasks.ts: every generateObject system prompt spells
+// out the exact JSON shape with a concrete example, and the schemas use
 // z.preprocess() to coerce the specific shape mistakes observed (string
-// -> array, string -> best-effort object) before validation runs, so a
-// near-miss response still gets used instead of being thrown out.
+// -> array, string -> best-effort object, wrong field names entirely)
+// before validation runs, so a near-miss response still gets used instead
+// of being thrown out.
 //
 // This list is for models with a *structural*, unpromptable rejection
 // (e.g. the Groq qwen model formerly registered here hard-rejected

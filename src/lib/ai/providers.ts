@@ -49,6 +49,29 @@ function local() {
     name: "local-llm",
     baseURL: `${baseURL.replace(/\/+$/, "")}/v1`,
     apiKey,
+    // EXPERIMENT (see models.ts's NO_STRUCTURED_OUTPUT_MODELS comment for
+    // the prior finding this revisits): previously left false/unset, which
+    // is why every generateObject call in tasks.ts/fetch-trends.ts has had
+    // to lean on prompt-only JSON instructions plus manual schema coercion
+    // — HANDOFF-FOR-WINDOWS.md documented agent-server's response_format as
+    // best-effort only, not a real schema. Flipping this to true makes the
+    // AI SDK send response_format: {type:"json_schema", strict:true} with
+    // the actual schema instead of just prompting for JSON and hoping,
+    // which — IF agent-server/Ollama honors it (Ollama's own OpenAI-compat
+    // endpoint supports json_schema mode on recent versions; unclear
+    // whether this custom FastAPI wrapper passes it through) — would fix
+    // the field-naming/shape mismatches at the source via constrained
+    // decoding rather than working around them after the fact. Worth
+    // retrying since agent-server is actively versioned (currently
+    // "0.8.0-step5.7-streaming" per its own health response) and may have
+    // changed since that doc was written. If it turns out agent-server
+    // still can't honor this — rejects the request outright, or silently
+    // ignores it with no change in behavior — revert this one flag; every
+    // existing coercion/no_think safety net in tasks.ts and
+    // fetch-trends.ts stays in place regardless and keeps working either
+    // way, so this is a pure upside-or-neutral bet, not a replacement for
+    // them.
+    supportsStructuredOutputs: true,
   });
 }
 

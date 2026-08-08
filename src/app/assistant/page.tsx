@@ -28,6 +28,7 @@ import {
   runDecayAction,
   backfillEmbeddingsAction,
 } from "./actions";
+import { MODELS, DEFAULT_MODEL_ID } from "@/lib/ai/models";
 
 export const dynamic = "force-dynamic";
 // Synthesis is a single large generateObject call over up to 120 atoms —
@@ -236,6 +237,26 @@ export default async function AssistantPage({
             <option value="highlight,theme">{s.kindsReflective}</option>
             <option value="idea,business">{s.kindsGenerative}</option>
             <option value="recommendation">{s.kindsActionable}</option>
+          </select>
+          {/* Explicit model override for this one Think run — picking a
+              model here doesn't turn off the fallback chain (chainFor/
+              withFallback in tasks.ts), it just changes which model tries
+              first; if it fails, the rest of the chain still runs. Native
+              select (not the client ModelPicker component used elsewhere)
+              since this form has no other client-side state to coordinate
+              with, matching the window/kinds selects right above it. */}
+          <select
+            name="modelId"
+            defaultValue={DEFAULT_MODEL_ID}
+            aria-label={s.modelLabel}
+            className="rounded-lg border border-border bg-bg px-2.5 py-1.5 text-sm text-fg outline-none focus:border-accent"
+          >
+            {MODELS.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name}
+                {m.isFree ? "" : " 💲"}
+              </option>
+            ))}
           </select>
           <PendingFormButton
             label={`✨ ${s.think}`}
