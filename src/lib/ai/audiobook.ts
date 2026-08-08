@@ -41,10 +41,28 @@ import { uploadBufferToR2 } from "../storage/r2";
 //     not just an overflow fallback for oversized sentences. Every clause
 //     becomes its own TTS call and therefore its own audio segment, so
 //     there's no longer a multi-clause span inside one call that a model
-//     hiccup can truncate partway through. Only genuinely trivial
-//     fragments (under MIN_MERGE_CHARS — a stray "等" or a lone closing
-//     quote) get merged into a neighbor, so a normal paragraph still
-//     reads as a handful of clips, not dozens.
+//     hiccup can truncate partway through.
+//
+//  3. (Found after (2) shipped and STILL didn't fix production audio —
+//     verified by hand-tracing this function against a real article's
+//     text.) The first version of this fix re-merged short trailing
+//     fragments (under a MIN_MERGE_CHARS length check) back onto the
+//     previous piece to avoid dozens of tiny one-clause clips. That
+//     merge was the bug: every fragment coming out of the punctuation
+//     split above ALREADY ends in a delimiter (that's what a split point
+//     is), so gluing another fragment onto it unconditionally puts that
+//     delimiter back in the MIDDLE of the resulting piece — reintroducing
+//     exactly the internal-punctuation shape that triggers the model's
+//     silent truncation. And a 15-char threshold merged constantly for
+//     Chinese, where a complete clause is routinely 5-15 characters (e.g.
+//     a trailing "，避免盲猜。" clause got glued onto the clause before it,
+//     putting the "，" back mid-piece and losing "避免盲猜" to truncation
+//     on every regeneration). Fix: no merging across a delimiter, ever —
+//     see splitLongText below. Each punctuation-delimited fragment is
+//     unconditionally its own piece, full stop. That does mean a run of
+//     several very short clauses now becomes several very short clips
+//     instead of one merged one — a minor UX cost, deliberately accepted
+//     over the alternative of silently losing words again.
 //
 // Chinese also gets a lower absolute ceiling than English (MAX_TTS_CHARS
 // per language) since it packs far more spoken content per character (no
@@ -53,7 +71,6 @@ import { uploadBufferToR2 } from "../storage/r2";
 // them identically under-protects Chinese specifically.
 const MAX_TTS_CHARS_EN = 1800;
 const MAX_TTS_CHARS_ZH = 350;
-const MIN_MERGE_CHARS = 15;
 
 function maxCharsFor(language: "en" | "zh"): number {
   return language === "zh" ? MAX_TTS_CHARS_ZH : MAX_TTS_CHARS_EN;
@@ -86,27 +103,30 @@ function splitLongText(text: string, language: "en" | "zh" = "en"): string[] {
     return text.length <= maxChars ? [text] : hardSlice(text, maxChars);
   }
 
+  // Every fragment here — except possibly the very last one — already
+  // ends in a delimiter (that's what produced the split at that point).
+  // Merging ANY two of them, in either direction, necessarily puts one of
+  // those delimiters back in the middle of the resulting piece instead of
+  // at the end — which is exactly the shape that triggers the model's
+  // silent truncation (see the header comment). So there is no safe merge
+  // here: every fragment is unconditionally its own piece. The only
+  // exception is a genuinely UNDELIMITED trailing remnant — only possible
+  // for the last fragment, when the source text doesn't end in
+  // punctuation at all (e.g. a stray "等" with nothing after it) — which
+  // has no delimiter of its own to lose track of — but even that fragment
+  // isn't merged onto the previous piece, because the previous piece's OWN
+  // trailing delimiter would end up mid-string. So it's just left as its
+  // own short, standalone piece — a minor one-word clip at worst, not a
+  // correctness bug (see header comment point 3 for the merge logic this
+  // replaced, and why it was unsafe).
   const pieces: string[] = [];
-  let piece = "";
   for (const fragment of fragments) {
-    const merged = piece ? `${piece}${piece.match(/[.!?]$/) ? " " : ""}${fragment}` : fragment;
-    // Only fold a fragment into the running piece when it's trivially
-    // short on its own AND doing so still fits the ceiling — a
-    // normal-length clause always becomes its own piece, which is the
-    // whole point (see the header comment).
-    if (fragment.length < MIN_MERGE_CHARS && merged.length <= maxChars) {
-      piece = merged;
-      continue;
-    }
-    if (piece.trim()) pieces.push(piece.trim());
     if (fragment.length <= maxChars) {
-      piece = fragment;
+      pieces.push(fragment);
     } else {
       pieces.push(...hardSlice(fragment, maxChars));
-      piece = "";
     }
   }
-  if (piece.trim()) pieces.push(piece.trim());
   return pieces;
 }
 
