@@ -197,6 +197,15 @@ export default async function SubcategoryLandingPage({
                     </span>
                   </div>
                   <SectionArticleList
+                    // Forces a remount when the language toggle changes
+                    // `lang` (soft client-side nav keeps this component
+                    // instance mounted otherwise) — SectionArticleList
+                    // seeds its `items` state from the `articles` prop
+                    // once on mount for optimistic drag-reorder, so
+                    // without this key it keeps showing the titles from
+                    // whichever language it first mounted with until a
+                    // full page refresh remounts it.
+                    key={`${sec.id}-${lang}`}
                     sectionId={sec.id}
                     subcategorySlug={subcategory.slug}
                     articles={sec.articles.map((a) => ({
