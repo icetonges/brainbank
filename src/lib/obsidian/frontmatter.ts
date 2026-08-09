@@ -21,13 +21,20 @@ export interface ParsedFrontmatter {
  * inline `[a, b]` form instead.
  */
 export function parseFrontmatter(raw: string): ParsedFrontmatter {
-  const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
+  // Leading whitespace on the opening/closing "---" delimiters and on each
+  // key line is tolerated (`\s*` / per-line trim below) — Obsidian, pasting,
+  // and various editors can introduce incidental indentation that has no
+  // semantic meaning in a flat key: value block, and silently treating an
+  // indented file as "no frontmatter" causes it to be misparsed as plain
+  // body text instead.
+  const match = raw.match(/^\s*---\r?\n([\s\S]*?)\r?\n\s*---\r?\n?([\s\S]*)$/);
   if (!match) return { data: {}, body: raw };
 
   const [, yamlBlock, body] = match;
   const data: Record<string, string | string[]> = {};
 
-  for (const line of yamlBlock.split(/\r?\n/)) {
+  for (const rawLine of yamlBlock.split(/\r?\n/)) {
+    const line = rawLine.trim();
     const m = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
     if (!m) continue;
     const [, key, rawValue] = m;

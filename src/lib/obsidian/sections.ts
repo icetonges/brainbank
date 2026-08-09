@@ -8,6 +8,11 @@ export type SectionName = (typeof SECTION_NAMES)[number];
  * directly in Obsidian with `## What` / `## How` / `## Why` / `## Other`
  * sections needs no AI pass at all (PLAN.md §13: code first).
  *
+ * Leading whitespace on each line is trimmed before matching, so a header
+ * indented by an editor or paste (`   ## What`) still counts — otherwise it
+ * silently falls through to the "no headers found" case below and the note
+ * gets rewritten by AI instead of used as-is.
+ *
  * Returns null if none of the four headers are present, signalling the
  * caller to fall back to AI drafting (draftNoteFromSource) for freeform
  * notes instead.
@@ -21,7 +26,7 @@ export function splitSections(body: string): Partial<Record<SectionName, string>
   let found = false;
 
   for (const line of lines) {
-    const m = line.match(headerRe);
+    const m = line.trim().match(headerRe);
     if (m) {
       current = m[1].toLowerCase() as SectionName;
       sections[current] = sections[current] ?? [];
