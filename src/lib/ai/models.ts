@@ -22,12 +22,27 @@
 // another external provider later is still just a provider() factory in
 // providers.ts, a MODELS entry, and a line in FALLBACK_CHAIN, same as
 // before.
+//
+// 2026-08-15: the vision entry was swapped from qwen3-vl:30b to
+// qwen3.8:27b-q8_0 — the Mac's new vision model, replacing the old one on
+// disk. Fixed here by pointing this registry's wireId straight at the new
+// tag (the vision entry has no env override — see wireId's field comment
+// below — so this file is the only place that needed to change on the app
+// side). Two other things from that same swap are Mac-side, not this repo:
+// agent-server's own model_catalog.json (used for auto-routing when a
+// caller doesn't pin a model — irrelevant to this app, which always pins
+// its model explicitly) still listed the old tag as of that date, and the
+// old qwen3-vl:30b weights were still on disk under their own tag rather
+// than being retired/aliased to the new model. Neither blocks this app
+// (it now requests the new tag by name), but if qwen3.8:27b-q8_0 ever
+// starts 404ing/erroring, check whether the Mac's model got renamed or
+// removed again before assuming this repo is at fault.
 
 export type ProviderId = "local" | "google";
 
 export type ModelId =
   | "local/qwen3.6-35b-a3b"
-  | "local/qwen3-vl-30b"
+  | "local/qwen3.8-27b-q8_0"
   | "google/gemini-3.5-flash-lite";
 
 export interface ModelInfo {
@@ -87,24 +102,30 @@ export const MODELS: ModelInfo[] = [
   // The only local model that accepts image input (vision-language) — the
   // Google fallback also supports vision, but this one is free/private and
   // never called unless it's the preferred choice or both other chain
-  // entries fail. Coexists in VRAM alongside the default model (40.5 GiB
-  // combined, both stay warm — see the handoff doc's table), so switching
-  // to this one and back stays fast (no evict/reload cycle).
+  // entries fail. Swapped 2026-08-15 from qwen3-vl:30b (19GB on disk) to
+  // qwen3.8:27b-q8_0 (29GB on disk) — the Mac's new vision model. On-disk
+  // sizes put this alongside the default model at ~52 GiB combined (23GB +
+  // 29GB), up from ~42 GiB with the old pairing; that's arithmetic on the
+  // two models' disk footprints, not a confirmed live-VRAM measurement for
+  // this specific new pairing, so treat "stays warm alongside the default
+  // model" as carried over from the old model rather than re-verified — if
+  // switching back and forth starts paying a cold-load tax, that's the
+  // first thing to check (may need the `heavy` flag below set to true).
   {
-    id: "local/qwen3-vl-30b",
-    name: "Qwen3-VL 30B (vision)",
+    id: "local/qwen3.8-27b-q8_0",
+    name: "Qwen3.8 27B Q8 (vision)",
     provider: "local",
     providerLabel: "Local",
     providerColor: "#16a34a",
     inputPricePer1M: 0,
     outputPricePer1M: 0,
     description:
-      "Self-hosted agent-server via Tailscale Funnel — private, no external API, no per-token cost. Vision-language — the only local model that accepts images. Fits in VRAM alongside the default model, so it stays warm.",
+      "Self-hosted agent-server via Tailscale Funnel — private, no external API, no per-token cost. Vision-language — the only local model that accepts images. Replaced qwen3-vl:30b on 2026-08-15.",
     contextWindow: "varies",
     isFree: true,
     supportsVision: true,
     badge: "Local",
-    wireId: "qwen3-vl:30b",
+    wireId: "qwen3.8:27b-q8_0",
   },
   // Commercial fallback — the chain's last resort (see FALLBACK_CHAIN
   // below), used only when both local models have failed. Google's Gemini
@@ -166,7 +187,7 @@ export const MODELS: ModelInfo[] = [
 // it fails," not "only ever use Gemini."
 export const FALLBACK_CHAIN: ModelId[] = [
   "local/qwen3.6-35b-a3b",
-  "local/qwen3-vl-30b",
+  "local/qwen3.8-27b-q8_0",
   "google/gemini-3.5-flash-lite",
 ];
 

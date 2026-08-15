@@ -25,7 +25,7 @@ const DEFAULT_LOCAL_MODEL = "qwen3.6:35b-a3b";
  * /api/ai/health route can show it without duplicating this fallback.
  * Only the default entry honors this env override (backward-compatible
  * with the single-model setup this registry replaces) — the other local
- * model (local/qwen3-vl-30b) always uses its exact wireId from models.ts,
+ * model (local/qwen3.8-27b-q8_0) always uses its exact wireId from models.ts,
  * since LOCAL_LLM_MODEL was only ever meant to say "which one model," not
  * "remap either local one." */
 export function localModelTag(): string {
