@@ -11,6 +11,12 @@ const ALLOWED_UPLOADS: Record<string, readonly string[]> = {
   ".markdown": ["text/markdown", "text/plain", "application/octet-stream"],
   ".txt": ["text/plain", "application/octet-stream"],
   ".json": ["application/json", "text/plain", "application/octet-stream"],
+  // Accepted so the composer's "replicate as dark-mode HTML" feature can
+  // upload the transformed copy (see src/lib/html-replica.ts) — browsers
+  // occasionally report octet-stream instead of text/html for a raw file
+  // pick, so both are allowed like the other text-family types above.
+  ".html": ["text/html", "application/octet-stream"],
+  ".htm": ["text/html", "application/octet-stream"],
   ".pptx": [
     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     "application/octet-stream",

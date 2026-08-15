@@ -17,6 +17,7 @@ import {
 import { t, type Lang } from "@/lib/i18n";
 import { SubcategoryField } from "@/components/subcategory-field";
 import { MODELS, DEFAULT_MODEL_ID, type ModelId } from "@/lib/ai/models";
+import { buildDarkModeHtmlReplica, isHtmlReplicaFile } from "@/lib/html-replica";
 
 // Converts pasted rich HTML (from a rendered webpage, Google Doc, Notion,
 // Word, another classroom article, etc.) into the markdown syntax this
@@ -172,6 +173,50 @@ export function ClassroomComposer({
     }
   }
 
+  /** Upload an .html/.htm file as a full-layout "replica" instead of
+   * extracting its text: buildDarkModeHtmlReplica runs client-side on the
+   * raw file content (no server round-trip needed — it's pure string
+   * manipulation), forcing the page dark to match the app's own default
+   * theme, and the *modified* copy is what actually gets uploaded and
+   * inserted. <Markdown>'s img override (markdown.tsx) recognizes the
+   * .html extension on the inserted `![name](url)` and renders it as a
+   * sandboxed <iframe> instead of an <img>, preserving the original
+   * page's exact layout. */
+  async function handleHtmlFile(file: File) {
+    setError(null);
+    setBusy(`${s.replicating} ${file.name}…`);
+
+    const el = bodyRef.current;
+    const insertStart = el?.selectionStart ?? el?.value.length ?? 0;
+    const insertEnd = el?.selectionEnd ?? insertStart;
+
+    try {
+      const original = await file.text();
+      const replica = buildDarkModeHtmlReplica(original);
+      const replicaFile = new File([replica], file.name, { type: "text/html" });
+
+      const target = await ensureDraft();
+      setBusy(null);
+      setUploadPct(0);
+      const { provider, url } = await signAndUploadFile(target.noteId, replicaFile, setUploadPct);
+
+      await attachMediaAction(target.noteId, target.slug, {
+        kind: mediaKindFromMimeType("text/html"),
+        provider,
+        url,
+        sizeBytes: replicaFile.size,
+        mimeType: "text/html",
+      });
+
+      insertAt(`\n![${file.name}](${url})\n`, insertStart, insertEnd);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `Failed to replicate ${file.name}`);
+    } finally {
+      setUploadPct(null);
+      setBusy(null);
+    }
+  }
+
   /** Upload a document, keep it attached to the note as source material,
    * extract its text server-side, and drop the content in at the cursor. */
   async function handleDocument(file: File) {
@@ -210,7 +255,9 @@ export function ClassroomComposer({
    * over the single progress indicator. */
   async function handleFiles(files: File[]) {
     for (const file of files) {
-      if (file.type.startsWith("image/")) {
+      if (isHtmlReplicaFile(file)) {
+        await handleHtmlFile(file);
+      } else if (file.type.startsWith("image/")) {
         await handleImage(file);
       } else if (isDocFile(file)) {
         await handleDocument(file);
@@ -375,7 +422,10 @@ export function ClassroomComposer({
         }}
         onPaste={(e) => {
           const files = Array.from(e.clipboardData?.files ?? []);
-          if (files.length > 0 && files.some((f) => f.type.startsWith("image/") || isDocFile(f))) {
+          if (
+            files.length > 0 &&
+            files.some((f) => f.type.startsWith("image/") || isDocFile(f) || isHtmlReplicaFile(f))
+          ) {
             e.preventDefault();
             handleFiles(files);
             return;
@@ -420,7 +470,7 @@ export function ClassroomComposer({
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*,.pdf,.doc,.docx,.xlsx,.xls,.csv,.pptx,.txt,.md,.markdown,.json"
+            accept="image/*,.pdf,.doc,.docx,.xlsx,.xls,.csv,.pptx,.txt,.md,.markdown,.json,.html,.htm"
             multiple
             className="hidden"
             disabled={uploadPct !== null || busy !== null}

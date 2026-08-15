@@ -11,6 +11,7 @@ import { extractDocumentForComposer } from "@/app/classroom/extract-actions";
 import { LIFE_AREAS } from "@/lib/knowledge/taxonomy";
 import { t, type Lang } from "@/lib/i18n";
 import { Markdown } from "@/components/markdown";
+import { buildDarkModeHtmlReplica, isHtmlReplicaFile } from "@/lib/html-replica";
 
 const turndown = new TurndownService({
   headingStyle: "atx",
@@ -420,6 +421,46 @@ export function DiaryComposer({
     }
   }
 
+  /** Upload an .html/.htm file as a full-layout "replica" instead of a
+   *  plain attachment: buildDarkModeHtmlReplica runs client-side on the
+   *  raw file content (pure string manipulation, no server round-trip),
+   *  forcing the page dark to match the app's own default theme — the
+   *  *modified* copy is what gets uploaded and inserted. Behaves like
+   *  handleImage (immediate insert, not queued in pendingDocs the way
+   *  other documents are) since there's no useful "attach only, extract
+   *  later" state for a replica — the point is the replica itself.
+   *  <Markdown>'s img override (markdown.tsx) recognizes the .html
+   *  extension on the inserted `![name](url)` and renders it as a
+   *  sandboxed <iframe>, preserving the original page's exact layout. */
+  async function handleHtmlFile(file: File, target: HTMLTextAreaElement | null) {
+    setError(null);
+    setUploadPct(0);
+    const insertStart = target?.selectionStart ?? target?.value.length ?? 0;
+    const insertEnd = target?.selectionEnd ?? insertStart;
+
+    try {
+      const original = await file.text();
+      const replica = buildDarkModeHtmlReplica(original);
+      const replicaFile = new File([replica], file.name, { type: "text/html" });
+
+      const entry = await ensureDraft();
+      const { provider, url } = await signAndUploadFile(entry.noteId, replicaFile, setUploadPct);
+      await attachMediaAction(entry.noteId, entry.slug, {
+        kind: mediaKindFromMimeType("text/html"),
+        provider,
+        url,
+        sizeBytes: replicaFile.size,
+        mimeType: "text/html",
+      });
+      insertAtCursor(target, `\n![${file.name}](${url})\n`, insertStart, insertEnd);
+      notifyEdited(target);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `Failed to replicate ${file.name}`);
+    } finally {
+      setUploadPct(null);
+    }
+  }
+
   /** Non-image attachments (PDF, Word, Excel, …) upload and attach like an
    *  image does, but insert as a file-card link rather than dumping their
    *  content into the entry — see extractPendingDoc for the opt-in pull. */
@@ -479,7 +520,9 @@ export function DiaryComposer({
 
   async function handleFiles(files: File[], target: HTMLTextAreaElement | null) {
     for (const file of files) {
-      if (file.type.startsWith("image/")) {
+      if (isHtmlReplicaFile(file)) {
+        await handleHtmlFile(file, target);
+      } else if (file.type.startsWith("image/")) {
         await handleImage(file, target);
       } else if (isDocFile(file)) {
         await handleDocument(file, target);
@@ -786,7 +829,7 @@ export function DiaryComposer({
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*,.pdf,.doc,.docx,.xlsx,.xls,.csv,.pptx,.txt,.md,.markdown,.json"
+            accept="image/*,.pdf,.doc,.docx,.xlsx,.xls,.csv,.pptx,.txt,.md,.markdown,.json,.html,.htm"
             multiple
             className="hidden"
             disabled={uploadPct !== null}

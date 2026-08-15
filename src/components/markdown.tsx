@@ -5,6 +5,7 @@ import remarkBreaks from "remark-breaks";
 import rehypeKatex from "rehype-katex";
 import rehypeHighlight from "rehype-highlight";
 import { MermaidDiagram } from "@/components/mermaid-diagram";
+import { isHtmlReplicaSrc } from "@/lib/html-replica";
 
 /** react-markdown passes a `node` prop (the AST node) to every component
  * override — it must not be spread onto a DOM element. */
@@ -198,6 +199,39 @@ export function Markdown({
           },
           img: (p) => {
             const { src, alt } = dom(p);
+            // The composer's "upload an HTML file" flow (handleHtmlFile in
+            // classroom-composer.tsx / diary-composer.tsx) inserts the
+            // replica the same way an image would — a plain
+            // ![name](url) — but pointed at an uploaded .html/.htm file
+            // instead of an image. Render it as a full replica of the
+            // original page's layout instead of trying (and failing) to
+            // load it as an <img>. It's already dark-mode by the time it
+            // gets here (buildDarkModeHtmlReplica ran client-side before
+            // upload) — this just needs to display it safely.
+            if (typeof src === "string" && isHtmlReplicaSrc(src)) {
+              return (
+                <span className="my-2 flex flex-col gap-1.5">
+                  <iframe
+                    src={src}
+                    title={alt || "HTML replica"}
+                    loading="lazy"
+                    // No "allow-scripts" — this is the real safety
+                    // boundary for arbitrary uploaded HTML, not the
+                    // script-tag strip in buildDarkModeHtmlReplica.
+                    // allow-same-origin alone (without allow-scripts) is
+                    // safe: it only lets the frame's own resources
+                    // (relative CSS/fonts/images) load, it can't be
+                    // combined with script execution to escape the
+                    // sandbox.
+                    sandbox="allow-same-origin"
+                    className="h-[75vh] w-full resize-y overflow-auto rounded-lg border border-border bg-bg"
+                  />
+                  {alt && (
+                    <span className="text-center font-sans text-xs text-fg-secondary">{alt}</span>
+                  )}
+                </span>
+              );
+            }
             // A real alt (not a pasted filename) doubles as a caption —
             // the formatter writes descriptive alt text, so images read
             // like proper article figures.

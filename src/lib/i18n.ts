@@ -148,7 +148,7 @@ const en = {
     moreArticles: "More in this subcategory",
     uncategorized: "Uncategorized",
     bodyPlaceholder:
-      "Drop everything here — text, markdown, files, links… No formatting needed; a messy paste is fine.\nPaste one or more URLs alone and each page's main content is fetched with the ads and navigation stripped; YouTube links pull the transcript. Attach, paste, or drag in documents (pdf, docx, xlsx, csv, pptx, txt, md, json) and their content is extracted right here. Images upload and appear as markdown; math ($x^2$), code blocks, and ```mermaid diagrams render automatically.\n\nClick Save and this stays exactly as written — AI doesn't touch it. AI only adds a learning map, step-by-step hands-on instructions, the top 3 sources, and tags for the right AI Classroom subtab.",
+      "Drop everything here — text, markdown, files, links… No formatting needed; a messy paste is fine.\nPaste one or more URLs alone and each page's main content is fetched with the ads and navigation stripped; YouTube links pull the transcript. Attach, paste, or drag in documents (pdf, docx, xlsx, csv, pptx, txt, md, json) and their content is extracted right here. An .html/.htm file instead becomes a full replica — its original layout untouched, forced into dark mode automatically. Images upload and appear as markdown; math ($x^2$), code blocks, and ```mermaid diagrams render automatically.\n\nClick Save and this stays exactly as written — AI doesn't touch it. AI only adds a learning map, step-by-step hands-on instructions, the top 3 sources, and tags for the right AI Classroom subtab.",
     modelLabel: "AI model",
     modelHeavyWarning:
       "Heavyweight — can't stay loaded alongside the other models. Selecting it evicts whatever's currently loaded, so the next run may take 60+ seconds to start.",
@@ -161,6 +161,7 @@ const en = {
     uploading: "Uploading…",
     fetchingUrl: "Fetching",
     extracting: "Extracting",
+    replicating: "Replicating",
     unsupportedFile: "Unsupported file type",
     // edit page
     editTitle: "Edit article",
@@ -274,7 +275,7 @@ const en = {
       "Just write. The title, tags, and everything your assistant learns from it are generated automatically — nothing below the box is required.",
     titlePlaceholder: "Title (leave blank — it'll be named automatically)",
     bodyPlaceholder:
-      "What happened today? What are you thinking about?\n\nPaste or drop images anywhere. Markdown, math ($x^2$), code blocks, and [[wikilinks]] to your knowledge pages all work.",
+      "What happened today? What are you thinking about?\n\nPaste or drop images anywhere. Attach an .html/.htm file and it becomes a full replica — original layout kept, forced into dark mode. Markdown, math ($x^2$), code blocks, and [[wikilinks]] to your knowledge pages all work.",
     toolbarBold: "Bold",
     toolbarItalic: "Italic",
     toolbarH2: "Heading 2",
@@ -533,7 +534,7 @@ const zh: typeof en = {
     moreArticles: "该子分类下的更多文章",
     uncategorized: "未分类",
     bodyPlaceholder:
-      "把所有内容放进来——文字、Markdown、文件、链接……无需排版，随意粘贴即可。\n单独粘贴一个或多个网址，会自动抓取每个页面的正文内容（去除广告和导航栏）；YouTube 链接会提取字幕。添加、粘贴或拖入文档（pdf、docx、xlsx、csv、pptx、txt、md、json），内容会直接提取到这里。图片自动上传并以 Markdown 插入；数学公式（$x^2$）、代码块和 ```mermaid 图表自动渲染。\n\n点击保存后，这里的内容将原样保留，AI 不会修改——AI 仅会生成学习地图、分步动手指南、三大推荐资源，以及对应 AI 课堂子栏目的标签。",
+      "把所有内容放进来——文字、Markdown、文件、链接……无需排版，随意粘贴即可。\n单独粘贴一个或多个网址，会自动抓取每个页面的正文内容（去除广告和导航栏）；YouTube 链接会提取字幕。添加、粘贴或拖入文档（pdf、docx、xlsx、csv、pptx、txt、md、json），内容会直接提取到这里。上传 .html/.htm 文件则会生成完整还原页面——保留原始排版，自动切换为暗色模式。图片自动上传并以 Markdown 插入；数学公式（$x^2$）、代码块和 ```mermaid 图表自动渲染。\n\n点击保存后，这里的内容将原样保留，AI 不会修改——AI 仅会生成学习地图、分步动手指南、三大推荐资源，以及对应 AI 课堂子栏目的标签。",
     modelLabel: "AI 模型",
     modelHeavyWarning:
       "重量级模型——无法与其他模型同时驻留显存。选择它会先卸载当前已加载的模型，因此下一次运行可能需要等待 60 秒以上。",
@@ -545,6 +546,7 @@ const zh: typeof en = {
     uploading: "上传中…",
     fetchingUrl: "正在抓取",
     extracting: "正在提取",
+    replicating: "正在生成暗色副本",
     unsupportedFile: "不支持的文件类型",
     editTitle: "编辑文章",
     regenerateOnSave: "重新运行 AI 发布助手（根据编辑后的内容重建学习地图、动手步骤、资源和标签）",
@@ -650,7 +652,7 @@ const zh: typeof en = {
     newDescription: "直接写就好。标题、标签，以及助手从中学到的一切都会自动生成——输入框以下都不是必填项。",
     titlePlaceholder: "标题（留空则自动命名）",
     bodyPlaceholder:
-      "今天发生了什么？在想些什么？\n\n图片可随处粘贴或拖入。支持 Markdown、数学公式（$x^2$）、代码块，以及指向知识页面的 [[wikilinks]]。",
+      "今天发生了什么？在想些什么？\n\n图片可随处粘贴或拖入。添加 .html/.htm 文件会生成完整还原页面——保留原始排版，自动切换为暗色模式。支持 Markdown、数学公式（$x^2$）、代码块，以及指向知识页面的 [[wikilinks]]。",
     toolbarBold: "粗体",
     toolbarItalic: "斜体",
     toolbarH2: "二级标题",
