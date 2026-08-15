@@ -653,16 +653,17 @@ function looksLikeRefusalOrMeta(text: string): boolean {
   return REFUSAL_PATTERNS.some((p) => p.test(text));
 }
 
-/** Strips fenced/inline code and the §URLn§ placeholders (protectUrls
- * below) before the language/structure checks run — none of that content
- * is ever expected to be in the target language, and code left untouched
- * is the system prompt being followed correctly, not a translation
- * failure. */
+/** Strips fenced/inline code and the §URLn§/§IMGn§ placeholders
+ * (protectUrls/protectFilenameImages below) before the language/structure
+ * checks run — none of that content is ever expected to be in the target
+ * language, and code left untouched is the system prompt being followed
+ * correctly, not a translation failure. */
 function stripNonProseForChecks(text: string): string {
   return text
     .replace(/```[\s\S]*?```/g, " ")
     .replace(/`[^`]*`/g, " ")
-    .replace(/§URL\d+§/g, " ");
+    .replace(/§URL\d+§/g, " ")
+    .replace(/§IMG\d+§/g, " ");
 }
 
 const CJK_PATTERN = /[一-鿿㐀-䶿]/g;
@@ -942,6 +943,55 @@ function restoreUrls(text: string, urls: string[]): string {
   });
 }
 
+// Matches a whole `![alt](url)` markdown image tag whose alt text is a
+// bare filename (an extension the composers upload — see DOC_ICON in
+// markdown.tsx and HTML_REPLICA_EXTENSIONS in html-replica.ts), not
+// hand-written caption prose. That's exactly the shape handleImage and
+// handleHtmlFile in classroom-composer.tsx/diary-composer.tsx insert:
+// `![original-filename.ext](uploaded-url)`, alt === the literal filename.
+//
+// Found in production 2026-08-15: an article built primarily from an
+// uploaded .html replica (see [[brainbank-html-replica-feature]]) has a
+// body that's effectively just one `![cheatsheet.html](url)` line — there
+// may be little or no other prose. protectUrls alone still hands the
+// *filename* ("cheatsheet.html", "aug-15-llm-cheatsheet-builds.html", …)
+// to the translation model as ordinary text; every model in the fallback
+// chain reasonably left an untranslatable filename as-is (nothing "to
+// translate" about a filename), which is completely correct — but with
+// so little other content in the chunk, that filename was the majority of
+// the "letters" cjkRatio counted, so detectTranslationProblem's Chinese-
+// ratio check saw ~0% CJK and rejected every model's (correct) response,
+// failing the whole translate action ("Nothing was saved").
+//
+// Masking the entire image tag — alt text AND url — rather than just the
+// url the way protectUrls does, removes the filename from what the model
+// (and the quality checks) ever see, and guarantees the tag survives
+// translation byte-for-byte: nothing here is meant to change language.
+const FILENAME_IMAGE_PATTERN =
+  /!\[[^\]\n]*\.(?:png|jpe?g|gif|webp|svg|avif|pdf|docx?|xlsx?|pptx?|csv|txt|md|markdown|json|html?)\]\([^\s)]+\)/gi;
+
+function imagePlaceholder(index: number): string {
+  return `§IMG${index}§`;
+}
+
+function protectFilenameImages(text: string): { masked: string; images: string[] } {
+  const images: string[] = [];
+  const masked = text.replace(FILENAME_IMAGE_PATTERN, (tag) => {
+    const token = imagePlaceholder(images.length);
+    images.push(tag);
+    return token;
+  });
+  return { masked, images };
+}
+
+function restoreFilenameImages(text: string, images: string[]): string {
+  if (images.length === 0) return text;
+  return text.replace(/§IMG(\d+)§/g, (whole, indexStr: string) => {
+    const image = images[Number(indexStr)];
+    return image ?? whole;
+  });
+}
+
 async function translateWithMeta(
   text: string,
   target: "en" | "zh",
@@ -950,12 +1000,18 @@ async function translateWithMeta(
 ): Promise<string> {
   if (!text.trim()) return "";
   const chosenModel = modelId ?? TASK_MODELS.translate;
-  const { masked, urls } = protectUrls(text);
+  // Filename-image tags first, URLs second: once protectFilenameImages
+  // swaps a whole `![name.ext](url)` tag for a single §IMGn§ token, the
+  // url that used to be inside it is gone from the text — protectUrls
+  // then only ever sees "real" URLs that appear outside of one of those
+  // tags (e.g. a "Source: https://…" line), which is exactly right.
+  const { masked: withoutImages, images } = protectFilenameImages(text);
+  const { masked, urls } = protectUrls(withoutImages);
   const chunks = chunkMarkdown(masked, TRANSLATE_CHUNK_MAX_CHARS);
 
   if (chunks.length <= 1) {
     const result = await translateChunk(masked, target, chosenModel, onModelUsed);
-    return restoreUrls(result, urls);
+    return restoreFilenameImages(restoreUrls(result, urls), images);
   }
 
   // Chunks are independent in principle, but they're translated
@@ -992,7 +1048,7 @@ async function translateWithMeta(
   // hits this path). Every chunk here is a whole, complete markdown
   // block(s) — never a mid-block fragment — so a blank line between
   // consecutive chunks is always the correct separator to restore.
-  return restoreUrls(translatedChunks.join("\n\n"), urls);
+  return restoreFilenameImages(restoreUrls(translatedChunks.join("\n\n"), urls), images);
 }
 
 export async function translateText(
