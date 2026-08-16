@@ -215,15 +215,28 @@ export function Markdown({
                     src={src}
                     title={alt || "HTML replica"}
                     loading="lazy"
-                    // No "allow-scripts" — this is the real safety
-                    // boundary for arbitrary uploaded HTML, not the
-                    // script-tag strip in buildDarkModeHtmlReplica.
-                    // allow-same-origin alone (without allow-scripts) is
-                    // safe: it only lets the frame's own resources
-                    // (relative CSS/fonts/images) load, it can't be
-                    // combined with script execution to escape the
-                    // sandbox.
-                    sandbox="allow-same-origin"
+                    // "allow-scripts", deliberately WITHOUT
+                    // "allow-same-origin": many of these uploaded files
+                    // are interactive (tabbed traversals, diagrams that
+                    // draw into the DOM at runtime — see
+                    // brainbank-html-replica-feature memory, 2026-08-15)
+                    // and render as an empty shell without script
+                    // execution, so blocking scripts entirely defeats the
+                    // feature. Dropping allow-same-origin instead of
+                    // dropping allow-scripts keeps the containment that
+                    // actually matters: the frame gets a unique, opaque
+                    // origin every load, so its script can't read/write
+                    // cookies or localStorage for the real url's origin,
+                    // can't reach into this page (different origin,
+                    // always was), and — with no allow-top-navigation,
+                    // allow-popups, or allow-forms granted — can't
+                    // redirect the tab, spawn a popup, or submit a form
+                    // out of the frame either. It's still someone's own
+                    // uploaded content, not arbitrary third-party HTML, so
+                    // this is a reasonable place to land: interactive
+                    // content works, the frame just can't affect anything
+                    // outside itself.
+                    sandbox="allow-scripts"
                     className="h-[75vh] w-full resize-y overflow-auto rounded-lg border border-border bg-bg"
                   />
                   {alt && (
