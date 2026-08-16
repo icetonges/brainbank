@@ -236,26 +236,44 @@ async function withFallback<T>(
     } catch (err) {
       lastError = err;
       console.error(`[ai:${label}] ${modelId} failed, falling back to next model in chain`, err);
-      // All three registered models currently share one ProviderId
+      // All three registered local models currently share one ProviderId
       // ("local" — see models.ts's header comment) — meaning they're all
       // the same single physical Mac/agent-server behind a Tailscale
       // Funnel, not independent services. When a failure looks like that
       // shared infrastructure being down/hung rather than a model-specific
       // bad response, trying the next local model is guaranteed to fail
-      // the same way and costs another full TASK_TIMEOUT_MS doing it —
+      // the same way and costs another full TASK_TIMEOUT_MS (or, for a DNS
+      // failure like ENOTFOUND, a fast-but-still-wasted retry) doing it —
       // multiplied by however many sequential AI calls a task like
       // translateClassroomArticleAction makes, this is exactly what turns
       // one degraded agent-server into a multi-minute cascade that blows
       // through the page's maxDuration even after raising it (observed:
       // the action dying mid-guide-translation on a long article after the
-      // body had already saved successfully). Stop the chain early here
-      // instead of burning the clock on retries that can't succeed.
+      // body had already saved successfully).
+      //
+      // Prune every OTHER same-provider candidate from the queue instead of
+      // only bailing out when *every* remaining candidate happens to share
+      // the provider (that all-or-nothing check silently did nothing for
+      // the much more common shape — two local models followed by a
+      // non-local one, e.g. [qwen-a, qwen-b, gemini] — since queue.every()
+      // was false the moment gemini was still in there, so the second qwen
+      // still got tried and failed the exact same way before gemini was
+      // ever reached; observed in production 2026-08-15: both local models
+      // hit ENOTFOUND back-to-back on the same translate call). Any
+      // DIFFERENT-provider candidates (gemini here) are left in place and
+      // still get a real attempt — only the doomed same-provider retries
+      // are skipped.
       const failedProvider = getModel(modelId).provider;
-      if (isInfraFailure(err) && queue.every((id) => getModel(id).provider === failedProvider)) {
-        console.error(
-          `[ai:${label}] ${modelId}'s failure looks like the shared "${failedProvider}" agent-server is unreachable, not a model-specific issue — every remaining model in the chain is the same provider, so skipping them instead of retrying`,
-        );
-        break;
+      if (isInfraFailure(err)) {
+        const before = queue.length;
+        for (let i = queue.length - 1; i >= 0; i--) {
+          if (getModel(queue[i]).provider === failedProvider) queue.splice(i, 1);
+        }
+        if (queue.length < before) {
+          console.error(
+            `[ai:${label}] ${modelId}'s failure looks like the shared "${failedProvider}" agent-server is unreachable, not a model-specific issue — skipping ${before - queue.length} remaining same-provider model(s) instead of retrying them`,
+          );
+        }
       }
       // A TranslationQualityError (tasks.ts's translate-quality gate)
       // means THIS model produced a bad response, not that the shared
