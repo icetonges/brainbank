@@ -26,12 +26,26 @@
  * override in markdown.tsx for how the replica is rendered (a sandboxed
  * `<iframe sandbox="allow-scripts">`, no `allow-same-origin`) and why
  * that's the actual safety boundary rather than anything done here.
+ *
+ * Only <img>/<video>/<picture> get the compensating re-invert. Earlier
+ * this list also included canvas/svg/iframe/embed/object, on the theory
+ * that any "media" element should look natural rather than like a photo
+ * negative — but once scripts run (see the fix above), a JS-driven
+ * diagram that draws itself into a <canvas> or inline <svg> counts as
+ * "media" too, and re-inverting it exactly cancels the outer html-level
+ * invert: the diagram comes back out in its original light colors,
+ * white background and all, while the rest of the page stays dark. That
+ * was reported directly — a replicated interactive graph rendering with
+ * a white background and dark text despite the dark-mode CSS being
+ * injected. canvas/svg are how these uploaded cheatsheets/diagrams
+ * actually draw their content, not how photos get embedded, so they
+ * belong with the rest of the page (inverted), not with img/video.
  */
 export function buildDarkModeHtmlReplica(html: string): string {
   const darkStyle =
     '<style id="__brainbank_force_dark">' +
-    "html{background:#fff !important;filter:invert(1) hue-rotate(180deg);}" +
-    "img,video,picture,canvas,svg,iframe,embed,object{filter:invert(1) hue-rotate(180deg);}" +
+    "html{background:#fff !important;filter:invert(1) hue-rotate(180deg) !important;}" +
+    "img,video,picture{filter:invert(1) hue-rotate(180deg) !important;}" +
     "</style>";
 
   if (/<head[^>]*>/i.test(html)) {
