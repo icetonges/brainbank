@@ -1,9 +1,8 @@
 import Link from "next/link";
 import { auth, signOut } from "@/auth";
-import { ThemeToggle } from "./theme-toggle";
-import { LanguageToggle } from "./language-toggle";
 import { getLang } from "@/lib/i18n-server";
 import { t } from "@/lib/i18n";
+import { HeaderNav } from "./header-nav";
 
 export async function Header() {
   const session = await auth();
@@ -11,6 +10,22 @@ export async function Header() {
   // header (which has no searchParams) can rely on the cookie alone.
   const lang = await getLang();
   const s = t(lang).header;
+
+  const signOutForm = session ? (
+    <form
+      action={async () => {
+        "use server";
+        await signOut({ redirectTo: "/" });
+      }}
+    >
+      <button
+        type="submit"
+        className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-fg-secondary hover:text-accent hover:border-accent transition-colors"
+      >
+        {s.signOut}
+      </button>
+    </form>
+  ) : null;
 
   return (
     <header className="border-b border-border bg-bg-elevated">
@@ -24,7 +39,7 @@ export async function Header() {
         <form
           action="/search"
           method="get"
-          className="hidden flex-1 max-w-xs sm:block"
+          className="hidden flex-1 max-w-xs md:block"
         >
           <input
             type="text"
@@ -34,110 +49,7 @@ export async function Header() {
           />
         </form>
 
-        <nav className="flex items-center gap-3">
-          <Link
-            href="/search"
-            className="rounded-md px-3 py-1.5 text-sm font-medium text-fg-secondary hover:text-accent transition-colors sm:hidden"
-          >
-            {s.search}
-          </Link>
-          <Link
-            href="/classroom"
-            className="rounded-md px-3 py-1.5 text-sm font-medium text-fg-secondary hover:text-accent transition-colors"
-          >
-            {s.classroom}
-          </Link>
-          {/* +Article sits right next to Classroom — it's the "create"
-              action for that section, so the two read as a pair. */}
-          {session && (
-            <Link
-              href="/classroom/new"
-              className="rounded-md bg-accent px-3 py-1.5 text-sm font-semibold text-accent-fg hover:opacity-90 transition-opacity"
-            >
-              {s.newArticle}
-            </Link>
-          )}
-          {/* Public regardless of session — see the auth-removal comments
-              on src/app/llm/page.tsx for why this one differs from the
-              other signed-in-only links below. */}
-          <Link
-            href="/llm"
-            className="rounded-md px-3 py-1.5 text-sm font-medium text-fg-secondary hover:text-accent transition-colors"
-          >
-            {s.llm}
-          </Link>
-          {/* Public too — a daily-refreshed AI news/papers/repos digest,
-              not personal data. Populated by a GitHub Action
-              (.github/workflows/fetch-trends.yml), not by anything in the
-              app itself. */}
-          {/* Also includes a GitHub Trending subsection (its own three
-              GitHub Actions: fetch-github-trending-{daily,weekly,monthly}.yml)
-              — merged in rather than a separate nav entry, since both
-              answer "what's happening in AI right now". */}
-          <Link
-            href="/trends"
-            className="rounded-md px-3 py-1.5 text-sm font-medium text-fg-secondary hover:text-accent transition-colors"
-          >
-            {s.trends}
-          </Link>
-
-          {session ? (
-            <>
-              {/* Owner-only and never rendered for anonymous visitors —
-                  the diary and its assistant have no public view at all
-                  (middleware.ts also matches both routes). Styled as an
-                  accent chip like the +Article/+Knowledge actions since
-                  it's the other "personal" entry point in the nav. */}
-              <Link
-                href="/diary"
-                className="rounded-md bg-accent px-3 py-1.5 text-sm font-semibold text-accent-fg hover:opacity-90 transition-opacity"
-              >
-                {s.diary}
-              </Link>
-              <Link
-                href="/assistant"
-                className="rounded-md px-3 py-1.5 text-sm font-medium text-fg-secondary hover:text-accent transition-colors"
-              >
-                {s.assistant}
-              </Link>
-              <Link
-                href="/graph"
-                className="rounded-md px-3 py-1.5 text-sm font-medium text-fg-secondary hover:text-accent transition-colors"
-              >
-                {s.graph}
-              </Link>
-              <Link
-                href="/obsidian"
-                className="rounded-md px-3 py-1.5 text-sm font-medium text-fg-secondary hover:text-accent transition-colors"
-              >
-                {s.obsidian}
-              </Link>
-              <form
-                action={async () => {
-                  "use server";
-                  await signOut({ redirectTo: "/" });
-                }}
-              >
-                <button
-                  type="submit"
-                  className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-fg-secondary hover:text-accent hover:border-accent transition-colors"
-                >
-                  {s.signOut}
-                </button>
-              </form>
-            </>
-          ) : (
-            <Link
-              href="/login"
-              className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-fg hover:border-accent hover:text-accent transition-colors"
-            >
-              {s.signIn}
-            </Link>
-          )}
-
-          <LanguageToggle />
-          <ThemeToggle />
-        </nav>
+        <HeaderNav session={Boolean(session)} s={s} signOutForm={signOutForm} />
       </div>
     </header>
   );

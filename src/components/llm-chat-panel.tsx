@@ -52,6 +52,10 @@ interface LlmChatStrings {
 const USAGE_TRAILER_PREFIX = "\n\n<!--BRAINBANK:USAGE:";
 const USAGE_TRAILER_SUFFIX = "-->";
 
+// Caps how tall the chat input can grow before it starts scrolling —
+// roughly 8 lines of text.
+const MAX_INPUT_HEIGHT_PX = 200;
+
 /** Splits the trailer (if present) off the raw accumulated stream text.
  * While the trailer has started but not yet fully arrived (its closing
  * "-->" hasn't shown up in a chunk yet), `visible` simply stops just
@@ -104,6 +108,9 @@ export function LlmChatPanel({ s }: { s: LlmChatStrings }) {
   // on," not a retroactive change to earlier replies.
   const [modelId, setModelId] = useState<ModelId>(DEFAULT_MODEL_ID);
   const abortRef = useRef<AbortController | null>(null);
+  // Auto-growing input — see the effect below that keeps its height in
+  // sync with content instead of staying a fixed single line.
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   // Per-reply "🔊 Play" — one shared <audio> element rather than one per
   // message, so starting a new reply's playback naturally stops whatever
@@ -129,6 +136,16 @@ export function LlmChatPanel({ s }: { s: LlmChatStrings }) {
     const interval = setInterval(() => setNow(Date.now()), 200);
     return () => clearInterval(interval);
   }, [pending]);
+
+  // Grows the textarea with its content (up to MAX_INPUT_HEIGHT_PX), instead
+  // of staying a fixed single line — resets back down to one line once the
+  // input is cleared (e.g. right after sending).
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, MAX_INPUT_HEIGHT_PX)}px`;
+  }, [input]);
 
   async function send() {
     const text = input.trim();
@@ -390,8 +407,9 @@ export function LlmChatPanel({ s }: { s: LlmChatStrings }) {
           was already playing. */}
       <audio ref={audioElRef} className="hidden" />
 
-      <div className="flex gap-2">
-        <input
+      <div className="flex items-end gap-2">
+        <textarea
+          ref={inputRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
@@ -402,7 +420,8 @@ export function LlmChatPanel({ s }: { s: LlmChatStrings }) {
           }}
           placeholder={transcribing ? s.micTranscribing : s.chatPlaceholder}
           disabled={transcribing}
-          className="flex-1 rounded-md border border-border bg-bg px-3 py-2 text-sm text-fg outline-none focus:border-accent disabled:opacity-60"
+          rows={1}
+          className="max-h-[12.5rem] flex-1 resize-none overflow-y-auto rounded-md border border-border bg-bg px-3 py-2 text-sm text-fg outline-none focus:border-accent disabled:opacity-60"
         />
         <button
           type="button"

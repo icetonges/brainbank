@@ -72,7 +72,7 @@ async function loadHome(
       .leftJoin(noteContent, and(eq(noteContent.noteId, notes.id), eq(noteContent.language, lang)))
       .where(visible ? and(isNotNull(notes.category), visible) : isNotNull(notes.category))
       .orderBy(desc(notes.createdAt))
-      .limit(5);
+      .limit(10);
     const latestArticles = latestArticlesRaw.map((a) => ({
       slug: a.slug,
       title: lang === a.primaryLanguage ? a.title : a.translatedTitle || a.title,
@@ -218,6 +218,50 @@ export default async function Home({
         ))}
       </section>
 
+      {/* ---- Latest classroom articles ---- */}
+      <section className="flex flex-col gap-4">
+        <div className="flex items-baseline justify-between gap-4">
+          <h2 className="text-xl font-semibold text-fg">{s.latestClassroom}</h2>
+          <Link href="/classroom" className="text-sm text-accent hover:underline">
+            {s.viewAll}
+          </Link>
+        </div>
+        {data && data.latestArticles.length > 0 ? (
+          <ul className="grid gap-3 sm:grid-cols-2">
+            {data.latestArticles.map((a) => (
+              <li key={a.slug} className="rounded-lg border border-border bg-bg-elevated p-4">
+                <Link
+                  href={`/classroom/${a.slug}?lang=${lang}`}
+                  className="font-medium text-fg hover:text-accent transition-colors"
+                >
+                  {a.title}
+                </Link>
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-fg-secondary">
+                  {a.category && (
+                    <span className="rounded-full border border-accent/50 px-2 py-0.5 text-accent">
+                      {tabLabel(
+                        a.category,
+                        CLASSROOM_TABS.find((tab) => tab.value === a.category)?.label ?? a.category,
+                      )}
+                    </span>
+                  )}
+                  <span>{formatDateTime(a.createdAt, dateLocale)}</span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <EmptyPanel>
+            {s.noArticles}{" "}
+            {session && (
+              <Link href="/classroom/new" className="text-accent hover:underline">
+                {s.publishFirst}
+              </Link>
+            )}
+          </EmptyPanel>
+        )}
+      </section>
+
       {/* ---- Category index: subcategory table of contents ---- */}
       <section className="flex flex-col gap-4">
         <div className="flex items-baseline justify-between gap-4">
@@ -298,50 +342,6 @@ export default async function Home({
           </div>
         ) : (
           <EmptyPanel>{s.noArticles}</EmptyPanel>
-        )}
-      </section>
-
-      {/* ---- Latest classroom articles ---- */}
-      <section className="flex flex-col gap-4">
-        <div className="flex items-baseline justify-between gap-4">
-          <h2 className="text-xl font-semibold text-fg">{s.latestClassroom}</h2>
-          <Link href="/classroom" className="text-sm text-accent hover:underline">
-            {s.viewAll}
-          </Link>
-        </div>
-        {data && data.latestArticles.length > 0 ? (
-          <ul className="grid gap-3 sm:grid-cols-2">
-            {data.latestArticles.map((a) => (
-              <li key={a.slug} className="rounded-lg border border-border bg-bg-elevated p-4">
-                <Link
-                  href={`/classroom/${a.slug}?lang=${lang}`}
-                  className="font-medium text-fg hover:text-accent transition-colors"
-                >
-                  {a.title}
-                </Link>
-                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-fg-secondary">
-                  {a.category && (
-                    <span className="rounded-full border border-accent/50 px-2 py-0.5 text-accent">
-                      {tabLabel(
-                        a.category,
-                        CLASSROOM_TABS.find((tab) => tab.value === a.category)?.label ?? a.category,
-                      )}
-                    </span>
-                  )}
-                  <span>{formatDateTime(a.createdAt, dateLocale)}</span>
-                </div>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <EmptyPanel>
-            {s.noArticles}{" "}
-            {session && (
-              <Link href="/classroom/new" className="text-accent hover:underline">
-                {s.publishFirst}
-              </Link>
-            )}
-          </EmptyPanel>
         )}
       </section>
 

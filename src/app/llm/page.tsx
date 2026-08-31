@@ -20,7 +20,7 @@ export default async function LlmPage({
   const s = t(lang).llm;
 
   return (
-    <div className="flex w-full max-w-3xl flex-1 flex-col gap-6">
+    <div className="flex w-full flex-1 flex-col gap-6">
       <div>
         <h1 className="text-2xl font-semibold text-fg">{s.title}</h1>
         <p className="mt-1 text-fg-secondary">{s.description}</p>

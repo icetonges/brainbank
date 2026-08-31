@@ -264,40 +264,6 @@ export default async function ClassroomPage({
         )}
       </div>
 
-      {audiobooks.length > 0 && (
-        <section className="flex flex-col gap-3 rounded-2xl border border-border bg-bg-elevated p-4">
-          <h2 className="flex items-center gap-2 text-lg font-semibold text-fg">
-            🔊 {s.audiobooksSectionTitle}
-          </h2>
-          <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {audiobooks.map((a) => (
-              <li key={a.slug}>
-                <Link
-                  href={`/classroom/${a.slug}?lang=${a.languages[0].lang}`}
-                  className="group flex flex-col gap-1.5 rounded-xl border border-border p-3 transition-colors hover:border-accent"
-                >
-                  <span className="line-clamp-1 font-medium text-fg transition-colors group-hover:text-accent">
-                    {a.title}
-                  </span>
-                  <span className="flex items-center gap-1.5 text-xs text-fg-secondary">
-                    {a.languages.map((l) => (
-                      <span
-                        key={l.lang}
-                        className="rounded-full border border-border px-1.5 py-0.5 font-medium"
-                      >
-                        {l.lang === "zh" ? "中文" : "EN"}
-                      </span>
-                    ))}
-                    {a.status === "private" && <span>🔒 {s.private}</span>}
-                    {a.status === "draft" && <span>{s.draft}</span>}
-                  </span>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
       {/* Pill tabs — the active subtab is a solid accent chip instead of a
           thin underline, so where you are is visible at a glance. */}
       <nav className="flex flex-wrap gap-2">
@@ -437,6 +403,40 @@ export default async function ClassroomPage({
             );
           })}
           </div>
+
+          {audiobooks.length > 0 && (
+            <section className="flex flex-col gap-3 rounded-2xl border border-border bg-bg-elevated p-4">
+              <h2 className="flex items-center gap-2 text-lg font-semibold text-fg">
+                🔊 {s.audiobooksSectionTitle}
+              </h2>
+              <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {audiobooks.map((a) => (
+                  <li key={a.slug}>
+                    <Link
+                      href={`/classroom/${a.slug}?lang=${a.languages[0].lang}`}
+                      className="group flex flex-col gap-1.5 rounded-xl border border-border p-3 transition-colors hover:border-accent"
+                    >
+                      <span className="line-clamp-1 font-medium text-fg transition-colors group-hover:text-accent">
+                        {a.title}
+                      </span>
+                      <span className="flex items-center gap-1.5 text-xs text-fg-secondary">
+                        {a.languages.map((l) => (
+                          <span
+                            key={l.lang}
+                            className="rounded-full border border-border px-1.5 py-0.5 font-medium"
+                          >
+                            {l.lang === "zh" ? "中文" : "EN"}
+                          </span>
+                        ))}
+                        {a.status === "private" && <span>🔒 {s.private}</span>}
+                        {a.status === "draft" && <span>{s.draft}</span>}
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
 
           {uncategorized.length > 0 && (
             <div className="flex flex-col gap-3">

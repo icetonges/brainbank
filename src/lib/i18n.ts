@@ -24,6 +24,7 @@ const en = {
     newArticle: "Article",
     signOut: "Sign out",
     signIn: "Sign in",
+    menu: "Menu",
   },
   footer: {
     tagline: "BrainBank — your daily knowledge base",
@@ -415,6 +416,7 @@ const zh: typeof en = {
     newArticle: "文章",
     signOut: "退出登录",
     signIn: "登录",
+    menu: "菜单",
   },
   footer: {
     tagline: "BrainBank — 你的每日知识库",

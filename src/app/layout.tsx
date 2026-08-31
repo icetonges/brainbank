@@ -8,6 +8,7 @@ import "katex/dist/katex.min.css";
 import "highlight.js/styles/github-dark.css";
 import { ThemeScript } from "@/components/theme-script";
 import { Header } from "@/components/header";
+import { BackToTopButton } from "@/components/back-to-top-button";
 import { AppSessionProvider } from "@/components/session-provider";
 import { getLang } from "@/lib/i18n-server";
 import { t } from "@/lib/i18n";
@@ -65,6 +66,7 @@ export default async function RootLayout({
           <footer className="border-t border-border py-6 text-center text-sm text-fg-secondary">
             {t(lang).footer.tagline}
           </footer>
+          <BackToTopButton />
         </AppSessionProvider>
       </body>
     </html>
