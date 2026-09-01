@@ -1,22 +1,22 @@
 {
   "functions": {
     "src/app/classroom/**": {
-      "maxDuration": 500
+      "maxDuration": 300
     },
     "src/app/api/ai/**": {
-      "maxDuration": 500
+      "maxDuration": 300
     },
     "src/app/api/admin/**": {
-      "maxDuration": 500
+      "maxDuration": 300
     },
     "src/app/diary/**": {
       "maxDuration": 300
     },
     "src/app/assistant/**": {
-      "maxDuration": 500
+      "maxDuration": 300
     },
     "src/app/trends/**": {
-      "maxDuration": 500
+      "maxDuration": 300
     },
     "src/app/api/tasks/**": {
       "maxDuration": 300

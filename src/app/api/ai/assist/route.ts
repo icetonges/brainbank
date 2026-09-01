@@ -29,7 +29,13 @@ export const runtime = "nodejs";
 // deploy/build time or silently clamp it back down — verify Fluid Compute
 // is on for this project (Project Settings -> Functions) before relying
 // on 500 actually being honored.
-export const maxDuration = 500;
+// Reverted 500 -> 300 on 2026-09-01: pushes stopped producing any Vercel
+// deployment at all (not a failed build with logs — no deployment showed up),
+// consistent with the warning above: 500 only works with Fluid Compute
+// enabled on this project, which isn't confirmed on. 300 is the hard ceiling
+// on Hobby and the safe default on Pro without Fluid Compute. If Fluid
+// Compute is verified on (Project Settings -> Functions) this can go back up.
+export const maxDuration = 300;
 
 interface AssistRequestBody {
   messages: { role: "user" | "assistant"; content: string }[];

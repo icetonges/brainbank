@@ -36,7 +36,13 @@ export const dynamic = "force-dynamic";
 // page rather than in actions.ts (Server Actions inherit it from the
 // invoking page). vercel.json covers src/app/assistant/** as the
 // platform-level backstop.
-export const maxDuration = 500;
+// Reverted 500 -> 300 on 2026-09-01: pushes stopped producing any Vercel
+// deployment at all (not a failed build with logs — no deployment showed up),
+// consistent with the warning above: 500 only works with Fluid Compute
+// enabled on this project, which isn't confirmed on. 300 is the hard ceiling
+// on Hobby and the safe default on Pro without Fluid Compute. If Fluid
+// Compute is verified on (Project Settings -> Functions) this can go back up.
+export const maxDuration = 300;
 
 export default async function AssistantPage({
   searchParams,

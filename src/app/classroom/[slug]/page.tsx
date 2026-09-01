@@ -46,7 +46,7 @@ export const dynamic = "force-dynamic";
 // platform response instead of RSC, which the client surfaces as "An
 // unexpected response was received from the server" — repeatable on every
 // Translate/Regenerate click against a slow local agent-server, not an
-// intermittent fluke. Matches /api/ai/assist/route.ts's maxDuration=500
+// intermittent fluke. Matches /api/ai/assist/route.ts's maxDuration
 // (same reasoning, same ceiling — see that file's comment).
 //
 // Raised from 290 -> 500 for headroom against the validation-retry
@@ -57,7 +57,13 @@ export const dynamic = "force-dynamic";
 // to stay just under — it only takes effect with Fluid Compute enabled on
 // this Vercel project (Project Settings -> Functions); otherwise Vercel
 // is expected to reject or clamp this value at deploy time.
-export const maxDuration = 500;
+// Reverted 500 -> 300 on 2026-09-01: pushes stopped producing any Vercel
+// deployment at all (not a failed build with logs — no deployment showed up),
+// consistent with the warning above: 500 only works with Fluid Compute
+// enabled on this project, which isn't confirmed on. 300 is the hard ceiling
+// on Hobby and the safe default on Pro without Fluid Compute. If Fluid
+// Compute is verified on (Project Settings -> Functions) this can go back up.
+export const maxDuration = 300;
 
 export default async function ClassroomArticlePage({
   params,

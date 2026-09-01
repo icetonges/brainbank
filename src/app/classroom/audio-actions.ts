@@ -10,7 +10,8 @@ import { attachMediaAction } from "@/app/notes/[slug]/actions";
 
 // Same "maxDuration lives on the invoking page" situation as the rest of
 // classroom/actions.ts (see the long comment there) — classroom/[slug]/
-// page.tsx already exports maxDuration=500 and vercel.json covers
+// page.tsx already exports maxDuration (300 as of 2026-09-01) and
+// vercel.json covers
 // src/app/classroom/** at the platform level, so generateArticleAudioAction
 // (called from a <form action> on that page) inherits both without needing
 // anything here.
