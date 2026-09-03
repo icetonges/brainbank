@@ -32,6 +32,15 @@ export function LanguageToggle() {
     const params = new URLSearchParams(searchParams.toString());
     params.set("lang", next);
     router.push(`${pathname}?${params.toString()}`);
+    // The Header (and its nav labels) is a Server Component rendered in
+    // the root layout, which reads the `lang` cookie set above. A soft
+    // navigation from router.push() alone reuses the layout's cached RSC
+    // output — layouts don't see searchParams, so Next has no reason to
+    // treat the cookie as stale — so the nav bar's text stays in the old
+    // language even though the button and <html lang> flip immediately.
+    // router.refresh() forces the whole tree, layout included, to
+    // re-render server-side with the fresh cookie.
+    router.refresh();
   }
 
   return (
