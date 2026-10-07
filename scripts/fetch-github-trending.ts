@@ -28,7 +28,7 @@
 //   TRENDING_CADENCE=daily npx tsx scripts/fetch-github-trending.ts
 // (needs DATABASE_URL in the environment.)
 import { parseHTML } from "linkedom";
-import { and, eq } from "drizzle-orm";
+import { and, eq, lt } from "drizzle-orm";
 import { generateObject, type LanguageModel } from "ai";
 import { z } from "zod";
 import { db } from "../src/lib/db";
@@ -254,6 +254,34 @@ async function getOrCreateRun(cadence: TrendingCadence, date: string): Promise<n
   return created.id;
 }
 
+// Retention: each cadence only keeps a rolling window of snapshots so the
+// tables stay a fixed size instead of growing forever — 30 days of daily
+// runs, 10 weeks of weekly runs, 12 months of monthly runs. The page only
+// ever reads the latest run per cadence, so nothing older is load-bearing.
+const RETENTION_DAYS: Record<TrendingCadence, number> = {
+  daily: 30,
+  weekly: 10 * 7,
+  monthly: 366, // 12 monthly runs (1st of each month), leap-year safe
+};
+
+/** Deletes this cadence's runs older than its retention window. Repo and
+ * developer rows go with them via the run_id FK's ON DELETE CASCADE. Only
+ * called after a successful insert, so a broken scraper never prunes the
+ * last good snapshot away. */
+async function pruneOldRuns(cadence: TrendingCadence, today: string): Promise<void> {
+  const cutoffDate = new Date(`${today}T00:00:00Z`);
+  cutoffDate.setUTCDate(cutoffDate.getUTCDate() - RETENTION_DAYS[cadence]);
+  const cutoff = cutoffDate.toISOString().slice(0, 10);
+  // date is a "YYYY-MM-DD" string, so string comparison is date order.
+  const deleted = await db
+    .delete(githubTrendingRuns)
+    .where(and(eq(githubTrendingRuns.cadence, cadence), lt(githubTrendingRuns.date, cutoff)))
+    .returning({ id: githubTrendingRuns.id });
+  console.log(
+    `[github-trending] Pruned ${deleted.length} ${cadence} run(s) older than ${cutoff}.`,
+  );
+}
+
 async function main() {
   const cadence = parseCadence();
   const today = new Date().toISOString().slice(0, 10);
@@ -327,6 +355,13 @@ async function main() {
       })
       .returning({ id: githubTrendingDevelopers.id });
     console.log(`[github-trending] Inserted ${insertedDevs.length} developer row(s).`);
+  }
+
+  try {
+    await pruneOldRuns(cadence, today);
+  } catch (err) {
+    // Non-fatal — today's snapshot is already saved; the next run retries.
+    console.error("[github-trending] Pruning old runs failed, continuing:", err);
   }
 }
 
