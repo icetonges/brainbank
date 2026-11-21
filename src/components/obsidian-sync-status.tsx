@@ -22,7 +22,15 @@ interface StatusPayload {
   error: string | null;
 }
 
-const POLL_MS = 2500;
+/** Poll cadence while a sync is in flight. Each poll is a Vercel Function
+ * invocation (the route authenticates and queries), and a sync that stalls in
+ * "running" with the page left open used to hold a flat 2.5s forever: ~1,440
+ * invocations an hour for a progress bar nobody is watching. Back off toward
+ * POLL_MAX_MS instead, and reset to the fast cadence the moment the tab is
+ * brought back to the foreground. */
+const POLL_MIN_MS = 2500;
+const POLL_MAX_MS = 20000;
+const POLL_BACKOFF = 1.6;
 
 export function ObsidianSyncStatus({
   initialStatus,
@@ -45,19 +53,58 @@ export function ObsidianSyncStatus({
   useEffect(() => {
     if (state.status !== "queued" && state.status !== "running") return;
 
-    const interval = setInterval(async () => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let delay = POLL_MIN_MS;
+
+    function schedule() {
+      timer = setTimeout(tick, delay);
+      delay = Math.min(delay * POLL_BACKOFF, POLL_MAX_MS);
+    }
+
+    async function tick() {
+      if (cancelled) return;
+      // A hidden tab's progress readout isn't being read, so don't spend an
+      // invocation on it — reschedule and let onVisibilityChange below fire
+      // an immediate poll when the tab comes back.
+      if (document.hidden) {
+        schedule();
+        return;
+      }
       try {
         const res = await fetch("/api/obsidian-sync-status");
-        if (!res.ok) return;
-        const data: StatusPayload = await res.json();
-        setState(data);
-        if (data.status === "succeeded" || data.status === "failed") router.refresh();
+        if (res.ok) {
+          const data: StatusPayload = await res.json();
+          if (cancelled) return;
+          setState(data);
+          if (data.status === "succeeded" || data.status === "failed") {
+            // Terminal: stop here rather than rescheduling. The status change
+            // re-runs this effect, which bails at the guard above.
+            router.refresh();
+            return;
+          }
+        }
       } catch {
-        // transient network hiccup — next poll will retry
+        // transient network hiccup — the next poll will retry
       }
-    }, POLL_MS);
+      schedule();
+    }
 
-    return () => clearInterval(interval);
+    function onVisibilityChange() {
+      if (document.hidden) return;
+      delay = POLL_MIN_MS;
+      if (timer) clearTimeout(timer);
+      void tick();
+    }
+
+    schedule();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
   }, [state.status, router]);
 
   if (!state.status) {

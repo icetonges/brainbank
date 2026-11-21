@@ -1,4 +1,5 @@
-import Link from "next/link";
+import type { Metadata } from "next";
+import Link from "@/components/link";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import {
@@ -65,6 +66,52 @@ export const dynamic = "force-dynamic";
 // Compute is verified on (Project Settings -> Functions) this can go back up.
 export const maxDuration = 300;
 
+/** The only note_content columns this page actually renders. `what`, `how`,
+ * `why` and `other` are long-form text columns nothing here reads, but
+ * findMany() with no `columns` selected them anyway — for EVERY language row
+ * on the article, so a bilingual article transferred and JSON-parsed two full
+ * copies of text that never reached the page. */
+/** Articles listed per section (and per unsectioned bucket) in the side nav.
+ * A collapsed <details> still ships all its children, so uncapped this was
+ * ~190 links per page: 61 KB of HTML plus the same again in the RSC flight
+ * payload, against 33 KB for the article itself. Truncated groups get a
+ * "+N more" row pointing at the subcategory landing page, which is uncapped.
+ * Raise this if you would rather have the longer nav. */
+const SIDE_NAV_MAX_PER_GROUP = 12;
+
+const ARTICLE_CONTENT_COLUMNS = {
+  language: true,
+  title: true,
+  bodyMarkdown: true,
+  summary: true,
+  translatedAt: true,
+  translatedModel: true,
+  audioSegments: true,
+  audioSourceHash: true,
+  audioVoice: true,
+} as const;
+
+type ArticleContentRow = Pick<
+  typeof noteContent.$inferSelect,
+  keyof typeof ARTICLE_CONTENT_COLUMNS
+>;
+
+/**
+ * Canonical URL for this article, with no `?lang=` param. Every internal link
+ * in the app carries one, so the same article is reachable at
+ * /classroom/x, /classroom/x?lang=en and /classroom/x?lang=zh — three URLs,
+ * three crawls, three function invocations for identical content. This is
+ * derived from `params` alone, so it adds no query.
+ */
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}): Promise<Metadata> {
+  const { slug } = await params;
+  return { alternates: { canonical: `/classroom/${slug}` } };
+}
+
 export default async function ClassroomArticlePage({
   params,
   searchParams,
@@ -80,7 +127,7 @@ export default async function ClassroomArticlePage({
   const dateLocale = lang === "zh" ? "zh-CN" : undefined;
 
   let note: typeof notes.$inferSelect | undefined;
-  let contents: (typeof noteContent.$inferSelect)[] = [];
+  let contents: ArticleContentRow[] = [];
   let guide: typeof learningGuides.$inferSelect | undefined;
   let tagRows: { name: string }[] = [];
   let subcategoryName: string | null = null;
@@ -90,6 +137,7 @@ export default async function ClassroomArticlePage({
     if (note) {
       contents = await db.query.noteContent.findMany({
         where: eq(noteContent.noteId, note.id),
+        columns: ARTICLE_CONTENT_COLUMNS,
       });
       guide = await db.query.learningGuides.findFirst({
         where: eq(learningGuides.noteId, note.id),
@@ -119,15 +167,20 @@ export default async function ClassroomArticlePage({
   if (!note || !note.category) notFound();
   if (note.status !== "published" && !session) notFound();
 
-  // Every classroom article, grouped by subcategory/section, for the side
-  // nav — uncapped (unlike the homepage's preview) since the point is to
-  // actually be able to jump to anything from here.
-  const toc = await loadClassroomToc(Boolean(session), lang);
+  // Two views of the same data, and both are served from ONE cached DB read
+  // (loadClassroomToc caches uncapped and applies the cap per call), so the
+  // second call costs a map, not a query.
+  //
+  // findAdjacentArticles must see the uncapped TOC: on a capped one, the
+  // article sitting at the cap boundary would look like the last in its
+  // section and silently lose its "next" link.
+  const fullToc = await loadClassroomToc(Boolean(session), lang);
+  const navToc = await loadClassroomToc(Boolean(session), lang, SIDE_NAV_MAX_PER_GROUP);
 
   // Previous/next within the article's own section (or its subcategory's
   // unsectioned bucket) — see findAdjacentArticles's comment for why this
   // is scoped rather than flattened across the whole classroom.
-  const adjacent = findAdjacentArticles(toc, note.subcategoryId, note.sectionId, slug);
+  const adjacent = findAdjacentArticles(fullToc, note.subcategoryId, note.sectionId, slug);
 
   // Content in the requested language, falling back to whatever exists
   // (with a "not translated yet" hint + translate button for the owner).
@@ -170,13 +223,23 @@ export default async function ClassroomArticlePage({
   const audioLanguage: "en" | "zh" = content?.language === "zh" ? "zh" : "en";
   const generateAudio = generateArticleAudioAction.bind(null, note.id, slug, audioLanguage);
   const currentBodyMarkdown = content?.bodyMarkdown ?? "";
-  const blocks = currentBodyMarkdown ? splitMarkdownBlocks(currentBodyMarkdown) : [];
   const segmentsByBlock: Record<number, string[]> = {};
   for (const seg of content?.audioSegments ?? []) {
     (segmentsByBlock[seg.blockIndex] ??= []).push(seg.url);
   }
   const hasAudio = Object.keys(segmentsByBlock).length > 0;
+  // Block-splitting exists ONLY to line each paragraph up with its own audio
+  // segment. With no audiobook there is nothing to click, so skip the parse
+  // and let the body render through a single <Markdown> (see the body section
+  // below) instead of one <Markdown> per paragraph.
+  const blocks =
+    hasAudio && currentBodyMarkdown ? splitMarkdownBlocks(currentBodyMarkdown) : [];
+  // The stale-audio hint is owner-only (`session && audioIsStale` below), but
+  // computing it costs a SECOND full parse of the body plus a sha256 — paid by
+  // every anonymous reader of an article that has audio, for a warning they
+  // never see. Short-circuit on the session first.
   const audioIsStale =
+    Boolean(session) &&
     hasAudio &&
     currentBodyMarkdown.trim() !== "" &&
     content?.audioSourceHash !== speechTextHash(speechTextForStaleness(currentBodyMarkdown));
@@ -192,7 +255,7 @@ export default async function ClassroomArticlePage({
       <aside className="sticky top-6 hidden w-64 shrink-0 self-start lg:block">
         <div className="max-h-[calc(100vh-3rem)] overflow-y-auto rounded-lg border border-border bg-bg-elevated p-3">
           <ClassroomSideNav
-            toc={toc}
+            toc={navToc}
             currentSlug={slug}
             currentSubcategoryId={note.subcategoryId}
             lang={lang}
@@ -347,23 +410,32 @@ export default async function ClassroomArticlePage({
 
       {content?.bodyMarkdown && (
         <section className="rounded-lg border border-border bg-bg-elevated p-5">
-          {/* Renders the article body AND (when an audiobook exists) makes
-              every paragraph hoverable to hear it read aloud, with a
-              transport bar for touch/non-hover use — see that
-              component's comment for why it's one block-by-block render
-              instead of one plain <Markdown>{bodyMarkdown}</Markdown>. */}
-          <ListenableArticle
-            blocks={blocks}
-            segmentsByBlock={segmentsByBlock}
-            s={{
-              playArticleAudio: s.playArticleAudio,
-              pauseAudio: s.pauseAudio,
-              paragraphOf: s.paragraphOf,
-              audioPrev: s.audioPrev,
-              audioNext: s.audioNext,
-              clickHint: s.clickHint,
-            }}
-          />
+          {/* With an audiobook: block-by-block, so every paragraph is
+              clickable to hear it read aloud, with a transport bar for
+              touch/non-hover use (see ListenableArticle's comment).
+              WITHOUT one: a single <Markdown> call. react-markdown rebuilds
+              the entire unified pipeline per call, and rehype-highlight's
+              attacher runs createLowlight(common) — registering ~37
+              highlight.js grammars — every time, so one call per paragraph
+              measured ~8.8x the CPU of one call for the whole body on a
+              55-block article. Nothing is clickable without audio, so the
+              split bought nothing on the majority of page views. */}
+          {hasAudio ? (
+            <ListenableArticle
+              blocks={blocks}
+              segmentsByBlock={segmentsByBlock}
+              s={{
+                playArticleAudio: s.playArticleAudio,
+                pauseAudio: s.pauseAudio,
+                paragraphOf: s.paragraphOf,
+                audioPrev: s.audioPrev,
+                audioNext: s.audioNext,
+                clickHint: s.clickHint,
+              }}
+            />
+          ) : (
+            <Markdown>{currentBodyMarkdown}</Markdown>
+          )}
           {hasAudio && content?.audioVoice && (
             <p className="mt-3 text-xs text-fg-secondary">
               🎙 {s.narratedWith}{" "}

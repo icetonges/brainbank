@@ -17,6 +17,8 @@
 // Supports optional ?from=N&to=M query params (1-7, inclusive) to seed a
 // subset of pages per request; see maxDuration below and vercel.json's
 // "src/app/api/admin/**" glob (already covers this route).
+import { revalidateTag } from "next/cache";
+import { CLASSROOM_TOC_TAG } from "@/lib/classroom/toc";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import {
@@ -227,6 +229,9 @@ export async function GET(req: Request) {
   const created = results.filter((r) => r.action === "created").length;
   const updated = results.filter((r) => r.action === "updated").length;
 
+  // These routes add or remove classroom articles, sections and
+  // subcategories directly, so the cached table of contents has to go.
+  revalidateTag(CLASSROOM_TOC_TAG, "max");
   return Response.json({
     subcategory: { name: SUBCATEGORY_NAME, created: subcategory.created },
     section: { name: SECTION_NAME, created: section.created },

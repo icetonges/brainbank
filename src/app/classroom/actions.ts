@@ -24,7 +24,8 @@ import { MODELS, type ModelId } from "@/lib/ai/models";
 import { linkWikilinksFromText } from "@/lib/notes/link-wikilinks";
 import { linkRelatedByTags } from "@/lib/notes/link-related";
 import { eq, and } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
+import { revalidatePath, updateTag } from "next/cache";
+import { CLASSROOM_TOC_TAG } from "@/lib/classroom/toc";
 import { redirect } from "next/navigation";
 
 // NOTE: a maxDuration export was tried here as a backstop (matching the one
@@ -430,6 +431,7 @@ export async function publishClassroomArticle(formData: FormData) {
   }
 
   revalidatePath("/classroom");
+  updateTag(CLASSROOM_TOC_TAG);
   redirect(`/classroom/${slug}`);
 }
 
@@ -573,6 +575,7 @@ export async function updateClassroomArticle(
 
   revalidatePath(`/classroom/${slug}`);
   revalidatePath("/classroom");
+  updateTag(CLASSROOM_TOC_TAG);
   redirect(`/classroom/${slug}`);
 }
 
@@ -739,6 +742,7 @@ export async function translateClassroomArticleAction(
   }
 
   revalidatePath(`/classroom/${slug}`);
+  updateTag(CLASSROOM_TOC_TAG);
 }
 
 export async function deleteClassroomArticle(noteId: number) {
@@ -747,6 +751,7 @@ export async function deleteClassroomArticle(noteId: number) {
   // cascade-delete via FK constraints — see schema.ts.
   await db.delete(notes).where(eq(notes.id, noteId));
   revalidatePath("/classroom");
+  updateTag(CLASSROOM_TOC_TAG);
   redirect("/classroom");
 }
 
@@ -783,6 +788,7 @@ export async function setArticlePrivacyAction(
 
   revalidatePath(`/classroom/${slug}`);
   revalidatePath("/classroom");
+  updateTag(CLASSROOM_TOC_TAG);
 }
 
 /**
@@ -812,4 +818,5 @@ export async function reorderSectionArticles(
   );
 
   revalidatePath(`/${subcategorySlugValue}`);
+  updateTag(CLASSROOM_TOC_TAG);
 }

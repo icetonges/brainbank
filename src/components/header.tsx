@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/link";
 import { auth, signOut } from "@/auth";
 import { getLang } from "@/lib/i18n-server";
 import { t } from "@/lib/i18n";

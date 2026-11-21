@@ -27,6 +27,8 @@
 // nothing else is left in them), so the subcategory doesn't linger as a
 // dangling, article-less entry. Safe to re-run: if the pages are already
 // gone, this is a no-op that reports 0 deleted.
+import { revalidateTag } from "next/cache";
+import { CLASSROOM_TOC_TAG } from "@/lib/classroom/toc";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import { notes, classroomSubcategories, classroomSections } from "@/lib/db/schema";
@@ -104,6 +106,9 @@ export async function GET() {
     }
   }
 
+  // These routes add or remove classroom articles, sections and
+  // subcategories directly, so the cached table of contents has to go.
+  revalidateTag(CLASSROOM_TOC_TAG, "max");
   return Response.json({
     deletedCount: toDelete.length,
     deletedSlugs: toDelete.map((r) => r.slug),

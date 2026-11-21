@@ -1,4 +1,5 @@
-import Link from "next/link";
+import type { Metadata } from "next";
+import Link from "@/components/link";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
 import { db, isDatabaseConfigured } from "@/lib/db";
@@ -38,6 +39,17 @@ interface ArticleRow {
  * be. Drilling into a subcategory should feel like zooming into its card,
  * not landing on a differently-styled page.
  */
+/** Canonical, `?lang=`-free URL for this subcategory — see the matching
+ * comment on classroom/[slug]/page.tsx's generateMetadata. */
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ subcategorySlug: string }>;
+}): Promise<Metadata> {
+  const { subcategorySlug } = await params;
+  return { alternates: { canonical: `/${subcategorySlug}` } };
+}
+
 export default async function SubcategoryLandingPage({
   params,
   searchParams,

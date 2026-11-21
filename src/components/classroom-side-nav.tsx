@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/link";
 import type { TocSubcategory } from "@/lib/classroom/toc";
 import type { Lang } from "@/lib/i18n";
 import { sectionTone, NEUTRAL_TONE } from "@/lib/classroom/section-tones";
@@ -15,6 +15,15 @@ import { sectionTone, NEUTRAL_TONE } from "@/lib/classroom/section-tones";
  * current article's own subcategory opens by default via the `open`
  * attribute; every other one starts collapsed so the list stays scannable
  * instead of dumping every article on the site into view at once.
+ *
+ * Collapsed is a CSS state, not an absent one: a <details> that can expand
+ * without JS has to ship all of its children in the HTML. With the nav
+ * uncapped that meant ~190 <Link>s per article page — 61 KB of the page's
+ * HTML against 33 KB for the article itself, and all of it a second time in
+ * the RSC flight payload. The caller now passes a capped TOC (see
+ * SIDE_NAV_MAX_PER_GROUP in classroom/[slug]/page.tsx) and each truncated
+ * group gets an overflow row linking to the subcategory's own landing page,
+ * which lists everything uncapped.
  */
 export function ClassroomSideNav({
   toc,
@@ -54,6 +63,11 @@ export function ClassroomSideNav({
                   {sec.articles.map((a) => (
                     <ArticleLink key={a.slug} slug={a.slug} title={a.title} currentSlug={currentSlug} lang={lang} />
                   ))}
+                  <OverflowLink
+                    hidden={sec.total - sec.articles.length}
+                    href={`/${sc.slug}?lang=${lang}#section-${sec.id}`}
+                    lang={lang}
+                  />
                 </div>
               );
             })}
@@ -68,12 +82,32 @@ export function ClassroomSideNav({
                 {sc.unsectioned.map((a) => (
                   <ArticleLink key={a.slug} slug={a.slug} title={a.title} currentSlug={currentSlug} lang={lang} />
                 ))}
+                <OverflowLink
+                  hidden={sc.unsectionedTotal - sc.unsectioned.length}
+                  href={`/${sc.slug}?lang=${lang}`}
+                  lang={lang}
+                />
               </div>
             )}
           </div>
         </details>
       ))}
     </nav>
+  );
+}
+
+/** "+N more" row for a group the caller truncated — points at the
+ * subcategory's own landing page, which is always uncapped. Renders nothing
+ * when the group fits, so an untruncated nav looks exactly as it did. */
+function OverflowLink({ hidden, href, lang }: { hidden: number; href: string; lang: Lang }) {
+  if (hidden <= 0) return null;
+  return (
+    <Link
+      href={href}
+      className="truncate rounded-md px-2 py-1 text-xs font-medium text-accent transition-colors hover:bg-bg hover:underline"
+    >
+      {lang === "zh" ? `还有 ${hidden} 篇 →` : `+${hidden} more →`}
+    </Link>
   );
 }
 

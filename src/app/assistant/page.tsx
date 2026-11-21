@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/link";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { getLang } from "@/lib/i18n-server";

@@ -238,7 +238,19 @@ export const noteContent = pgTable("note_content", {
   // article page can show "narrated with <voice>" and so regenerating
   // defaults back to whatever was last picked.
   audioVoice: text("audio_voice"),
-});
+},
+  // note_content had no index beyond its serial primary key, so every join
+  // from notes (the classroom TOC does one per load, and the article page
+  // looks a note's rows up by id) scanned a table whose rows carry full
+  // article bodies. Composite (note_id, language) because that is exactly
+  // the shape of the TOC's join predicate:
+  //   leftJoin(noteContent, and(eq(noteContent.noteId, notes.id),
+  //                             eq(noteContent.language, lang)))
+  // Non-unique deliberately: one row per (note, language) is the intent, but
+  // a unique constraint would fail the migration outright if any duplicate
+  // already exists in production.
+  (t) => [index("note_content_note_id_language_idx").on(t.noteId, t.language)],
+);
 
 export const tags = pgTable("tags", {
   id: serial("id").primaryKey(),

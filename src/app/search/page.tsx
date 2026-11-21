@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/link";
 import { cookies } from "next/headers";
 import { and, or, ilike, eq, inArray, desc } from "drizzle-orm";
 import { auth } from "@/auth";

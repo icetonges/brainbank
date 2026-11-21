@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import Link from "next/link";
+import Link from "@/components/link";
 
 // App Router error boundary: catches any uncaught exception thrown while
 // rendering a page (Server or Client Component) below the root layout and

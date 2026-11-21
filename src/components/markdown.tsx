@@ -4,8 +4,47 @@ import remarkMath from "remark-math";
 import remarkBreaks from "remark-breaks";
 import rehypeKatex from "rehype-katex";
 import rehypeHighlight from "rehype-highlight";
+import { common } from "lowlight";
 import { MermaidDiagram } from "@/components/mermaid-diagram";
 import { isHtmlReplicaSrc } from "@/lib/html-replica";
+
+/** Syntax-highlighting grammars to register, instead of rehype-highlight's
+ * default `common` set of 37. react-markdown builds a fresh unified pipeline
+ * on EVERY render, and rehype-highlight's attacher calls
+ * createLowlight(languages) each time, so the registration cost is paid per
+ * render rather than once per process — narrowing the set from 37 to 20
+ * measured ~45% off a whole-article render (18.8ms -> 10.3ms). Add a language
+ * here if an article needs it; anything unlisted falls back to an unhighlighted
+ * code block rather than breaking. Note `powershell` was never in `common`, so
+ * the ```powershell blocks in the existing content were already unhighlighted.
+ * `mermaid` is deliberately absent: the `pre` override below intercepts those
+ * blocks before highlighting and routes them to MermaidDiagram. */
+const HIGHLIGHT_LANGUAGE_NAMES = [
+  "bash",
+  "c",
+  "cpp",
+  "csharp",
+  "css",
+  "diff",
+  "go",
+  "ini",
+  "java",
+  "javascript",
+  "json",
+  "markdown",
+  "plaintext",
+  "python",
+  "rust",
+  "shell",
+  "sql",
+  "typescript",
+  "xml",
+  "yaml",
+] as const;
+
+const HIGHLIGHT_LANGUAGES = Object.fromEntries(
+  HIGHLIGHT_LANGUAGE_NAMES.filter((name) => name in common).map((name) => [name, common[name]]),
+);
 
 /** react-markdown passes a `node` prop (the AST node) to every component
  * override — it must not be spread onto a DOM element. */
@@ -92,7 +131,7 @@ export function Markdown({
         // indentParagraphs so it only changes journaling-style renders,
         // not classroom articles that may rely on soft-wrap paragraphs.
         remarkPlugins={indentParagraphs ? [remarkGfm, remarkMath, remarkBreaks] : [remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex, rehypeHighlight]}
+        rehypePlugins={[rehypeKatex, [rehypeHighlight, { languages: HIGHLIGHT_LANGUAGES }]]}
         components={{
           h1: (p) => (
             <h2

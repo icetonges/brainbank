@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/link";
 import { auth } from "@/auth";
 import { db, isDatabaseConfigured } from "@/lib/db";
 import { notes, noteContent, edges, tags, noteTags } from "@/lib/db/schema";

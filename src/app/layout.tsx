@@ -9,9 +9,9 @@ import "highlight.js/styles/github-dark.css";
 import { ThemeScript } from "@/components/theme-script";
 import { Header } from "@/components/header";
 import { BackToTopButton } from "@/components/back-to-top-button";
-import { AppSessionProvider } from "@/components/session-provider";
 import { getLang } from "@/lib/i18n-server";
 import { t } from "@/lib/i18n";
+import { siteUrl } from "@/lib/site-url";
 
 // The Claude.ai type pairing, in free-font form: Anthropic's actual fonts
 // (Styrene for UI/headings, Tiempos for long-form prose) are commercial,
@@ -31,6 +31,9 @@ const fontSerif = Source_Serif_4({
 });
 
 export const metadata: Metadata = {
+  // Required for the relative `alternates.canonical` values set by the
+  // article and subcategory pages to render as absolute URLs.
+  metadataBase: new URL(siteUrl()),
   title: "BrainBank",
   description:
     "A daily knowledge base: capture text, links, videos and documents; connect them; understand what, how, and why.",
@@ -52,7 +55,10 @@ export default async function RootLayout({
         <ThemeScript />
       </head>
       <body className="min-h-full flex flex-col bg-bg text-fg antialiased">
-        <AppSessionProvider>
+        {/* No next-auth SessionProvider: nothing calls useSession() (pages read
+            the session server-side via auth(), and login uses signIn(), which
+            needs no provider). The provider still fetched /api/auth/session on
+            every page load and every tab refocus, ~0.5s of function time each. */}
           <Header />
           {/* max-w-[82rem] = the classroom article page's sidebar (16rem) +
               gap-8 (2rem) + its content column (max-w-5xl = 64rem), so that
@@ -67,7 +73,6 @@ export default async function RootLayout({
             {t(lang).footer.tagline}
           </footer>
           <BackToTopButton />
-        </AppSessionProvider>
       </body>
     </html>
   );

@@ -1,5 +1,10 @@
 "use client";
 
+/** Debounce before a diary draft autosaves. Each autosave is a server action,
+ * i.e. a Vercel Function invocation; at the previous 5s a long writing session
+ * fired one every time the writer paused to think. */
+const AUTOSAVE_DEBOUNCE_MS = 15000;
+
 import { useEffect, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 import TurndownService from "turndown";
@@ -371,12 +376,15 @@ export function DiaryComposer({
     }
   }
 
-  /** Debounces autosave to 5s after the last change — every field edit
-   *  (typing, mood/energy/tag clicks) restarts the timer. */
+  /** Debounces autosave after the last change — every field edit (typing,
+   *  mood/energy/tag clicks) restarts the timer. Each autosave is a server
+   *  action, i.e. a function invocation, so a long writing session at 5s
+   *  fired one every time the writer paused to think. 15s still protects
+   *  against a lost tab while cutting that roughly threefold. */
   function scheduleAutosave() {
     setDraftStatus("idle");
     if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
-    autosaveTimerRef.current = setTimeout(autosaveDraft, 5000);
+    autosaveTimerRef.current = setTimeout(autosaveDraft, AUTOSAVE_DEBOUNCE_MS);
   }
 
   // Mood/energy/tags are controlled React state (button clicks, not input

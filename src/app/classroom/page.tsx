@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/link";
 import { db } from "@/lib/db";
 import { notes, noteContent, classroomSubcategories, classroomSections } from "@/lib/db/schema";
 import type { ClassroomCategory } from "@/lib/db/schema";

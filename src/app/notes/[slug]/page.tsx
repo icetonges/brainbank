@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/link";
 import { db } from "@/lib/db";
 import { notes, noteContent, noteTags, tags as tagsTable } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";

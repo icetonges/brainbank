@@ -36,6 +36,13 @@
       "when": 1786054437671,
       "tag": "0004_long_random",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1794283349815,
+      "tag": "0005_puzzling_caretaker",
+      "breakpoints": true
     }
   ]
 }

@@ -1,0 +1,1 @@
+CREATE INDEX "note_content_note_id_language_idx" ON "note_content" USING btree ("note_id","language");

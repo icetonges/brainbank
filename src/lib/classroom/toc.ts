@@ -1,7 +1,21 @@
+import { unstable_cache } from "next/cache";
 import { db } from "@/lib/db";
 import { notes, noteContent, classroomSubcategories, classroomSections } from "@/lib/db/schema";
 import { asc, and, eq, isNotNull } from "drizzle-orm";
 import type { Lang } from "@/lib/i18n";
+
+/** Cache tag for the classroom table of contents. Anything that changes
+ * which articles exist, what they are called, or where they are filed has to
+ * drop it. Server Actions use updateTag(CLASSROOM_TOC_TAG) so the owner sees
+ * their own edit on the very next render (read-your-own-writes); the admin
+ * seed/delete route handlers, where updateTag isn't available, use
+ * revalidateTag(CLASSROOM_TOC_TAG, "max"). See src/app/classroom/actions.ts. */
+export const CLASSROOM_TOC_TAG = "classroom-toc";
+
+/** How long a TOC entry survives with no explicit invalidation. The write
+ * paths all revalidate the tag, so this is only a backstop for anything that
+ * edits the DB outside the app (a manual SQL fix, a seed route). */
+const TOC_REVALIDATE_SECONDS = 3600;
 
 export interface TocArticle {
   slug: string;
@@ -19,6 +33,16 @@ export interface TocSection {
    * instead of silently matching the truncated array length. */
   total: number;
 }
+
+/** The Next data cache round-trips values through JSON, so a Date comes back
+ * as a string. The cached layer therefore deals in ISO strings and
+ * loadClassroomToc revives them into Dates before anything renders. */
+type CachedArticle = Omit<TocArticle, "createdAt"> & { createdAt: string };
+type CachedSection = Omit<TocSection, "articles"> & { articles: CachedArticle[] };
+type CachedSubcategory = Omit<TocSubcategory, "sections" | "unsectioned"> & {
+  sections: CachedSection[];
+  unsectioned: CachedArticle[];
+};
 
 export interface TocSubcategory {
   id: number;
@@ -45,11 +69,8 @@ export interface TocSubcategory {
  * stay compact; the side nav omits it because a nav you can't actually
  * jump to every article from isn't much of a nav.
  */
-export async function loadClassroomToc(
-  isOwner: boolean,
-  lang: Lang,
-  maxPerGroup?: number,
-): Promise<TocSubcategory[]> {
+const loadClassroomTocCached = unstable_cache(
+  async (isOwner: boolean, lang: Lang): Promise<CachedSubcategory[]> => {
   // Public-read/private-edit, same rule as the rest of the AI Classroom.
   const visible = isOwner ? undefined : eq(notes.status, "published");
 
@@ -88,7 +109,7 @@ export async function loadClassroomToc(
     )
     .orderBy(asc(notes.sectionOrder), asc(notes.createdAt));
 
-  const bySubcatGroup = new Map<string, TocArticle[]>(); // key: `${subcategoryId}:${sectionId ?? "none"}`
+  const bySubcatGroup = new Map<string, CachedArticle[]>(); // key: `${subcategoryId}:${sectionId ?? "none"}`
   const groupCounts = new Map<string, number>(); // same key — true count, uncapped
   const subcatCounts = new Map<number, number>();
   for (const r of articleRows) {
@@ -97,13 +118,14 @@ export async function loadClassroomToc(
     const key = `${r.subcategoryId}:${r.sectionId ?? "none"}`;
     groupCounts.set(key, (groupCounts.get(key) ?? 0) + 1);
     const arr = bySubcatGroup.get(key) ?? [];
-    if (maxPerGroup === undefined || arr.length < maxPerGroup) {
-      arr.push({
-        slug: r.slug,
-        title: lang === r.primaryLanguage ? r.title : r.translatedTitle || r.title,
-        createdAt: r.createdAt,
-      });
-    }
+    // Always uncapped here: one cache entry per (isOwner, lang) serves the
+    // uncapped side nav AND the capped homepage preview, which slices it
+    // below. Caching per-cap would mean two entries for the same data.
+    arr.push({
+      slug: r.slug,
+      title: lang === r.primaryLanguage ? r.title : r.translatedTitle || r.title,
+      createdAt: r.createdAt.toISOString(),
+    });
     bySubcatGroup.set(key, arr);
   }
 
@@ -135,6 +157,35 @@ export async function loadClassroomToc(
       };
     })
     .filter((sc) => sc.sections.length > 0 || sc.unsectioned.length > 0);
+  },
+  ["classroom-toc"],
+  { tags: [CLASSROOM_TOC_TAG], revalidate: TOC_REVALIDATE_SECONDS },
+);
+
+/**
+ * Public entry point: reads the cached, uncapped TOC and then revives its
+ * dates and applies `maxPerGroup` per request. The DB work (three queries,
+ * one of them a join across every classroom article) used to run on every
+ * homepage hit AND every article page hit; now it runs once per
+ * (isOwner, lang) until a write invalidates CLASSROOM_TOC_TAG.
+ */
+export async function loadClassroomToc(
+  isOwner: boolean,
+  lang: Lang,
+  maxPerGroup?: number,
+): Promise<TocSubcategory[]> {
+  const cached = await loadClassroomTocCached(isOwner, lang);
+  const take = (articles: CachedArticle[]): TocArticle[] =>
+    (maxPerGroup === undefined ? articles : articles.slice(0, maxPerGroup)).map((a) => ({
+      slug: a.slug,
+      title: a.title,
+      createdAt: new Date(a.createdAt),
+    }));
+  return cached.map((sc) => ({
+    ...sc,
+    sections: sc.sections.map((sec) => ({ ...sec, articles: take(sec.articles) })),
+    unsectioned: take(sc.unsectioned),
+  }));
 }
 
 export interface AdjacentArticles {
