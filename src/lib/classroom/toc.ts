@@ -14,8 +14,12 @@ export const CLASSROOM_TOC_TAG = "classroom-toc";
 
 /** How long a TOC entry survives with no explicit invalidation. The write
  * paths all revalidate the tag, so this is only a backstop for anything that
- * edits the DB outside the app (a manual SQL fix, a seed route). */
-const TOC_REVALIDATE_SECONDS = 3600;
+ * edits the DB outside the app (a manual SQL fix, a seed route).
+ *
+ * Kept at a week because the cached public pages (/pub, see
+ * src/lib/public-pages.ts) inherit the shortest revalidate of any data they
+ * read. At 1h, nearly every crawler visit to an article re-rendered it. */
+const TOC_REVALIDATE_SECONDS = 604800;
 
 export interface TocArticle {
   slug: string;
