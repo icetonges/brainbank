@@ -7,10 +7,7 @@ import "./globals.css";
 import "katex/dist/katex.min.css";
 import "highlight.js/styles/github-dark.css";
 import { ThemeScript } from "@/components/theme-script";
-import { Header } from "@/components/header";
 import { BackToTopButton } from "@/components/back-to-top-button";
-import { getLang } from "@/lib/i18n-server";
-import { t } from "@/lib/i18n";
 import { siteUrl } from "@/lib/site-url";
 
 // The Claude.ai type pairing, in free-font form: Anthropic's actual fonts
@@ -39,40 +36,25 @@ export const metadata: Metadata = {
     "A daily knowledge base: capture text, links, videos and documents; connect them; understand what, how, and why.",
 };
 
-export default async function RootLayout({
+// The root layout reads no cookies and no session, so it can be static. The
+// header, <main> and footer live one level down: (app)/layout.tsx is the
+// per-request version (owner session, `lang` cookie) and (public)/layout.tsx
+// is the anonymous English version that the cached public pages render
+// under. Before this split, the cookie read here made every page on the site
+// a function invocation, including the article pages crawlers fetch all day.
+export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const lang = await getLang();
-
   return (
-    <html
-      lang={lang === "zh" ? "zh-CN" : "en"}
-      className={`h-full ${fontSans.variable} ${fontSerif.variable}`}
-    >
+    <html lang="en" className={`h-full ${fontSans.variable} ${fontSerif.variable}`}>
       <head>
         <ThemeScript />
       </head>
       <body className="min-h-full flex flex-col bg-bg text-fg antialiased">
-        {/* No next-auth SessionProvider: nothing calls useSession() (pages read
-            the session server-side via auth(), and login uses signIn(), which
-            needs no provider). The provider still fetched /api/auth/session on
-            every page load and every tab refocus, ~0.5s of function time each. */}
-          <Header />
-          {/* max-w-[82rem] = the classroom article page's sidebar (16rem) +
-              gap-8 (2rem) + its content column (max-w-5xl = 64rem), so that
-              page's header lines up exactly with content + nav combined
-              instead of the nav poking out past a narrower header. Every
-              other page just gets a bit more breathing room at this width;
-              none of them assume the old max-w-5xl as a hard constraint. */}
-          <main className="mx-auto flex w-full max-w-[82rem] flex-1 flex-col px-6 py-10">
-            {children}
-          </main>
-          <footer className="border-t border-border py-6 text-center text-sm text-fg-secondary">
-            {t(lang).footer.tagline}
-          </footer>
-          <BackToTopButton />
+        {children}
+        <BackToTopButton />
       </body>
     </html>
   );

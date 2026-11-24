@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { deleteClassroomArticle } from "@/app/classroom/actions";
+import { deleteClassroomArticle } from "@/app/(app)/classroom/actions";
 
 /** Same confirm-then-delete pattern as DeleteNoteButton, but redirects
  * back to /classroom instead of the homepage. */

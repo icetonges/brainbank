@@ -64,6 +64,9 @@ export default function robots(): MetadataRoute.Robots {
           "/search",
           "/classroom/new",
           "/classroom/*/edit",
+          // Internal targets of the cached-page rewrites; the public URLs
+          // without /pub are the canonical ones.
+          "/pub",
         ],
       },
     ],

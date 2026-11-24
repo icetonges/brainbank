@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { setArticlePrivacyAction } from "@/app/classroom/actions";
+import { setArticlePrivacyAction } from "@/app/(app)/classroom/actions";
 import { t, type Lang } from "@/lib/i18n";
 
 /**

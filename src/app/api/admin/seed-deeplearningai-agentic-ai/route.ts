@@ -27,6 +27,7 @@
 // pages ever runs long enough to worry about the function's time limit;
 // see maxDuration below and vercel.json's matching entry for this route.
 import { revalidateTag } from "next/cache";
+import { revalidatePublicPages } from "@/lib/public-pages";
 import { CLASSROOM_TOC_TAG } from "@/lib/classroom/toc";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
@@ -246,6 +247,7 @@ export async function GET(req: Request) {
   // These routes add or remove classroom articles, sections and
   // subcategories directly, so the cached table of contents has to go.
   revalidateTag(CLASSROOM_TOC_TAG, "max");
+  revalidatePublicPages();
   return Response.json({
     subcategory: { name: SUBCATEGORY_NAME, created: subcategory.created },
     section: { name: SECTION_NAME, created: section.created },

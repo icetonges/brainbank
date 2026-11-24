@@ -1,18 +1,14 @@
 import Link from "@/components/link";
-import { auth } from "@/auth";
 import { db, isDatabaseConfigured } from "@/lib/db";
 import { notes, noteContent, edges, tags, noteTags } from "@/lib/db/schema";
 import type { ClassroomCategory } from "@/lib/db/schema";
 import { CLASSROOM_TABS } from "@/lib/classroom";
 import { loadClassroomToc, type TocSubcategory } from "@/lib/classroom/toc";
-import { getLang } from "@/lib/i18n-server";
 import { t, CLASSROOM_TAB_LABELS_ZH, type Lang } from "@/lib/i18n";
 import { desc, eq, and, isNotNull, count } from "drizzle-orm";
 import { HeroVisual, PillarIcon } from "@/components/home-visuals";
 import { formatDate, formatDateTime } from "@/lib/date";
 import { sectionTone, NEUTRAL_TONE, type SectionTone } from "@/lib/classroom/section-tones";
-
-export const dynamic = "force-dynamic";
 
 // Homepage preview stays compact — the full, uncapped list per subcategory
 // lives at its own landing page (/[subcategorySlug]).
@@ -111,15 +107,13 @@ async function loadHome(
   }
 }
 
-export default async function Home({
-  searchParams,
-}: {
-  searchParams: Promise<{ lang?: string }>;
-}) {
-  const session = await auth();
-  const { lang: langParam } = await searchParams;
-  const lang = await getLang(langParam);
-  const { data, error } = await loadHome(Boolean(session), lang);
+/** Homepage body, shared by the per-request route ((app)/page.tsx) and the
+ * cached anonymous one ((public)/pub/page.tsx). */
+export async function HomeView({ lang, isOwner }: { lang: Lang; isOwner: boolean }) {
+  const session = isOwner;
+  const { data, error } = await loadHome(isOwner, lang);
+  // Anonymous renders are cached (ISR); throwing keeps the last good copy.
+  if (!isOwner && error === "connection-failed") throw new Error("Homepage data load failed");
   const s = t(lang).home;
   const cs = t(lang).classroom;
   const dateLocale = lang === "zh" ? "zh-CN" : undefined;

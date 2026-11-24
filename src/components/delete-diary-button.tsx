@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { deleteDiaryEntry } from "@/app/diary/actions";
+import { deleteDiaryEntry } from "@/app/(app)/diary/actions";
 import { t, type Lang } from "@/lib/i18n";
 
 /** Confirm-then-delete, same pattern as DeleteArticleButton. The confirm

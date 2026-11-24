@@ -1,7 +1,7 @@
 "use client";
 
 import { useTransition } from "react";
-import { resolveContradictionAction, archiveAtomAction } from "@/app/assistant/actions";
+import { resolveContradictionAction, archiveAtomAction } from "@/app/(app)/assistant/actions";
 import type { Lang } from "@/lib/i18n";
 
 export interface ContradictionItem {

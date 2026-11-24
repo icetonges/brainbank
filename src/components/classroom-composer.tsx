@@ -5,15 +5,15 @@ import { useFormStatus } from "react-dom";
 import TurndownService from "turndown";
 import { signAndUploadFile } from "@/lib/upload-client";
 import { mediaKindFromMimeType } from "@/lib/storage/media-kind";
-import { attachMediaAction } from "@/app/notes/[slug]/actions";
+import { attachMediaAction } from "@/app/(app)/notes/[slug]/actions";
 import {
   createClassroomDraft,
   publishClassroomArticle,
-} from "@/app/classroom/actions";
+} from "@/app/(app)/classroom/actions";
 import {
   extractUrlsForComposer,
   extractDocumentForComposer,
-} from "@/app/classroom/extract-actions";
+} from "@/app/(app)/classroom/extract-actions";
 import { t, type Lang } from "@/lib/i18n";
 import { SubcategoryField } from "@/components/subcategory-field";
 import { MODELS, DEFAULT_MODEL_ID, type ModelId } from "@/lib/ai/models";

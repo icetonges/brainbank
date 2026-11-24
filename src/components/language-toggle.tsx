@@ -1,14 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 // Site-wide EN/ZH preference. The query parameter drives translated note
 // content while the cookie/localStorage keep the selection across navigation.
 export function LanguageToggle() {
   const router = useRouter();
   const pathname = usePathname();
-  const searchParams = useSearchParams();
   const [lang, setLang] = useState<"en" | "zh">("en");
 
   useEffect(() => {
@@ -29,7 +28,7 @@ export function LanguageToggle() {
       // ignore
     }
     document.documentElement.lang = next === "zh" ? "zh-CN" : "en";
-    const params = new URLSearchParams(searchParams.toString());
+    const params = new URLSearchParams(window.location.search);
     params.set("lang", next);
     router.push(`${pathname}?${params.toString()}`);
     // The Header (and its nav labels) is a Server Component rendered in

@@ -1,6 +1,6 @@
 {
   "functions": {
-    "src/app/classroom/**": {
+    "src/app/(app)/classroom/**": {
       "maxDuration": 300
     },
     "src/app/api/ai/**": {
@@ -9,13 +9,13 @@
     "src/app/api/admin/**": {
       "maxDuration": 300
     },
-    "src/app/diary/**": {
+    "src/app/(app)/diary/**": {
       "maxDuration": 300
     },
-    "src/app/assistant/**": {
+    "src/app/(app)/assistant/**": {
       "maxDuration": 300
     },
-    "src/app/trends/**": {
+    "src/app/(app)/trends/**": {
       "maxDuration": 300
     },
     "src/app/api/tasks/**": {

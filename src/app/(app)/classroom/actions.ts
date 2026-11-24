@@ -25,6 +25,7 @@ import { linkWikilinksFromText } from "@/lib/notes/link-wikilinks";
 import { linkRelatedByTags } from "@/lib/notes/link-related";
 import { eq, and } from "drizzle-orm";
 import { revalidatePath, updateTag } from "next/cache";
+import { revalidatePublicPages } from "@/lib/public-pages";
 import { CLASSROOM_TOC_TAG } from "@/lib/classroom/toc";
 import { redirect } from "next/navigation";
 
@@ -432,6 +433,7 @@ export async function publishClassroomArticle(formData: FormData) {
 
   revalidatePath("/classroom");
   updateTag(CLASSROOM_TOC_TAG);
+  revalidatePublicPages();
   redirect(`/classroom/${slug}`);
 }
 
@@ -491,6 +493,7 @@ export async function regenerateGuideAction(noteId: number, slug: string) {
   }
 
   revalidatePath(`/classroom/${slug}`);
+  revalidatePublicPages();
 }
 
 /** The edit page's Save button — updates topic, category, and body; slug is
@@ -576,6 +579,7 @@ export async function updateClassroomArticle(
   revalidatePath(`/classroom/${slug}`);
   revalidatePath("/classroom");
   updateTag(CLASSROOM_TOC_TAG);
+  revalidatePublicPages();
   redirect(`/classroom/${slug}`);
 }
 
@@ -743,6 +747,7 @@ export async function translateClassroomArticleAction(
 
   revalidatePath(`/classroom/${slug}`);
   updateTag(CLASSROOM_TOC_TAG);
+  revalidatePublicPages();
 }
 
 export async function deleteClassroomArticle(noteId: number) {
@@ -752,6 +757,7 @@ export async function deleteClassroomArticle(noteId: number) {
   await db.delete(notes).where(eq(notes.id, noteId));
   revalidatePath("/classroom");
   updateTag(CLASSROOM_TOC_TAG);
+  revalidatePublicPages();
   redirect("/classroom");
 }
 
@@ -789,6 +795,7 @@ export async function setArticlePrivacyAction(
   revalidatePath(`/classroom/${slug}`);
   revalidatePath("/classroom");
   updateTag(CLASSROOM_TOC_TAG);
+  revalidatePublicPages();
 }
 
 /**
@@ -819,4 +826,5 @@ export async function reorderSectionArticles(
 
   revalidatePath(`/${subcategorySlugValue}`);
   updateTag(CLASSROOM_TOC_TAG);
+  revalidatePublicPages();
 }

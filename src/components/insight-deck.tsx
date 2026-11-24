@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition, useMemo } from "react";
-import { setInsightStatusAction } from "@/app/assistant/actions";
+import { setInsightStatusAction } from "@/app/(app)/assistant/actions";
 import { INSIGHT_KIND_META } from "@/lib/knowledge/taxonomy";
 import type { Lang } from "@/lib/i18n";
 

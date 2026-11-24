@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import Link from "@/components/link";
-import { reorderSectionArticles } from "@/app/classroom/actions";
+import { reorderSectionArticles } from "@/app/(app)/classroom/actions";
 import { formatDateTime } from "@/lib/date";
 
 interface Article {

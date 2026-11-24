@@ -2,7 +2,7 @@
 
 import { useRef } from "react";
 import { useFormStatus } from "react-dom";
-import { addAtomAction } from "@/app/assistant/actions";
+import { addAtomAction } from "@/app/(app)/assistant/actions";
 import { ATOM_KIND_COLORS } from "@/lib/knowledge/taxonomy";
 import type { Lang } from "@/lib/i18n";
 

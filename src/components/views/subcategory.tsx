@@ -1,17 +1,12 @@
-import type { Metadata } from "next";
 import Link from "@/components/link";
 import { notFound } from "next/navigation";
-import { auth } from "@/auth";
 import { db, isDatabaseConfigured } from "@/lib/db";
 import { classroomSubcategories, classroomSections, notes, noteContent } from "@/lib/db/schema";
 import { eq, and, asc } from "drizzle-orm";
-import { getLang } from "@/lib/i18n-server";
-import { t } from "@/lib/i18n";
+import { t, type Lang } from "@/lib/i18n";
 import { SectionArticleList } from "@/components/section-article-list";
 import { formatDateTime } from "@/lib/date";
 import { sectionTone } from "@/lib/classroom/section-tones";
-
-export const dynamic = "force-dynamic";
 
 interface ArticleRow {
   id: number;
@@ -39,30 +34,20 @@ interface ArticleRow {
  * be. Drilling into a subcategory should feel like zooming into its card,
  * not landing on a differently-styled page.
  */
-/** Canonical, `?lang=`-free URL for this subcategory — see the matching
- * comment on classroom/[slug]/page.tsx's generateMetadata. */
-export async function generateMetadata({
-  params,
+/** Shared by the per-request route ((app)/[subcategorySlug]) and the cached
+ * anonymous one ((public)/pub/[subcategorySlug]). */
+export async function SubcategoryView({
+  subcategorySlug,
+  lang,
+  isOwner,
 }: {
-  params: Promise<{ subcategorySlug: string }>;
-}): Promise<Metadata> {
-  const { subcategorySlug } = await params;
-  return { alternates: { canonical: `/${subcategorySlug}` } };
-}
-
-export default async function SubcategoryLandingPage({
-  params,
-  searchParams,
-}: {
-  params: Promise<{ subcategorySlug: string }>;
-  searchParams: Promise<{ lang?: string }>;
+  subcategorySlug: string;
+  lang: Lang;
+  isOwner: boolean;
 }) {
   if (!isDatabaseConfigured) notFound();
 
-  const { subcategorySlug } = await params;
-  const { lang: langParam } = await searchParams;
-  const session = await auth();
-  const lang = await getLang(langParam);
+  const session = isOwner;
   const s = t(lang).classroom;
   const dateLocale = lang === "zh" ? "zh-CN" : undefined;
 

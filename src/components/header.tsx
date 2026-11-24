@@ -1,9 +1,13 @@
 import Link from "@/components/link";
 import { auth, signOut } from "@/auth";
 import { getLang } from "@/lib/i18n-server";
-import { t } from "@/lib/i18n";
+import { t, type Lang } from "@/lib/i18n";
+import type { ReactNode } from "react";
 import { HeaderNav } from "./header-nav";
 
+/** Per-request header: reads the owner session and the `lang` cookie. Used by
+ * (app)/layout.tsx. The cached public pages use HeaderView directly with
+ * session=false and lang="en", so they never touch cookies. */
 export async function Header() {
   const session = await auth();
   // The LanguageToggle sets the `lang` cookie before navigating, so the
@@ -27,6 +31,19 @@ export async function Header() {
     </form>
   ) : null;
 
+  return <HeaderView session={Boolean(session)} lang={lang} signOutForm={signOutForm} />;
+}
+
+export function HeaderView({
+  session,
+  lang,
+  signOutForm = null,
+}: {
+  session: boolean;
+  lang: Lang;
+  signOutForm?: ReactNode;
+}) {
+  const s = t(lang).header;
   return (
     <header className="border-b border-border bg-bg-elevated">
       {/* Matches <main>'s max-w-[82rem] in layout.tsx — see the comment
@@ -49,7 +66,7 @@ export async function Header() {
           />
         </form>
 
-        <HeaderNav session={Boolean(session)} s={s} signOutForm={signOutForm} />
+        <HeaderNav session={session} s={s} signOutForm={signOutForm} />
       </div>
     </header>
   );

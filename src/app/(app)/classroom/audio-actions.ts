@@ -5,8 +5,9 @@ import { db } from "@/lib/db";
 import { notes } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { revalidatePublicPages } from "@/lib/public-pages";
 import { generateArticleAudio } from "@/lib/ai/audiobook";
-import { attachMediaAction } from "@/app/notes/[slug]/actions";
+import { attachMediaAction } from "@/app/(app)/notes/[slug]/actions";
 
 // Same "maxDuration lives on the invoking page" situation as the rest of
 // classroom/actions.ts (see the long comment there) — classroom/[slug]/
@@ -73,4 +74,5 @@ export async function generateArticleAudioAction(
   });
 
   revalidatePath(`/classroom/${slug}`);
+  revalidatePublicPages();
 }

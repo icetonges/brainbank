@@ -1,5 +1,17 @@
 import type { NextConfig } from "next";
 
+// Requests that must get the per-request pages: the owner (Auth.js session
+// cookie, http and https names) and anyone reading in Chinese (`lang=zh` as
+// query or cookie). Everyone else is an anonymous English reader and gets the
+// cached copy under /pub. These rules run in Vercel's routing layer, so
+// deciding costs no function time. See src/lib/public-pages.ts.
+const anonymousEnglish = [
+  { type: "cookie" as const, key: "authjs.session-token" },
+  { type: "cookie" as const, key: "__Secure-authjs.session-token" },
+  { type: "cookie" as const, key: "lang", value: "zh" },
+  { type: "query" as const, key: "lang", value: "zh" },
+];
+
 const nextConfig: NextConfig = {
   turbopack: { root: process.cwd() },
   serverExternalPackages: ["@napi-rs/canvas", "pdf-parse", "pdfjs-dist"],
@@ -19,6 +31,19 @@ const nextConfig: NextConfig = {
       "./node_modules/@napi-rs/canvas-*/**/*",
       "./node_modules/pdfjs-dist/**/*",
     ],
+  },
+  async rewrites() {
+    return {
+      // "/" is a filesystem route, so it has to be rewritten before files.
+      beforeFiles: [{ source: "/", destination: "/pub", missing: anonymousEnglish }],
+      // afterFiles runs after static routes (/classroom/new, /llm, /trends,
+      // /login, ...) have had their chance, so only the dynamic
+      // [subcategorySlug] and classroom/[slug] URLs fall through to these.
+      afterFiles: [
+        { source: "/classroom/:slug", destination: "/pub/classroom/:slug", missing: anonymousEnglish },
+        { source: "/:subcategorySlug", destination: "/pub/:subcategorySlug", missing: anonymousEnglish },
+      ],
+    };
   },
   async headers() {
     return [
