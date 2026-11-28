@@ -9,6 +9,7 @@ import "highlight.js/styles/github-dark.css";
 import { ThemeScript } from "@/components/theme-script";
 import { BackToTopButton } from "@/components/back-to-top-button";
 import { siteUrl } from "@/lib/site-url";
+import { Analytics } from "@vercel/analytics/next";
 
 // The Claude.ai type pairing, in free-font form: Anthropic's actual fonts
 // (Styrene for UI/headings, Tiempos for long-form prose) are commercial,
@@ -55,6 +56,7 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col bg-bg text-fg antialiased">
         {children}
         <BackToTopButton />
+        <Analytics />
       </body>
     </html>
   );

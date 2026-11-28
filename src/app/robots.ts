@@ -63,10 +63,15 @@ export default function robots(): MetadataRoute.Robots {
           "/obsidian",
           "/search",
           "/classroom/new",
+          // Per-tab filters of the classroom index render per request; the
+          // default view (no ?tab=) is cached and lists every article anyway.
+          "/classroom?tab=",
+          "/classroom?*&tab=",
           "/classroom/*/edit",
           // Internal targets of the cached-page rewrites; the public URLs
           // without /pub are the canonical ones.
           "/pub",
+          "/pubzh",
         ],
       },
     ],

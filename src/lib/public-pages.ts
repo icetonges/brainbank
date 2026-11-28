@@ -18,6 +18,7 @@ import { notes, classroomSubcategories } from "@/lib/db/schema";
  */
 export function revalidatePublicPages() {
   revalidatePath("/pub", "layout");
+  revalidatePath("/pubzh", "layout");
 }
 
 /** Published article slugs, prerendered at build so the first visitor after

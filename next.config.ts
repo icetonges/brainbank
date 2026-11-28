@@ -5,12 +5,42 @@ import type { NextConfig } from "next";
 // query or cookie). Everyone else is an anonymous English reader and gets the
 // cached copy under /pub. These rules run in Vercel's routing layer, so
 // deciding costs no function time. See src/lib/public-pages.ts.
-const anonymousEnglish = [
+const ownerCookies = [
   { type: "cookie" as const, key: "authjs.session-token" },
   { type: "cookie" as const, key: "__Secure-authjs.session-token" },
+];
+const anonymousEnglish = [
+  ...ownerCookies,
   { type: "cookie" as const, key: "lang", value: "zh" },
   { type: "query" as const, key: "lang", value: "zh" },
 ];
+
+// Anonymous Chinese readers get the cached copy under /pubzh. Two rules per
+// URL because Next has no OR: `?lang=zh` wins outright, and the `lang=zh`
+// cookie applies only when the URL names no language (mirrors getLang()).
+// An explicit `?lang=en` with a zh cookie matches neither table and falls
+// through to the per-request page, which is rare and still correct.
+type Condition = { type: "cookie" | "query"; key: string; value?: string };
+function zhRewrites(source: string, destination: string, extraMissing: Condition[] = []) {
+  return [
+    {
+      source,
+      destination,
+      has: [{ type: "query" as const, key: "lang", value: "zh" }],
+      missing: [...ownerCookies, ...extraMissing],
+    },
+    {
+      source,
+      destination,
+      has: [{ type: "cookie" as const, key: "lang", value: "zh" }],
+      missing: [...ownerCookies, { type: "query" as const, key: "lang" }, ...extraMissing],
+    },
+  ];
+}
+
+// /classroom's cached copy is the default "all" view only; other tabs read
+// ?tab= and stay per-request.
+const noTabFilter = [{ type: "query" as const, key: "tab" }];
 
 const nextConfig: NextConfig = {
   turbopack: { root: process.cwd() },
@@ -35,12 +65,20 @@ const nextConfig: NextConfig = {
   async rewrites() {
     return {
       // "/" is a filesystem route, so it has to be rewritten before files.
-      beforeFiles: [{ source: "/", destination: "/pub", missing: anonymousEnglish }],
+      beforeFiles: [
+        ...zhRewrites("/", "/pubzh"),
+        { source: "/", destination: "/pub", missing: anonymousEnglish },
+        // /classroom is also a filesystem route.
+        ...zhRewrites("/classroom", "/pubzh/classroom", noTabFilter),
+        { source: "/classroom", destination: "/pub/classroom", missing: [...anonymousEnglish, ...noTabFilter] },
+      ],
       // afterFiles runs after static routes (/classroom/new, /llm, /trends,
       // /login, ...) have had their chance, so only the dynamic
       // [subcategorySlug] and classroom/[slug] URLs fall through to these.
       afterFiles: [
+        ...zhRewrites("/classroom/:slug", "/pubzh/classroom/:slug"),
         { source: "/classroom/:slug", destination: "/pub/classroom/:slug", missing: anonymousEnglish },
+        ...zhRewrites("/:subcategorySlug", "/pubzh/:subcategorySlug"),
         { source: "/:subcategorySlug", destination: "/pub/:subcategorySlug", missing: anonymousEnglish },
       ],
     };

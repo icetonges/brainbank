@@ -26,6 +26,7 @@
     "@napi-rs/canvas": "^1.0.2",
     "@neondatabase/serverless": "^1.1.0",
     "@next/env": "^16.2.10",
+    "@vercel/analytics": "^2.0.1",
     "ai": "^7.0.22",
     "bcryptjs": "^3.0.3",
     "drizzle-orm": "^0.45.2",
